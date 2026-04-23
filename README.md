@@ -46,7 +46,7 @@ In the repository I provide the final versions of the notebooks that are loaded 
 
 ## Training Pipeline
 
-![](images\pipeline.png)
+![](images/pipeline.png)
 
 ### Loss Functions
 
@@ -60,17 +60,17 @@ $$
 
 ## Evaluation Method
 
-![](images\evaluation.png)
+![](images/evaluation.png)
 
 ## Results
 
 ### Probing (Decoder Performance)
 
-![](images\decoder.png)
+![](images/decoder.png)
 
 ### Regression Results
 
-![](images\regression.png)
+![](images/regression.png)
 
 
 ## Conclusion
