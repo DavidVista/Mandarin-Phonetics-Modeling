@@ -27,7 +27,7 @@ $$
 $$
 
 $$
-\mathcal{L}_{\text{aligned-pinyin}}=\text{CE}_{\text{dec}} + \mathbb{\lambda}_{\text{enc}} (\Sigma_{\text{CE}} + \mathbb{\lambda}_{\text{MSE}} \text{MSE})
+\mathcal{L}_{\text{pinyin-aligned}}=\text{CE}_{\text{dec}} + \mathbb{\lambda}_{\text{enc}} (\Sigma_{\text{CE}} + \mathbb{\lambda}_{\text{MSE}} \text{MSE})
 $$
 
 $$
@@ -123,11 +123,11 @@ In the repository we provide the final versions of the notebooks that are loaded
 
 #### Pinyin Encoder (BERT)
 - [pinyin-bert-encoder.ipynb](https://www.kaggle.com/code/davidvista/phonetic-bert?scriptVersionId=317433217): Training of Mandarin encoder based on BERT using pinyin objective only.
-- [frozen-pinyin-bert-encoder.ipynb](https://www.kaggle.com/code/davidvista/frozen-bert-decoder-pipeline?scriptVersionId=317889620): Frozen encoder training pipeline (decoder is trained only).
+- [frozen-pinyin-bert-decoder-pipeline.ipynb](https://www.kaggle.com/code/davidvista/frozen-bert-decoder-pipeline?scriptVersionId=317889620): Frozen encoder training pipeline (decoder is trained only).
 
 #### Pinyin Aligned Encoder (BERT)
-- [aligned-pinyin-bert-encoder.ipynb](https://www.kaggle.com/code/davidvista/phonetic-bert?scriptVersionId=316276525): Training of Mandarin encoder based on BERT using alignment and pinyin objective.
-- [frozen-aligned-pinyin-bert-decoder-pipeline.ipynb](https://www.kaggle.com/code/davidvista/frozen-bert-decoder-pipeline?scriptVersionId=316532205): Frozen encoder training pipeline (decoder is trained only).
+- [pinyin-aligned-bert-encoder.ipynb](https://www.kaggle.com/code/davidvista/phonetic-bert?scriptVersionId=316276525): Training of Mandarin encoder based on BERT using alignment and pinyin objective.
+- [frozen-pinyin-aligned-bert-decoder-pipeline.ipynb](https://www.kaggle.com/code/davidvista/frozen-bert-decoder-pipeline?scriptVersionId=316532205): Frozen encoder training pipeline (decoder is trained only).
 
 #### Aligned Encoder (BERT)
 - [aligned-bert-encoder.ipynb](https://www.kaggle.com/code/davidvista/phonetic-bert?scriptVersionId=321337105): Training of Mandarin encoder based on BERT using alignment only.
@@ -150,7 +150,7 @@ Extraction of context-averaged and context-aware representations for phonetic si
 
 #### LSTM Models
 - [lstm-pinyin-encoder-analysis.ipynb](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322529379): analysis of pinyin encoder.
-- [lstm-aligned-pinyin-encoder-analysis.ipynb](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322528751): analysis of aligned pinyin encoder.
+- [lstm-pinyin-aligned-encoder-analysis.ipynb](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322528751): analysis of aligned pinyin encoder.
 - [lstm-aligned-encoder-analysis.ipynb](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322529543): analysis of aligned encoder.
 
 #### BERT Models
@@ -163,7 +163,7 @@ Evaluation of trained decoders on the probing dataset. Each perturbed bigram is 
 
 #### LSTM Models
 - [pinyin-lstm-decoder-benchmarking.ipynb](https://www.kaggle.com/code/davidvista/wubi-based-decoder-benchmarking?scriptVersionId=324435767): results of pinyin pipeline.
-- [aligned-pinyin-lstm-decoder-benchmarking.ipynb](https://www.kaggle.com/code/davidvista/wubi-based-decoder-benchmarking?scriptVersionId=324461905): results of pinyin aligned pipeline.
+- [pinyin-aligned-lstm-decoder-benchmarking.ipynb](https://www.kaggle.com/code/davidvista/wubi-based-decoder-benchmarking?scriptVersionId=324461905): results of pinyin aligned pipeline.
 - [aligned-lstm-decoder-benchmarking.ipynb](https://www.kaggle.com/code/davidvista/wubi-based-decoder-benchmarking?scriptVersionId=324463259): results of aligned pipeline.
 
 #### BERT Models
