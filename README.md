@@ -79,9 +79,41 @@ We find that optimizing an encoder only for pinyin prediction does not naturally
 
 These structural changes are reflected behaviorally in the homophone probing benchmark. As alignment strengthens, decoders become increasingly likely to recover the original lexical item rather than copying the perturbed homophone, indicating that hidden states progressively collapse character-specific information into shared phonetic representations. The same qualitative trend is reproduced with BERT encoders, despite their substantially different inductive bias, demonstrating that the effect arises from the alignment objective rather than the encoder architecture. Overall, the study shows that explicit continuous supervision can reshape neural representations from discrete symbolic categories toward graded similarity spaces, providing a practical framework for both learning and interpreting structured latent representations beyond Mandarin phonetics.
 
-## Notebooks Structure
+## Data & Local Setup
 
-In the repository we provide the final versions of the notebooks that are loaded from Kaggle. These notebooks provide the results but are not supposed to be run outside of the Kaggle environment. Nevertheless, the results of running are still visible.
+The notebooks were originally authored on Kaggle and have been adapted to run locally against a shared `datasets/` directory at the repository root. Every notebook defines its data root near the top:
+
+```python
+import os
+ROOT_PATH = "../../.."                        # relative depth to the repo root (varies per notebook location)
+DATASETS = os.path.join(ROOT_PATH, "datasets")
+```
+
+All data paths are then built from `DATASETS` (e.g. `f"{DATASETS}/corpus/train.csv"`), so relocating the `datasets/` folder only requires editing `ROOT_PATH`.
+
+### `datasets/` layout
+
+| Subfolder | Contents | Committed? |
+| :-- | :-- | :-- |
+| `corpus/` | Labeled train/eval sentence corpora (`train.csv`, `eval.csv`) | ✅ |
+| `embeddings/` | Pinyin acoustic embeddings (`pinyin_embeddings*.pkl`) | ✅ |
+| `pinyin-tokens/` | Pinyin token vocabulary (`pinyin.txt`) | ✅ |
+| `wubi/` | Wubi ↔ character dictionaries | ✅ |
+| `sounds/` | Reference `.wav` recordings used to build embeddings | ✅ |
+| `probing/` | Homophone inventory and perturbed-phrase probing sets | ✅ |
+| `models/{lstm,bert}/{aligned,pinyin-aligned,pinyin}/` + `char2pinyin-encoder/`, `pinyin2char-decoder/` | Trained encoder/decoder/pipeline weights (`*.pt`) | ⚙️ generated |
+| `metrics/{lstm,bert}/{variant}/` | Training/evaluation metric dumps (`*.pkl`) | ⚙️ generated |
+| `representations/{lstm,bert}/{variant}/` | Extracted character/aggregated representations (`*.joblib`) | ⚙️ generated |
+| `regression/{lstm,bert}/{variant}/` | Similarity + PCA regression tables (`*.csv`) | ⚙️ generated |
+| `plots/{lstm,bert}/{variant}/` | Figures saved by the analysis notebooks | ⚙️ generated |
+
+> **⚙️ Model weights and other generated artifacts are not committed** — they are produced by running the notebooks. Their directory structure is kept in the repo via `.gitkeep` placeholders (and the contents are git-ignored). Because these paths only appear once the corresponding notebook has been run, a freshly cloned repo will show empty `models/`, `metrics/`, `representations/`, `regression/`, and `plots/` trees.
+
+### Run order
+
+Downstream notebooks consume the outputs of upstream ones, so run them in dependency order: **Datasets/Tokenization** (build corpus, embeddings, wubi, probing sets) → **Training** (produce encoder → frozen-decoder → full-pipeline weights per variant) → **Representations Extraction** (dump hidden-state records) → **Regression Analysis** & **Probing** (consume weights + representations). The results of previous Kaggle runs remain visible in the committed notebook outputs.
+
+## Notebooks Structure
 
 ### Tokenization
 - [wubi-tokenizer.ipynb](notebooks/Tokenization/wubi-tokenizer.ipynb): Notebook for Wubi tokenization implementation and testing.
