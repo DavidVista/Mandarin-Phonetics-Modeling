@@ -105,7 +105,7 @@ All data paths are then built from `DATASETS` (e.g. `f"{DATASETS}/corpus/train.c
 | `metrics/{lstm,bert}/{variant}/` | Training/evaluation metric dumps (`*.pkl`) | ⚙️ generated |
 | `representations/{lstm,bert}/{variant}/` | Extracted character/aggregated representations (`*.joblib`) | ⚙️ generated |
 | `regression/{lstm,bert}/{variant}/` | Similarity + PCA regression tables (`*.csv`) | ⚙️ generated |
-| `plots/{lstm,bert}/{variant}/` | Figures saved by the analysis notebooks | ⚙️ generated |
+| `plots/{lstm,bert}/{variant}/` and `plots/embeddings/{base,zh-ch,sounds}/` | Figures (`.png`/`.svg`/`.pdf`) from the regression-analysis notebooks and HTML plots (`.html`) from the embedding-evaluation notebooks; each notebook writes via a `MEDIA_PATH` prefix | ⚙️ generated |
 
 > **⚙️ Model weights and other generated artifacts are not committed** — they are produced by running the notebooks. Their directory structure is kept in the repo via `.gitkeep` placeholders (and the contents are git-ignored). Because these paths only appear once the corresponding notebook has been run, a freshly cloned repo will show empty `models/`, `metrics/`, `representations/`, `regression/`, and `plots/` trees.
 
