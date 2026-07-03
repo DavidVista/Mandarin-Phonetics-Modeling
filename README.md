@@ -123,7 +123,7 @@ Downstream notebooks consume the outputs of upstream ones, so they must be run i
 4. **Training — decoder** (frozen / full pipeline) → reads the step-3 encoder weights, produces decoder / end-to-end weights.
 5. **Representations Extraction** → reads step-3/4 weights + `corpus/eval.csv`, dumps `representations/{arch}/{variant}/character_records.joblib`.
 6. **Regression Analysis** → reads the step-5 representations, writes `regression/{arch}/{variant}/…csv` and `plots/`.
-7. **Probing** → reads step-3 encoder + step-4 decoder weights + `corpus/eval.csv` + `probing/exact_homophone_phrases.csv`.
+7. **Probing** → reads step-3 encoder + step-4 decoder weights + `probing/exact_homophone_phrases.csv`. Note: the character vocabulary (`char2idx`/`idx2char`) is rebuilt from **`corpus/train.csv`** — it must match the corpus the decoder was trained on (step 4) so the output indices and `vocab_size_char` align with the loaded weights; the benchmark itself still runs on the eval-derived perturbation set. Characters absent from the train vocab fall back to `<UNK>`.
 
 Each variant (`aligned`, `pinyin-aligned`, `pinyin`) for each architecture (`lstm`, `bert`) forms an independent steps 3→7 chain. The results of previous Kaggle runs remain visible in the committed notebook outputs.
 
