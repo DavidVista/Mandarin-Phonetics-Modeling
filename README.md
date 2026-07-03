@@ -111,7 +111,21 @@ All data paths are then built from `DATASETS` (e.g. `f"{DATASETS}/corpus/train.c
 
 ### Run order
 
-Downstream notebooks consume the outputs of upstream ones, so run them in dependency order: **Datasets/Tokenization** (build corpus, embeddings, wubi, probing sets) → **Training** (produce encoder → frozen-decoder → full-pipeline weights per variant) → **Representations Extraction** (dump hidden-state records) → **Regression Analysis** & **Probing** (consume weights + representations). The results of previous Kaggle runs remain visible in the committed notebook outputs.
+Downstream notebooks consume the outputs of upstream ones, so they must be run in dependency order. The committed `datasets/` inputs (`corpus/`, `embeddings/`, `wubi/`, `probing/`, `pinyin-tokens/`, `sounds/`) already contain the results of steps 1–2, so a fresh clone can start from **step 3**; run steps 1–2 only to regenerate those inputs from scratch. Within a step, follow the sub-order shown.
+
+1. **Datasets — preparation** (order matters within this step):
+   1. `Datasets/Pinyin Labeling/char2pinyin-pinyin2char-framework` → trains the char↔pinyin models (needs only `pinyin-tokens/pinyin.txt`).
+   2. `Datasets/Pinyin Labeling/pinyin-dataset-labelling` and `pinyin-eval-dataset-labelling` → label the corpus using the char2pinyin model → produce `corpus/train.csv` and `corpus/eval.csv`.
+   3. `Datasets/Pinyin Embeddings/mandarin-sounds-dataset` → reads `corpus/train.csv`, produces `embeddings/pinyin_embeddings.pkl` (evaluation variants optional).
+   4. `Datasets/Probing/exact-homophones` → `probing/homophone_inventory.pkl` (reads `corpus/eval.csv`), then `phrase-perturbation` → `probing/exact_homophone_phrases.csv`.
+2. **Tokenization** — `Tokenization/wubi-tokenizer` → builds `wubi/chinese_to_wubi.pkl` and `wubi/wubi_to_chinese.pkl`.
+3. **Training — encoder** → produces `models/{arch}/{variant}/…` encoder weights (reads `corpus/train.csv`, `embeddings/`, and `wubi/` for LSTM).
+4. **Training — decoder** (frozen / full pipeline) → reads the step-3 encoder weights, produces decoder / end-to-end weights.
+5. **Representations Extraction** → reads step-3/4 weights + `corpus/eval.csv`, dumps `representations/{arch}/{variant}/character_records.joblib`.
+6. **Regression Analysis** → reads the step-5 representations, writes `regression/{arch}/{variant}/…csv` and `plots/`.
+7. **Probing** → reads step-3 encoder + step-4 decoder weights + `corpus/eval.csv` + `probing/exact_homophone_phrases.csv`.
+
+Each variant (`aligned`, `pinyin-aligned`, `pinyin`) for each architecture (`lstm`, `bert`) forms an independent steps 3→7 chain. The results of previous Kaggle runs remain visible in the committed notebook outputs.
 
 ## Notebooks Structure
 
