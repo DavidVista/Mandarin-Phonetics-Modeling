@@ -143,7 +143,7 @@ Downstream notebooks consume the outputs of upstream ones, so run them in depend
 - [wubi-tokenizer-scratch-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Model/wubi-tokenizer-scratch-pipeline.ipynb): Training pipeline for Wubi tokenizer from scratch (both encoder and decoder).
 
 #### Pinyin Aligned Encoder (LSTM)
-- [phonetic-aware-representaions-learning.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-representaions-learning.ipynb): Training of Mandarin encoder with Wubi tokenizer and acoustic alignment. Note that the link refers to the Kaggle version of the encoder with a stable training, for unstable version view "Version 2".
+- [phonetic-aware-representaions-learning.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-representaions-learning.ipynb): Training of Mandarin encoder with Wubi tokenizer and acoustic alignment.
 - [phonetic-aware-frozen-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-frozen-pipeline.ipynb): Frozen encoder training pipeline (decoder is trained only).
 - [phonetic-aware-frozen-pipeline-unstable-encoder.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-frozen-pipeline-unstable-encoder.ipynb): Frozen encoder training pipeline (decoder is trained only, training of encoder was not stable due to small alignment pressure). This notebook is used for contrasting the effect of proper alignment.
 - [phonetic-aware-full-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-full-pipeline.ipynb): Complete training pipeline for phonetic-aware encoder (decoder and stable trained encoder).
