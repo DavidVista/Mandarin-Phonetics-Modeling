@@ -16,6 +16,7 @@ librosa                 # audio features
 ffmpeg-python           # audio I/O
 numpy
 pandas
+openpyxl
 scipy
 scikit-learn            # imported as sklearn
 statsmodels             # het_breuschpagan, VIF, etc.
