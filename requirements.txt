@@ -1,0 +1,34 @@
+# Python 3.12 (Google Colab environment)
+
+# --- Versions confirmed from notebook install logs ---
+torch==2.11.0            # installed with +cu126 wheel (--index-url .../whl/cu126)
+torchvision==0.26.0      # installed with +cu126 wheel
+pypinyin==0.55.0
+umap-learn==0.5.11
+numba==0.60.0            # pulled in by umap-learn
+pynndescent==0.6.0       # pulled in by umap-learn
+
+# --- Used in notebooks, versions not pinned (Colab defaults) ---
+transformers            # AutoTokenizer/AutoProcessor/BertModel/BertTokenizer
+datasets                # load_dataset
+sentencepiece           # tokenizer backend
+librosa                 # audio features
+ffmpeg-python           # audio I/O
+numpy
+pandas
+openpyxl
+scipy
+scikit-learn            # imported as sklearn
+statsmodels             # het_breuschpagan, VIF, etc.
+xgboost
+shap
+matplotlib
+seaborn
+plotly
+jinja2
+tqdm
+joblib
+jieba                   # Chinese word segmentation
+sympy
+requests
+ipython                 # IPython.display (Audio, HTML)
