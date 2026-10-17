@@ -218,3 +218,13 @@ datasets/plots/**/*.png
 datasets/plots/**/*.pdf
 datasets/plots/**/*.svg
 datasets/plots/**/*.html
+
+# Shared experiment outputs are immutable local/generated bundles. Keep policies
+# and explicitly tracked manifests/configs available through negation when added.
+datasets/experiments/**
+!datasets/experiments/
+!datasets/experiments/**/
+!datasets/experiments/**/manifest.json
+!datasets/experiments/**/config.json
+datasets/experiments/**/initialization/*.pt
+datasets/runs/**
