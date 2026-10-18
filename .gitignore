@@ -3,6 +3,11 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# LaTeX exceptions
+*.out
+*.aux
+*.gz
+
 # C extensions
 *.so
 

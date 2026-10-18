@@ -1,0 +1,265 @@
+% Built on the Springer LLNCS template (llncs.cls). Compile with XeLaTeX
+% (required for the xeCJK Chinese glyphs).
+%
+\documentclass[runningheads]{llncs}
+\usepackage[T1]{fontenc}
+%
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\newcommand{\changed}[1]{#1}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc,shapes.geometric}
+%
+% - Chinese glyph support (XeLaTeX + Noto CJK) -----
+\usepackage{xeCJK}
+%\usepackage{ctex}
+
+%\setCJKmainfont{Noto Serif CJK SC}
+\newcommand{\hz}[1]{{\CJKfamily{}#1}} % inline hanzi helper
+% -------------
+%
+
+\usepackage{cite}
+\usepackage[hidelinks]{hyperref}
+% \renewcommand\UrlFont{\ttfamily}
+\usepackage{color}
+\renewcommand\UrlFont{\color{blue}\rmfamily}
+% \urlstyle{rm}
+
+%
+% - convenience macros ----------
+\newcommand{\cossim}{\sigma}                     % cosine similarity
+\newcommand{\jac}{J}                             % Jaccard similarity
+\newcommand{\ind}{\mathbb{I}}                    % indicator of a shared trait
+\newcommand{\hvec}{\mathbf{h}}                   % hidden state
+\newcommand{\avec}{\mathbf{a}}                   % acoustic (pinyin) embedding
+\newcommand{\vvec}{\mathbf{v}}                   % semantic (BERT) embedding
+\newcommand{\wset}{\mathbf{w}}                   % wubi token set
+\newcommand{\pset}{\mathbf{p}}                   % pinyin decomposition
+\newcommand{\SCE}{\Sigma_{\mathrm{CE}}}
+% -------------
+%
+\begin{document}
+%
+\title{Learning Mandarin Phonetic Representations in Neural Networks Using Acoustic Alignment}
+\titlerunning{Learning Mandarin Phonetic Representations Using Acoustic Alignment}
+
+\author{Ilya Grigorev}
+\authorrunning{I.\,Grigorev}
+
+\institute{Innopolis University, Innopolis, Russia\\
+\email{il.grigorev@innopolis.university}}
+
+\maketitle
+
+\section{Motivation}
+\label{sec:intro}
+
+Phonetics examines the production, acoustic properties, and perception of speech
+sounds \cite{ref_phonetic_sciences}. Different speech sounds may exhibit varying
+degrees of phonetic similarity, with some pronunciations being closer to each
+other than others. Experimental studies demonstrate that human listeners
+distinguish such differences when comparing spoken forms and individual phonemes
+\cite{ref_word_similarity,ref_phoneme_similarity}. Graded phonetic similarity
+therefore describes an aspect of phonetic structure that extends beyond the
+identification of individual sounds. Modeling phonetic information requires
+investigating not only whether a system correctly identifies pronunciations but
+also whether its learned representations reflect the relationships between
+different pronunciations.
+
+We consider the learning of phonetic representations from written Chinese
+character sequences, drawing inspiration from the relationship between
+orthographic and phonological processing in human reading. Phonological
+information is activated during Chinese character recognition, even when readers
+perform tasks involving semantic judgments
+\cite{ref_early_phonology,ref_chinese_reading}. Mandarin provides a convenient
+setting for character-level pronunciation modeling, as each written character
+typically corresponds to a single spoken syllable in a given context. Syllables
+can be further decomposed into three phonological components: an initial, a
+final, and a lexical tone \cite{ref_mandarin_phonology}. Different syllables may
+share one or more phonological components, whereas distinct characters may have
+identical pronunciations, resulting in substantial \textit{homophony}.
+Furthermore, some characters have multiple pronunciations whose selection
+depends on the surrounding linguistic context. Learning pronunciation from
+written characters therefore requires a model to extract phonetic information
+from inputs that also carry orthographic, semantic, and contextual information.
+These linguistic properties may influence the organization of learned
+representations independently of phonetic similarity. The central challenge is
+consequently to determine whether a neural network can acquire representations
+organized according to phonetic relationships despite the presence of other
+linguistic information in its inputs.
+
+
+The mapping from character-based representations to pronunciation can be learned
+using different forms of phonetic supervision. To encode target pronunciations,
+we adopt Hanyu Pinyin (hereafter Pinyin), a standardized Romanization system for
+Mandarin Chinese \cite{ref_pinyin}. Rather than predicting complete romanized
+syllables, we treat their initial, final, and tone components as separate
+categorical labels. Let $y_{\text{ini}}$, $y_{\text{fin}}$, and
+$y_{\text{tone}}$ denote the ground-truth component labels, and let
+$p_{\text{ini}}$, $p_{\text{fin}}$, and $p_{\text{tone}}$ denote their
+respective predicted probability distributions. The discrete prediction loss is
+defined as the sum of categorical cross-entropy terms in
+\eqref{eq:discrete-loss-component}:
+
+\begin{equation}
+\label{eq:discrete-loss-component}
+\begin{aligned}
+    \mathcal{L}_{\text{pinyin}}
+    ={}& -\log p_{\text{ini}}(y_{\text{ini}}) \\
+       & -\log p_{\text{fin}}(y_{\text{fin}}) \\
+       & -\log p_{\text{tone}}(y_{\text{tone}}).
+\end{aligned}
+\end{equation}
+
+Supervised classification aims to predict these labels without explicitly
+specifying the geometry of the learned representation space. Although shared
+phonological components may induce relationships between representations,
+accurate classification does not necessarily imply the preservation of graded
+similarity between pronunciations. An alternative approach introduces
+\textit{continuous acoustic representations} as training targets to guide the
+organization of the learned space. Let $\mathbf{h}, \mathbf{a} \in
+\mathbb{R}^{d}$ denote the learned hidden representation and its corresponding
+acoustic target, respectively. The acoustic alignment loss is defined as the
+mean squared error in \eqref{eq:acoustic-loss-component}:
+
+\begin{equation}
+\label{eq:acoustic-loss-component}
+    \mathcal{L}_{\text{acoustic}}
+    = \frac{1}{d}\|\mathbf{h}-\mathbf{a}\|_2^2.
+\end{equation}
+
+One approach to obtaining continuous acoustic representations is to extract
+embeddings from pretrained speech models. For example, wav2vec 2.0 learns latent
+representations from speech waveforms \cite{ref_wav2vec2}. The resulting
+acoustic representations encode speech information as continuous vectors rather
+than categorical identities, allowing relationships between pronunciations to be
+expressed through distances in the acoustic space. However, speech-derived
+representations may encode additional properties that are not directly related
+to the phonetic distinctions under investigation. Consequently, acoustic
+alignment provides an additional source of supervision but does not establish
+that the learned geometry corresponds to human-perceived phonetic similarity.
+
+For independent evaluation, we employ DIMSIM, a Mandarin phonetic similarity
+framework \cite{ref_dimsim}. DIMSIM represents Pinyin syllables through their
+initial, final, and tone components and calculates phonetic distance by
+combining distances between the corresponding components. Distances between
+initials and finals are obtained from learned multidimensional representations
+informed by linguistic structure and native-speaker similarity annotations,
+while tonal differences are incorporated through a separate distance component.
+The resulting distance measure captures graded relationships between Mandarin
+pronunciations and provides a reference independent of the acoustic targets used
+during training. By comparing DIMSIM distances with pairwise hidden-state
+similarities, we assess whether the learned representations preserve relative
+phonetic relationships beyond categorical identity. Although DIMSIM does not
+constitute an absolute measure of human-perceived phonetic similarity, the
+framework provides a perceptually informed reference for evaluating phonetic
+relationships in the learned representation space.
+
+Overall, we compare the representation spaces learned under two principal
+training regimes: discrete label supervision \eqref{eq:discrete-loss}, where the
+model predicts Pinyin components, and guided supervision
+\eqref{eq:combined-loss}, where discrete prediction is supplemented with
+continuous speech-derived targets. To investigate the interaction between the
+training objectives, we vary the strength of acoustic alignment $\lambda$ from
+the label-only regime toward an acoustic-dominated regime, with acoustic-only
+training considered as a separate reference condition \eqref{eq:acoustic-loss}. 
+
+\begin{equation}
+\label{eq:discrete-loss}
+    \mathcal{L} = \mathcal{L}_{\text{pinyin}}.
+\end{equation}
+
+\begin{equation}
+\label{eq:combined-loss}
+    \mathcal{L}
+    = \mathcal{L}_{\text{pinyin}}
+    + \lambda\mathcal{L}_{\text{acoustic}}.
+\end{equation}
+
+\begin{equation}
+\label{eq:acoustic-loss}
+    \mathcal{L} = \mathcal{L}_{\text{acoustic}}.
+\end{equation}
+
+The primary objective is to assess whether graded phonetic similarity emerges
+under discrete supervision and how continuous acoustic guidance influences its
+preservation in character-based representations.
+
+
+\section{Expected Results}
+\label{sec:results}
+
+The comparison of training regimes allows for several possible outcomes, each
+with different implications for the acquisition of phonetic structure. Under
+discrete Pinyin supervision, the presence of graded phonetic relationships would
+suggest that phonetic similarity can emerge without explicit similarity-based
+supervision, whereas their absence would indicate that accurate label prediction
+does not necessarily imply the preservation of phonetic similarity. Introducing
+acoustic alignment may strengthen the correspondence between hidden-state
+similarity and DIMSIM phonetic similarity, although the correspondence may also
+remain unchanged, decrease, or vary non-monotonically as the alignment strength
+increases. The acoustic-only regime further allows us to examine whether
+removing discrete supervision strengthens, preserves, or weakens graded phonetic
+relationships compared to the combined and discrete-only regimes. Together, the
+possible outcomes provide insight into how discrete pronunciation prediction and
+continuous acoustic guidance influence the organization of phonetic information
+within character-based representations.
+
+
+\begin{thebibliography}{10}
+
+\bibitem{ref_phonetic_sciences}
+W. J. Hardcastle, J. Laver, and F. E. Gibbon, Eds., \emph{The Handbook of
+Phonetic Sciences}, 2nd ed. Chichester, U.K.: Wiley-Blackwell, 2010, doi:
+10.1002/9781444317251.
+
+\bibitem{ref_word_similarity}
+U. Hahn and T. M. Bailey, ``What makes words sound similar?'' \emph{Cognition},
+vol. 97, no. 3, pp. 227--267, 2005, doi: 10.1016/j.cognition.2004.09.006.
+
+\bibitem{ref_phoneme_similarity}
+T. M. Bailey and U. Hahn, ``Phoneme similarity and confusability,'' \emph{J.
+Memory Lang.}, vol. 52, no. 3, pp. 339--362, 2005, doi:
+10.1016/j.jml.2004.12.003.
+
+\bibitem{ref_early_phonology}
+C. A. Perfetti and S. Zhang, ``Very early phonological activation in Chinese
+reading,'' \emph{J. Exp. Psychol. Learn. Mem. Cogn.}, vol. 21, no. 1, pp.
+24--33, 1995, doi: 10.1037/0278-7393.21.1.24.
+
+\bibitem{ref_chinese_reading}
+X. Zhou and W. Marslen-Wilson, ``Phonology, orthography, and semantic activation
+in reading Chinese,'' \emph{J. Memory Lang.}, vol. 41, no. 4, pp. 579--606,
+1999, doi: 10.1006/jmla.1999.2663.
+
+\bibitem{ref_mandarin_phonology}
+K. D. Neergaard and C.-R. Huang, ``Mandarin Chinese syllable structure and
+phonological similarity: Perception and production studies,'' in \emph{The
+Cambridge Handbook of Chinese Linguistics}, C.-R. Huang, Y.-H. Lin, I.-H. Chen,
+and Y.-Y. Hsu, Eds. Cambridge, U.K.: Cambridge Univ. Press, 2022, pp. 245--274,
+doi: 10.1017/9781108329019.015.
+
+\bibitem{ref_pinyin}
+Y.-H. Lin, \emph{The Sounds of Chinese}. Cambridge, U.K.: Cambridge Univ. Press,
+2007, ch. 6, pp. 123--135.
+
+\bibitem{ref_wav2vec2}
+A. Baevski, H. Zhou, A. Mohamed, and M. Auli, ``wav2vec 2.0: A framework for
+self-supervised learning of speech representations,'' in \emph{Advances in
+Neural Information Processing Systems}, vol. 33, 2020, pp. 12449--12460.
+
+\bibitem{ref_dimsim}
+M. Li, M. Danilevsky, S. Noeman, and Y. Li, ``DIMSIM: An accurate Chinese
+phonetic similarity algorithm based on learned high dimensional encoding,'' in
+\emph{Proc. 22nd Conf. Computational Natural Language Learning (CoNLL)},
+Brussels, Belgium, Oct. 2018, pp. 444--453, doi: 10.18653/v1/K18-1043.
+
+\end{thebibliography}
+
+
+\end{document}
