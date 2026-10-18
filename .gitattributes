@@ -4,3 +4,6 @@
 # Preserve the bytes bound by experiment and checkpoint checksums.
 datasets/experiments/**/config.json -text
 datasets/experiments/**/manifest.json -text
+datasets/evaluations/**/manifest.json -text
+datasets/evaluations/**/config.json -text
+datasets/evaluations/**/coverage.json -text

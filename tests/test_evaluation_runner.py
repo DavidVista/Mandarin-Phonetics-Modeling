@@ -40,7 +40,7 @@ class RunnerTests(unittest.TestCase):
             artifacts = {name: sha(experiment / name) for name in ("samples.jsonl", "splits.json", "vocab.json", "config.json")}
             (experiment / "manifest.json").write_text(json.dumps({"experiment_id": "synthetic", "artifacts": artifacts}), encoding="utf-8")
             bundle = prepare_evaluation_bundle(
-                "eval", experiment_path=experiment, output_root=root / "bundles", contextual_pair_count=3,
+                "1.0.0", experiment_path=experiment, output_root=root / "bundles", contextual_pair_count=3,
                 character_pair_count=3, max_all_pairs=10, distance_fn=lambda a, b: 0.0 if a == b else 1.0,
                 metric_provenance={"metric_name": "synthetic"},
                 code_provenance={"test": "0" * 64},

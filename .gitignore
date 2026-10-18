@@ -228,3 +228,12 @@ datasets/experiments/**
 !datasets/experiments/**/config.json
 datasets/experiments/**/initialization/*.pt
 datasets/runs/**
+
+# Evaluation bundle storage (schema 2)
+datasets/evaluations/**
+!datasets/evaluations/
+!datasets/evaluations/**/
+!datasets/evaluations/**/manifest.json
+!datasets/evaluations/**/config.json
+!datasets/evaluations/**/coverage.json
+datasets/evaluation-runs/**

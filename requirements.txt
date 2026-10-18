@@ -1,9 +1,10 @@
 # Python 3.12 (Google Colab environment)
 
 # --- Versions confirmed from notebook install logs ---
-torch==2.11.0            # installed with +cu126 wheel (--index-url .../whl/cu126)
-torchvision==0.26.0      # installed with +cu126 wheel
+# Historical notebook environment: torch 2.11.0+cu126 and torchvision
+# 0.26.0+cu126. Install the matching CPU/CUDA runtime separately.
 pypinyin==0.55.0
+dimsim==0.2.2
 umap-learn==0.5.11
 numba==0.60.0            # pulled in by umap-learn
 pynndescent==0.6.0       # pulled in by umap-learn

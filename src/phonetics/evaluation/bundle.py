@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 import shutil
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -18,7 +19,9 @@ from typing import Any
 from .dimsim import DimsimDistance
 from .sampling import make_pair_plan, pair_count
 
-BUNDLE_SCHEMA_VERSION = 1
+BUNDLE_SCHEMA_VERSION = 2
+PAIRING_POLICY = "nonzero_nonzero"
+_EVALUATION_ID_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 DistanceFunction = Callable[[str, str], float]
 
 
@@ -105,7 +108,7 @@ def _build_occurrences(samples: list[dict], vocab: dict) -> list[dict]:
     if not isinstance(acoustic_tokens, list) or any(not isinstance(x, str) for x in acoustic_tokens):
         raise ValueError("invalid acoustic token vocabulary")
     component_names = [labels.get(name) for name in ("initials", "finals", "tones")]
-    if any(not isinstance(values, list) for values in component_names):
+    if any(not isinstance(values, list) or any(not isinstance(value, str) for value in values) for values in component_names):
         raise ValueError("invalid component label vocabulary")
     rows = []
     for sample in sorted(samples, key=lambda row: row["sample_id"]):
@@ -199,8 +202,8 @@ def prepare_evaluation_bundle(
     code_provenance: dict[str, str] | None = None,
 ) -> Path:
     """Create an immutable evaluation bundle and return its path."""
-    if Path(evaluation_id).name != evaluation_id or evaluation_id in {"", ".", ".."}:
-        raise ValueError("evaluation_id must be one safe path component")
+    if not isinstance(evaluation_id, str) or _EVALUATION_ID_PATTERN.fullmatch(evaluation_id) is None:
+        raise ValueError("evaluation_id must be a dotted X.Y.Z version")
     numeric = {"contextual_pair_count": contextual_pair_count, "sentence_seed": sentence_seed,
                "sampling_seed": sampling_seed, "character_pair_count": character_pair_count,
                "max_all_pairs": max_all_pairs}
@@ -238,16 +241,20 @@ def prepare_evaluation_bundle(
     occurrences = _build_occurrences(samples, vocab)
     groups, group_by_id = _build_groups(occurrences)
     occurrence_by_id = {row["occurrence_id"]: row for row in occurrences}
+    eligible_ids = {
+        "contextual": sorted(row["occurrence_id"] for row in occurrences if isinstance(row["initial"], str) and row["initial"]),
+        "character_pinyin": sorted(row["group_id"] for row in groups if row["group_kind"] == "character_pinyin" and isinstance(row["initial"], str) and row["initial"]),
+        "syllable": sorted(row["group_id"] for row in groups if row["group_kind"] == "syllable" and isinstance(row["initial"], str) and row["initial"]),
+    }
     contextual = _pair_rows(
-        sorted(occurrence_by_id), occurrence_by_id, sample_count=contextual_pair_count,
+        eligible_ids["contextual"], occurrence_by_id, sample_count=contextual_pair_count,
         seed=sampling_seed, max_all_pairs=max_all_pairs, distance_fn=distance_fn,
     )
     aggregate_plans = {}
     pair_counts = {"character_pinyin": character_pair_count, "syllable": syllable_pair_count}
     for offset, kind in enumerate(("character_pinyin", "syllable"), start=1):
-        ids = sorted(row["group_id"] for row in groups if row["group_kind"] == kind)
         aggregate_plans[kind] = _pair_rows(
-            ids, group_by_id, sample_count=pair_counts[kind], seed=sampling_seed + offset,
+            eligible_ids[kind], group_by_id, sample_count=pair_counts[kind], seed=sampling_seed + offset,
             max_all_pairs=max_all_pairs, distance_fn=distance_fn,
         )
     target.mkdir(parents=True)
@@ -275,10 +282,22 @@ def prepare_evaluation_bundle(
             statuses: dict[str, int] = {}
             for row in rows:
                 statuses[row["distance_status"]] = statuses.get(row["distance_status"], 0) + 1
+            original_count = object_counts[level]
+            eligible_count = len(eligible_ids[level])
+            original_pairs, eligible_pairs = pair_count(original_count), pair_count(eligible_count)
             coverage["levels"][level] = {
-                "object_count": object_counts[level], "eligible_pair_population": pair_count(object_counts[level]),
-                "sampled_pair_count": len(rows), "distance_status_counts": dict(sorted(statuses.items())),
-                "zero_initial_pair_count": sum(row["left_zero_initial"] or row["right_zero_initial"] for row in rows),
+                "objects": {
+                    "original": original_count, "eligible": eligible_count,
+                    "excluded": original_count - eligible_count,
+                    "excluded_by_reason": {"zero_initial": original_count - eligible_count},
+                },
+                "unordered_pair_population": {
+                    "original": original_pairs, "eligible": eligible_pairs,
+                    "excluded": original_pairs - eligible_pairs,
+                    "excluded_by_reason": {"zero_initial": original_pairs - eligible_pairs},
+                },
+                "selection_count": len(rows),
+                "distance_status_counts": dict(sorted(statuses.items())),
             }
         _write_json(target / "coverage.json", coverage)
         config = {
@@ -287,11 +306,13 @@ def prepare_evaluation_bundle(
             "sentence_seed": sentence_seed, "sampling_seed": sampling_seed,
             "character_pair_count": character_pair_count, "syllable_pair_count": syllable_pair_count,
             "max_all_pairs": max_all_pairs,
+            "pairing_policy": PAIRING_POLICY,
         }
         _write_json(target / "config.json", config)
         artifacts = {str(path.relative_to(target)).replace("\\", "/"): _sha256(path) for path in target.rglob("*") if path.is_file()}
         manifest = {
             "schema_version": BUNDLE_SCHEMA_VERSION, "evaluation_id": evaluation_id,
+            "pairing_policy": PAIRING_POLICY,
             "source_experiment": {
                 "path": str(experiment_root), "experiment_id": source_manifest.get("experiment_id"),
                 "hashes": source_hashes,
@@ -319,6 +340,13 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
     manifest = _read_json(root / "manifest.json")
     if manifest.get("schema_version") != BUNDLE_SCHEMA_VERSION:
         raise ValueError("unsupported evaluation bundle schema")
+    config = _read_json(root / "config.json")
+    if config.get("schema_version") != BUNDLE_SCHEMA_VERSION:
+        raise ValueError("unsupported evaluation config schema")
+    if manifest.get("pairing_policy") != PAIRING_POLICY or config.get("pairing_policy") != PAIRING_POLICY:
+        raise ValueError("unsupported evaluation pairing policy")
+    if manifest.get("evaluation_id") != config.get("evaluation_id") or not isinstance(config.get("evaluation_id"), str) or _EVALUATION_ID_PATTERN.fullmatch(config["evaluation_id"]) is None:
+        raise ValueError("invalid or inconsistent evaluation_id")
     required = {"config.json", "coverage.json", "sentences.jsonl", "occurrences.jsonl", "groups.jsonl",
                 "pairs/contextual.jsonl", "pairs/character_pinyin.jsonl", "pairs/syllable.jsonl"}
     artifacts = manifest.get("artifacts", {})
@@ -328,6 +356,7 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
         artifact = (root / relative).resolve()
         if root not in artifact.parents or not artifact.is_file() or _sha256(artifact) != expected:
             raise ValueError(f"evaluation artifact checksum mismatch: {relative}")
+    coverage = _read_json(root / "coverage.json")
     occurrences, groups = _read_jsonl(root / "occurrences.jsonl"), _read_jsonl(root / "groups.jsonl")
     occurrence_ids = [row.get("occurrence_id") for row in occurrences]
     group_ids = [row.get("group_id") for row in groups]
@@ -335,6 +364,8 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
         raise ValueError("evaluation occurrence IDs are invalid or duplicated")
     if len(group_ids) != len(set(group_ids)) or any(not isinstance(value, str) for value in group_ids):
         raise ValueError("evaluation group IDs are invalid or duplicated")
+    if any(not isinstance(row.get("initial"), str) for row in occurrences + groups):
+        raise ValueError("evaluation initial metadata must be strings")
     pairs = {kind: _read_jsonl(root / f"pairs/{kind}.jsonl") for kind in ("contextual", "character_pinyin", "syllable")}
     occurrence_id_set = set(occurrence_ids)
     valid_ids = {
@@ -342,6 +373,9 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
         "character_pinyin": {row["group_id"] for row in groups if row.get("group_kind") == "character_pinyin"},
         "syllable": {row["group_id"] for row in groups if row.get("group_kind") == "syllable"},
     }
+    metadata = {"contextual": {row["occurrence_id"]: row for row in occurrences},
+                "character_pinyin": {row["group_id"]: row for row in groups if row.get("group_kind") == "character_pinyin"},
+                "syllable": {row["group_id"]: row for row in groups if row.get("group_kind") == "syllable"}}
     for group in groups:
         members = group.get("occurrence_ids")
         if (not isinstance(members, list) or not members or members != sorted(members) or len(members) != len(set(members))
@@ -360,9 +394,43 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
             expected = hashlib.sha256(json.dumps([row["left_id"], row["right_id"]], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
             if row["pair_id"] != expected:
                 raise ValueError(f"{kind} pair ID does not match endpoints")
+            left_zero = metadata[kind][row["left_id"]].get("initial") == ""
+            right_zero = metadata[kind][row["right_id"]].get("initial") == ""
+            if left_zero or right_zero:
+                raise ValueError(f"{kind} pair violates {PAIRING_POLICY} policy")
+            if row.get("left_zero_initial") is not False or row.get("right_zero_initial") is not False or row.get("no_zero_initial_diagnostic") is not True:
+                raise ValueError(f"{kind} pair has inconsistent zero-initial flags")
+        original_count = len(valid_ids[kind])
+        eligible_count = sum(isinstance(metadata[kind][object_id].get("initial"), str) and bool(metadata[kind][object_id]["initial"])
+                             for object_id in valid_ids[kind])
+        original_pairs, eligible_pairs = pair_count(original_count), pair_count(eligible_count)
+        statuses: dict[str, int] = {}
+        for row in rows:
+            status = row.get("distance_status")
+            statuses[status] = statuses.get(status, 0) + 1
+        expected_coverage = {
+            "objects": {
+                "original": original_count, "eligible": eligible_count, "excluded": original_count - eligible_count,
+                "excluded_by_reason": {"zero_initial": original_count - eligible_count},
+            },
+            "unordered_pair_population": {
+                "original": original_pairs, "eligible": eligible_pairs, "excluded": original_pairs - eligible_pairs,
+                "excluded_by_reason": {"zero_initial": original_pairs - eligible_pairs},
+            },
+            "selection_count": len(rows), "distance_status_counts": dict(sorted(statuses.items())),
+        }
+        if coverage.get("levels", {}).get(kind) != expected_coverage:
+            raise ValueError(f"{kind} coverage metadata is inconsistent")
+    expected_counts = {
+        "sentences": len(_read_jsonl(root / "sentences.jsonl")), "occurrences": len(occurrences),
+        "character_pinyin_groups": len(valid_ids["character_pinyin"]), "syllable_groups": len(valid_ids["syllable"]),
+        "pairs": {kind: len(rows) for kind, rows in pairs.items()},
+    }
+    if manifest.get("counts") != expected_counts:
+        raise ValueError("evaluation manifest counts are inconsistent")
     return {
-        "root": root, "manifest": manifest, "config": _read_json(root / "config.json"),
-        "coverage": _read_json(root / "coverage.json"),
+        "root": root, "manifest": manifest, "config": config,
+        "coverage": coverage,
         "sentences": _read_jsonl(root / "sentences.jsonl"),
         "occurrences": occurrences, "groups": groups, "pairs": pairs,
     }
