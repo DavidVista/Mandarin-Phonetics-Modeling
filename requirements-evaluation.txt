@@ -1,0 +1,10 @@
+# Pinned metric implementation used to prepare model-independent pair bundles.
+dimsim==0.2.2
+pypinyin==0.55.0
+
+# Scientific analysis/runtime dependencies. Install PyTorch appropriate for the
+# target CPU/CUDA environment separately, following the main project policy.
+numpy
+scipy
+pandas
+matplotlib
