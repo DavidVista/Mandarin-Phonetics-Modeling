@@ -38,7 +38,7 @@ def _epoch(model, loader, acoustic, condition, lambda_mse, device, optimizer=Non
 
 
 def train_experiment(experiment_path, *, condition: str, seed: int = 42, lambda_mse: float = 1.0,
-                     runs_root=None, device=None):
+                     runs_root=None, device=None, code_provenance: dict | None = None):
     if condition not in {"ce_only", "mse_only", "combined"}: raise ValueError("invalid condition")
     if condition != "combined" and lambda_mse != 1.0: raise ValueError("lambda_mse only applies to combined")
     if condition == "combined" and (not torch.isfinite(torch.tensor(lambda_mse)) or lambda_mse < 0): raise ValueError("lambda_mse must be finite and nonnegative")
@@ -71,9 +71,10 @@ def train_experiment(experiment_path, *, condition: str, seed: int = 42, lambda_
         test_metrics = _epoch(model, loaders["test"], acoustic, condition, lambda_mse, device)
         actual = {"experiment_id": experiment["manifest"]["experiment_id"], "seed": seed, "condition": condition, "lambda_mse": lambda_mse,
                   "device": str(device), "manifest_sha256": best_checkpoint["manifest_sha256"], "config": config,
-                  "code_sha256": {p.name: _sha(p) for p in (Path(__file__), Path(__file__).with_name("metrics.py"),
-                                      Path(__file__).with_name("data.py"), Path(__file__).with_name("model.py"),
-                                      Path(__file__).with_name("reproducibility.py"))}}
+                  "code_sha256": code_provenance if code_provenance is not None else {
+                      p.name: _sha(p) for p in (Path(__file__), Path(__file__).with_name("metrics.py"),
+                          Path(__file__).with_name("data.py"), Path(__file__).with_name("model.py"),
+                          Path(__file__).with_name("reproducibility.py"))}}
         (run / "history.json").write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
         (run / "test_metrics.json").write_text(json.dumps(test_metrics, indent=2) + "\n", encoding="utf-8")
         (run / "actual_config.json").write_text(json.dumps(actual, indent=2, sort_keys=True) + "\n", encoding="utf-8")

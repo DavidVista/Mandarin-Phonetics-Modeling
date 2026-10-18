@@ -1,0 +1,54 @@
+{
+  "artifacts": {
+    "acoustic_targets.pt": "dd9a0d44f8c2f4d39232d830d50e583770ed0599ff60f47a7428ad923cea911b",
+    "config.json": "6ccbd330d7c8edfbc04439bf17f702061a39a6bde6277558b9a54365bbdaf57e",
+    "initialization/seed-42.pt": "1bdd8f1f7be26d2ad05736691647f392eaea51f3912fddfe985a4eb523958cd5",
+    "samples.jsonl": "515b1dcdf327082fafb892c9135adf1b1afede40a09219fd03a5f900454b0c56",
+    "splits.json": "e67f9e7317c8250d0068e9b3b30828384ec72f2bc477f06acde6da7ddb9404ba",
+    "vocab.json": "3aca99b215c5ba1878cb02efb8156531042ed08bfefd2daebe6b45237141200e",
+    "wubi_mapping.pkl": "80d3228546097490632cfdc1b42666b706840e2d7f1f76f64712449c9cfe927e"
+  },
+  "code": {
+    "data.py": "f8f6c6c588f11b36de854a7b144883231a4ee29851ce0bcf68bcf3af610933d6",
+    "model.py": "9f6bd2de95cec891c875280e518726ec1c9f6f0ec6080b55fe564a88170415af",
+    "reproducibility.py": "ad47bd3899c536a7d4a8d151469b1d206b15a653bd00e6498eeddb90a37446f3"
+  },
+  "counts": {
+    "accepted": 156834,
+    "input_rows": 161464,
+    "rejected": {
+      "duplicate_text": 4558,
+      "missing_acoustic_coverage": 72
+    },
+    "seeds": [
+      42
+    ],
+    "splits": {
+      "test": 15684,
+      "train": 125467,
+      "validation": 15683
+    }
+  },
+  "environment": {
+    "numpy": "2.2.6",
+    "python": "3.11.2",
+    "torch": "2.6.0+cpu"
+  },
+  "experiment_id": "1.0.0",
+  "preparation_version": "2",
+  "schema_version": 1,
+  "sources": {
+    "acoustic": {
+      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\embeddings\\pinyin_embeddings.pkl",
+      "sha256": "cdc24b0c97c47f6af452c94566f7646ec379e53716d4d25bc2f8cff6838e8dd8"
+    },
+    "corpus": {
+      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\corpus\\train.csv",
+      "sha256": "bd3373aa5c7604bc944e4bb8ca6b9dcbea6dd79afd2db4e7fbe148e9c91a073a"
+    },
+    "wubi": {
+      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\wubi\\chinese_to_wubi.pkl",
+      "sha256": "80d3228546097490632cfdc1b42666b706840e2d7f1f76f64712449c9cfe927e"
+    }
+  }
+}

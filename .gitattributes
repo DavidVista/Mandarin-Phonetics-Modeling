@@ -1,2 +1,6 @@
 *.ipynb text eol=lf
 *.py text eol=lf
+
+# Preserve the bytes bound by experiment and checkpoint checksums.
+datasets/experiments/**/config.json -text
+datasets/experiments/**/manifest.json -text
