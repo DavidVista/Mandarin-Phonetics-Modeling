@@ -18,12 +18,12 @@ from torch.utils.data import DataLoader, Dataset
 
 from .model import build_encoder
 from .reproducibility import make_generator, seed_everything
+from .pinyin import INITIALS, FINALS, TONES, ZERO_INITIAL, _canonical_labels, _decompose
+from .data_contract import pair_reason, sample_id
+from .artifacts import sha256_file
+from .preparation import validate_prepared
 
 PREPARATION_VERSION = "2"
-INITIALS = ["", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "zh", "ch", "sh", "r", "z", "c", "s"]
-FINALS = ["a", "ai", "an", "ang", "ao", "e", "ei", "en", "eng", "er", "i", "ia", "ian", "iang", "iao", "ie", "in", "ing", "iong", "iu", "o", "ong", "ou", "u", "ua", "uai", "uan", "uang", "ui", "un", "uo", "v", "ve", "van", "vn"]
-TONES = ["1", "2", "3", "4", "5"]
-ZERO_INITIAL = {"yi":"i","ya":"ia","yao":"iao","ye":"ie","you":"iu","yan":"ian","yin":"in","yang":"iang","ying":"ing","yong":"iong","yu":"v","yue":"ve","yuan":"van","yun":"vn","wu":"u","wa":"ua","wo":"uo","wai":"uai","wei":"ui","wan":"uan","wen":"un","wang":"uang","weng":"ong"}
 
 
 def _sha(path: Path) -> str:
@@ -36,23 +36,6 @@ def _sha(path: Path) -> str:
 
 def _json(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-
-
-def _canonical_labels(tokens: list[str]) -> list[str]:
-    return [t if t[-1:].isdigit() else t + "5" for t in tokens]
-
-
-def _decompose(token: str) -> tuple[int, int, int]:
-    tone = token[-1] if token[-1:].isdigit() else "5"
-    base = token[:-1] if token[-1:].isdigit() else token
-    base = ZERO_INITIAL.get(base, base)
-    initial = next((x for x in sorted(INITIALS[1:], key=len, reverse=True) if base.startswith(x)), "")
-    final = base[len(initial):]
-    if initial in {"j", "q", "x"}:
-        final = {"u":"v", "ue":"ve", "uan":"van", "un":"vn"}.get(final, final)
-    if final in FINALS and tone in TONES:
-        return INITIALS.index(initial), FINALS.index(final), TONES.index(tone)
-    raise ValueError(f"invalid pinyin decomposition: {token}")
 
 
 def _encode(text: str, mapping: dict, stoi: dict[str, int]) -> tuple[list[int], list[list[int]]]:
@@ -81,6 +64,7 @@ def prepare_experiment(experiment_id: str, *, datasets_root: str | Path, output_
     if not isinstance(experiment_id, str) or not experiment_id or Path(experiment_id).name != experiment_id or experiment_id in {".", ".."}:
         raise ValueError("experiment_id must be one non-empty safe path component")
     root = Path(datasets_root).resolve()
+    prepared_manifest = validate_prepared(root) if (root / "manifest.json").is_file() else None
     sources = {"corpus": root / "corpus/train.csv", "wubi": root / "wubi/chinese_to_wubi.pkl", "acoustic": root / "embeddings/pinyin_embeddings.pkl"}
     if any(not p.is_file() for p in sources.values()):
         raise FileNotFoundError({k: str(v) for k, v in sources.items() if not v.is_file()})
@@ -121,7 +105,12 @@ def prepare_experiment(experiment_id: str, *, datasets_root: str | Path, output_
             raw = pinyin_value.split() if isinstance(pinyin_value, str) else []
             canonical = _canonical_labels(raw) if raw else []
             reason = None
-            if not text or not raw: reason = "invalid_row"
+            if prepared_manifest is not None:
+                reason = pair_reason(text, canonical, valid_wubi, acoustic)
+                if reason: raise ValueError(f"prepared row {row_number} rejected by common contract: {reason}")
+                if text in seen: raise ValueError(f"duplicate text in prepared dataset at rows {seen[text][0]} and {row_number}")
+                components = [_decompose(x) for x in canonical]
+            elif not text or not raw: reason = "invalid_row"
             elif len(text) != len(raw): reason = "length_mismatch"
             elif text in seen and seen[text][1] != canonical: raise ValueError(f"conflicting labels for duplicate text at rows {seen[text][0]} and {row_number}")
             elif text in seen: reason = "duplicate_text"
@@ -135,7 +124,7 @@ def prepare_experiment(experiment_id: str, *, datasets_root: str | Path, output_
                 continue
             seen[text] = (row_number, canonical)
             token_ids, spans = _encode(text, valid_wubi, stoi)
-            digest = hashlib.sha256(json.dumps([text, canonical], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+            digest = sample_id(text, canonical)
             accepted.append({"sample_id": digest, "source_row": row_number, "text": text, "token_ids": token_ids,
                              "character_spans": spans, "component_labels": components,
                              "acoustic_ids": [acoustic_ids[x] for x in canonical]})
@@ -165,11 +154,14 @@ def prepare_experiment(experiment_id: str, *, datasets_root: str | Path, output_
             torch.save({"state_dict": model.state_dict(), "seed": int(seed), "config_sha256": _sha(target / "config.json"),
                         "vocab_sha256": _sha(target / "vocab.json"), "source_sha256": source_hashes}, target / f"initialization/seed-{seed}.pt")
         artifacts = {str(p.relative_to(target)).replace("\\", "/"): _sha(p) for p in target.rglob("*") if p.is_file()}
-        code_files = [Path(__file__), Path(__file__).with_name("model.py"), Path(__file__).with_name("reproducibility.py")]
+        code_files = [Path(__file__), Path(__file__).with_name("model.py"), Path(__file__).with_name("reproducibility.py"),
+                      Path(__file__).with_name("pinyin.py"), Path(__file__).with_name("data_contract.py")]
         manifest = {"schema_version": 1, "experiment_id": experiment_id, "preparation_version": PREPARATION_VERSION,
                     "code": {p.name: _sha(p) for p in code_files},
                     "environment": {"python": platform.python_version(), "torch": torch.__version__, "numpy": np.__version__},
                     "sources": {k: {"path": str(v), "sha256": source_hashes[k]} for k,v in sources.items()},
+                    **({"prepared_dataset": {"id": prepared_manifest["dataset_id"], "manifest_sha256": sha256_file(root / "manifest.json"),
+                                             "contract": prepared_manifest["data_contract"]}} if prepared_manifest else {}),
                     "counts": {"input_rows": len(accepted) + sum(rejected.values()), "accepted": len(accepted), "rejected": dict(sorted(rejected.items())),
                                "splits": {k: len(v) for k,v in splits.items()}, "seeds": config["seeds"]}, "artifacts": artifacts}
         _json(target / "manifest.json", manifest)
