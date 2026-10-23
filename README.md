@@ -114,9 +114,10 @@ All data paths are then built from `DATASETS` (e.g. `f"{DATASETS}/corpus/train.c
 Downstream notebooks consume the outputs of upstream ones, so they must be run in dependency order. The committed `datasets/` inputs (`corpus/`, `embeddings/`, `wubi/`, `probing/`, `pinyin-tokens/`, `sounds/`) already contain the results of steps 1–2, so a fresh clone can start from **step 3**; run steps 1–2 only to regenerate those inputs from scratch. Within a step, follow the sub-order shown.
 
 1. **Datasets — preparation** (order matters within this step):
-   1. `Datasets/Pinyin Labeling/char2pinyin-pinyin2char-framework` → trains the char↔pinyin models (needs only `pinyin-tokens/pinyin.txt`).
-   2. `Datasets/Pinyin Labeling/pinyin-dataset-labelling` and `pinyin-eval-dataset-labelling` → label the corpus using the char2pinyin model → produce `corpus/train.csv` and `corpus/eval.csv`.
-   3. `Datasets/Pinyin Embeddings/mandarin-sounds-dataset` → reads `corpus/train.csv`, produces `embeddings/pinyin_embeddings.pkl` (evaluation variants optional).
+   1. `Datasets/Pinyin Labeling/char2pinyin-pinyin2char-framework` → trains an immutable char→pinyin labeller from an explicitly pinned local export and tonal inventory.
+   2. `Datasets/Pinyin Labeling/pinyin-dataset-labelling` → combines AIxBlock lot1 and lot2, cleans them and writes versioned `SOURCE_ROOT/corpus/labelled.csv` with provenance. It does not replace historical `corpus/train.csv` or `corpus/eval.csv`.
+   3. `Datasets/Pinyin Embeddings/mandarin-sounds-dataset` → stages the fixed audio inventory in `SOURCE_ROOT/audio`; its historical research cells are opt-in.
+   4. The data-preparation notebook consumes the labelled corpus, audio manifest and local Wubi mapping through the shared SDK, then `prepare_experiment` creates splits.
    4. `Datasets/Probing/exact-homophones` → `probing/homophone_inventory.pkl` (reads `corpus/eval.csv`), then `phrase-perturbation` → `probing/exact_homophone_phrases.csv`.
 2. **Tokenization** — `Tokenization/wubi-tokenizer` → builds `wubi/chinese_to_wubi.pkl` and `wubi/wubi_to_chinese.pkl`.
 3. **Training — encoder** → produces `models/{arch}/{variant}/…` encoder weights (reads `corpus/train.csv`, `embeddings/`, and `wubi/` for LSTM).
@@ -135,14 +136,13 @@ Each variant (`aligned`, `pinyin-aligned`, `pinyin`) for each architecture (`lst
 ### Datasets
 
 #### Pinyin Embeddings
-- [mandarin-sounds-dataset.ipynb](notebooks/Datasets/Pinyin%20Embeddings/mandarin-sounds-dataset.ipynb): Main notebook for creating and processing the Mandarin sounds dataset (using the finetuned Wav2Vec model). The sounds are loaded from the [pinyin chart](https://studycli.org/pinyin-chart/) provided by StudyCLI website [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-sounds-dataset).
+- [mandarin-sounds-dataset.ipynb](notebooks/Datasets/Pinyin%20Embeddings/mandarin-sounds-dataset.ipynb): Guarded producer for a fixed StudyCLI audio inventory plus the 15 retained historical neutral WAVs. The generic preparation SDK computes embeddings later; the historical research block remains opt-in. [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-sounds-dataset).
 - [evaluation-of-mandarin-sounds-dataset-base.ipynb](notebooks/Datasets/Pinyin%20Embeddings/evaluation-of-mandarin-sounds-dataset-base.ipynb): Notebook for evaluating the Mandarin sounds dataset using embeddings from the base Wav2Vec model [[Kaggle Link]](https://www.kaggle.com/code/davidvista/evaluation-of-mandarin-sounds-dataset?scriptVersionId=310537595).
 - [evaluation-of-mandarin-sounds-dataset-zh-ch.ipynb](notebooks/Datasets/Pinyin%20Embeddings/evaluation-of-mandarin-sounds-dataset-zh-ch.ipynb): Notebook for evaluating the Mandarin sounds dataset using embeddings from the finetuned Wav2Vec model [[Kaggle Link]](https://www.kaggle.com/code/davidvista/evaluation-of-mandarin-sounds-dataset?scriptVersionId=310537423).
 
 #### Pinyin Labeling
 - [char2pinyin-pinyin2char-framework.ipynb](notebooks/Datasets/Pinyin%20Labeling/char2pinyin-pinyin2char-framework.ipynb): Notebook for training a character-to-pinyin model on a different corpus. The corpus is not primarily chosen for modeling due to unknown domain and too broad vocabulary. However, the general pinyin labeling is sufficient with this corpus [[Kaggle Link]](https://www.kaggle.com/code/davidvista/char2pinyin-pinyin2char-framework?scriptVersionId=305074711).
 - [pinyin-dataset-labelling.ipynb](notebooks/Datasets/Pinyin%20Labeling/pinyin-dataset-labelling.ipynb): Notebook for labeling the [main pinyin dataset](https://huggingface.co/datasets/AIxBlock/Chinese-short-sentences) using a pre-trained character-to-pinyin model [[Kaggle Link]](https://www.kaggle.com/code/davidvista/pinyin-dataset-labelling).
-- [pinyin-eval-dataset-labelling.ipynb](notebooks/Datasets/Pinyin%20Labeling/pinyin-eval-dataset-labelling.ipynb): Notebook for labeling the Pinyin evaluation dataset [[Kaggle Link]](https://www.kaggle.com/code/davidvista/pinyin-eval-dataset-labelling/notebook).
 
 #### Probing
 - [exact-homophones.ipynb](notebooks/Datasets/Probing/exact-homophones.ipynb): Notebook for sampling characters sharing exact pinyin (homophones) from the corpus with counting and filtering with minimal frequency threshold [[Kaggle Link]](https://www.kaggle.com/code/davidvista/exact-homophones).
