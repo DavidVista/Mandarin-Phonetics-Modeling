@@ -1,0 +1,57 @@
+{
+  "artifacts": {
+    "config.json": "d4ca9cb9bce21e9b366440297e510984d2cacfd065f341b106ef5873636c0721",
+    "pinyin_embeddings.pkl": "f18e4566edaae7a431203550b9adbb5cb41dbdb77c941be6264074588936aa0e",
+    "reports/inference.json": "2553cc072fca54d0cf391504f1bb3a962df615f15a603e1c229a6907a683a91a",
+    "sound_inventory.jsonl": "f90172e72c6792d1f65eeab8fae8e164915a648fb7b4804e5842c0255987e368"
+  },
+  "bundle_id": "duyu-chinese-lessons-base-v1",
+  "bundle_type": "acoustic_embeddings",
+  "code": {
+    "acoustic-validation": "98edfe53b1a76a4122cddc1f04ecf72eb5caffc03cf48cbd098f4cbf9668d2e2",
+    "artifact-helpers": "55452cc148ac690fec4164535346014f2e08f4a75dec9485f89af731bc22ba59",
+    "audio-model": "3b5a7071021cb9ba4fc9c76d5a32b07c34510655affa1b3362a058ee6ec626bb",
+    "bundle-creation": "7f92a9aeff8bc37df259469d252a65ac8d2718fc445f57fc1c807c2b1c224b85",
+    "bundle-validation": "d4324539c2a9eee5d2d98e6811f26c5c8234d1e09ff7136891f0158c742cc9fa",
+    "embedding-cache": "d90e5a49ea1553147f8c958515ca39d764e50ba9c917475ca817485b903ce379",
+    "model-config": "1f85757af42a7fef988391efe2eaafc832437b43ac8d6c2bc815a08c7291a6a7",
+    "pinyin-contract": "8b1cf6c1c116f61abfa1f6a42288d774363fc159d3701f464cc1934649f3bd0c",
+    "sound-inventory": "cf2f20796b9b7cf7b424f87531ca79251363d70bc8bd390815801256fc99a501"
+  },
+  "count": 1188,
+  "data_contract": "prepared-1",
+  "dimension": 768,
+  "environment": {
+    "numpy": "2.1.3",
+    "python": "3.13.15",
+    "torch": "2.11.0+cu128",
+    "transformers": "5.16.1"
+  },
+  "inference": {
+    "backend": "transformers",
+    "cached": 0,
+    "computed": 1188,
+    "errors": 0
+  },
+  "inventory_sha256": "f90172e72c6792d1f65eeab8fae8e164915a648fb7b4804e5842c0255987e368",
+  "manifest_self_hash": "excluded",
+  "model": {
+    "backend": "transformers",
+    "device": "cuda",
+    "dtype": "float32",
+    "id": "facebook/wav2vec2-base",
+    "layer": -1,
+    "mono": true,
+    "padding": "legacy_one_second",
+    "pooling": "mean_all",
+    "processor": "facebook/wav2vec2-base",
+    "revision": "0b5b8e868dd84f03fd87d01f9c4ff0f080fecfe8",
+    "sample_rate": 16000
+  },
+  "pinyin_contract": "legacy-2",
+  "schema_version": 1,
+  "source": {
+    "path": "/kaggle/input/datasets/davidvista/lmpr-v1/source-data/sounds",
+    "sha256": "a5c4b7ac719804cc3cfdb853ff9365d673d1a2ca98c8e37d0ea275020533acaa"
+  }
+}

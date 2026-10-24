@@ -1,0 +1,24 @@
+{
+  "bundle_id": "duyu-chinese-lessons-zh-cn-v1",
+  "cache_root": "/kaggle/working/acoustic-cache",
+  "model": {
+    "device": "cuda",
+    "dtype": "float32",
+    "id": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "layer": -1,
+    "mono": true,
+    "padding": "legacy_one_second",
+    "pooling": "mean_all",
+    "processor": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "revision": "99ccb2737be22b8bb50dcfcc39ad4d567fb90cfd",
+    "sample_rate": 16000
+  },
+  "output_root": "/kaggle/working/pinyin-embeddings",
+  "schema_version": 1,
+  "sounds": {
+    "manifest": "/kaggle/input/datasets/davidvista/lmpr-v1/source-data/sounds-manifest/chinese-sounds-v1/sounds_manifest.csv",
+    "path": "/kaggle/input/datasets/davidvista/lmpr-v1/source-data/sounds",
+    "sha256": "a5c4b7ac719804cc3cfdb853ff9365d673d1a2ca98c8e37d0ea275020533acaa",
+    "tone_convention": "explicit"
+  }
+}
