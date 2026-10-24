@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import json
 import sys
@@ -91,9 +92,22 @@ class NotebookTests(unittest.TestCase):
     def test_dependency_setup_paths_and_storage_contract(self):
         prepare = json.loads(PREPARE.read_text(encoding="utf-8"))
         dependency_source = code(next(cell for cell in prepare["cells"] if cell["id"] == "prep-dependencies"))
-        with mock.patch("subprocess.check_call") as install:
-            exec(compile(dependency_source, "prep-dependencies", "exec"), {})
-        install.assert_not_called()
+        for enabled in (False, True):
+            with self.subTest(install_dependencies=enabled):
+                tree = ast.parse(dependency_source)
+                assignments = [node for node in tree.body if isinstance(node, ast.Assign)
+                               and any(isinstance(target, ast.Name) and target.id == "INSTALL_DEPENDENCIES"
+                                       for target in node.targets)]
+                self.assertEqual(len(assignments), 1)
+                assignments[0].value = ast.Constant(value=enabled)
+                namespace = {}
+                with mock.patch("subprocess.check_call") as install:
+                    exec(compile(ast.fix_missing_locations(tree), "prep-dependencies", "exec"), namespace)
+                if enabled:
+                    install.assert_called_once_with(
+                        [sys.executable, "-m", "pip", "install", *namespace["DEPENDENCIES"]])
+                else:
+                    install.assert_not_called()
         self.assertIn('"dimsim==0.2.2"', dependency_source)
         self.assertIn('"pypinyin==0.55.0"', dependency_source)
         self.assertNotIn('"torch', dependency_source)
