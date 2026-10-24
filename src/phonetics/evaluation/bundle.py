@@ -21,7 +21,8 @@ from .sampling import make_pair_plan, pair_count
 
 BUNDLE_SCHEMA_VERSION = 2
 PAIRING_POLICY = "nonzero_nonzero"
-_EVALUATION_ID_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+_EVALUATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
+_WINDOWS_RESERVED_NAME_PATTERN = re.compile(r"^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$", re.IGNORECASE)
 DistanceFunction = Callable[[str, str], float]
 
 
@@ -52,6 +53,17 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 def _safe_id(value: str, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def _validate_evaluation_id(value: Any) -> str:
+    if (not isinstance(value, str) or _EVALUATION_ID_PATTERN.fullmatch(value) is None
+            or ".." in value or "/" in value or "\\" in value or ":" in value
+            or value.endswith((".", " ")) or Path(value).is_absolute()
+            or _WINDOWS_RESERVED_NAME_PATTERN.fullmatch(value) is not None):
+        raise ValueError(
+            "evaluation_id must be a safe single-directory name using ASCII letters, digits, '.', '_', or '-'"
+        )
     return value
 
 
@@ -202,8 +214,7 @@ def prepare_evaluation_bundle(
     code_provenance: dict[str, str] | None = None,
 ) -> Path:
     """Create an immutable evaluation bundle and return its path."""
-    if not isinstance(evaluation_id, str) or _EVALUATION_ID_PATTERN.fullmatch(evaluation_id) is None:
-        raise ValueError("evaluation_id must be a dotted X.Y.Z version")
+    evaluation_id = _validate_evaluation_id(evaluation_id)
     numeric = {"contextual_pair_count": contextual_pair_count, "sentence_seed": sentence_seed,
                "sampling_seed": sampling_seed, "character_pair_count": character_pair_count,
                "max_all_pairs": max_all_pairs}
@@ -345,7 +356,9 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
         raise ValueError("unsupported evaluation config schema")
     if manifest.get("pairing_policy") != PAIRING_POLICY or config.get("pairing_policy") != PAIRING_POLICY:
         raise ValueError("unsupported evaluation pairing policy")
-    if manifest.get("evaluation_id") != config.get("evaluation_id") or not isinstance(config.get("evaluation_id"), str) or _EVALUATION_ID_PATTERN.fullmatch(config["evaluation_id"]) is None:
+    manifest_evaluation_id = _validate_evaluation_id(manifest.get("evaluation_id"))
+    config_evaluation_id = _validate_evaluation_id(config.get("evaluation_id"))
+    if manifest_evaluation_id != config_evaluation_id:
         raise ValueError("invalid or inconsistent evaluation_id")
     required = {"config.json", "coverage.json", "sentences.jsonl", "occurrences.jsonl", "groups.jsonl",
                 "pairs/contextual.jsonl", "pairs/character_pinyin.jsonl", "pairs/syllable.jsonl"}

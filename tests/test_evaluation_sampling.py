@@ -217,15 +217,71 @@ class EvaluationBundleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "violates nonzero_nonzero policy"):
                 load_evaluation_bundle(path)
 
-    def test_evaluation_id_must_be_dotted_version(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
-            root = Path(temporary)
-            with self.assertRaisesRegex(ValueError, "X.Y.Z"):
-                prepare_evaluation_bundle(
-                    "eval", experiment_path=self.make_experiment(root), output_root=root / "out",
+    def test_evaluation_id_accepts_named_and_historical_versions(self):
+        for evaluation_id in ("duyu-chinese-lessons-zh-cn-v1", "1.0.0"):
+            with self.subTest(evaluation_id=evaluation_id), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+                root = Path(temporary)
+                path = prepare_evaluation_bundle(
+                    evaluation_id, experiment_path=self.make_experiment(root), output_root=root / "out",
+                    contextual_pair_count=3, character_pair_count=3,
                     distance_fn=lambda _left, _right: 0.0,
                     metric_provenance={"metric_name": "synthetic"}, code_provenance={"test": "0" * 64},
                 )
+                bundle = load_evaluation_bundle(path)
+                self.assertEqual(path.name, evaluation_id)
+                self.assertEqual(bundle["manifest"]["evaluation_id"], evaluation_id)
+                self.assertEqual(bundle["config"]["evaluation_id"], evaluation_id)
+
+    def test_evaluation_id_rejects_unsafe_names_on_create_and_load(self):
+        invalid_ids = (None, 7, "", "../eval", "eval/name", r"eval\name", "/absolute", r"C:\absolute",
+                       "eval..v1", "eval.", "eval ", "CON", "con.json", "PRN", "AUX.txt", "NUL",
+                       "COM1", "com9.log", "LPT1", "lpt9.txt")
+        for evaluation_id in invalid_ids:
+            with self.subTest(operation="create", evaluation_id=evaluation_id), \
+                    tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+                root = Path(temporary)
+                with self.assertRaisesRegex(ValueError, "safe single-directory name"):
+                    prepare_evaluation_bundle(
+                        evaluation_id, experiment_path=self.make_experiment(root), output_root=root / "out",
+                        distance_fn=lambda _left, _right: 0.0,
+                        metric_provenance={"metric_name": "synthetic"}, code_provenance={"test": "0" * 64},
+                    )
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+            root = Path(temporary)
+            path = prepare_evaluation_bundle(
+                "valid-v1", experiment_path=self.make_experiment(root), output_root=root / "out",
+                contextual_pair_count=3, character_pair_count=3,
+                distance_fn=lambda _left, _right: 0.0,
+                metric_provenance={"metric_name": "synthetic"}, code_provenance={"test": "0" * 64},
+            )
+            config_path, manifest_path = path / "config.json", path / "manifest.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            config["evaluation_id"] = manifest["evaluation_id"] = "../unsafe"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            manifest["artifacts"]["config.json"] = sha(config_path)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "safe single-directory name"):
+                load_evaluation_bundle(path)
+
+    def test_loader_keeps_manifest_config_evaluation_id_consistency(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+            root = Path(temporary)
+            path = prepare_evaluation_bundle(
+                "valid-v1", experiment_path=self.make_experiment(root), output_root=root / "out",
+                contextual_pair_count=3, character_pair_count=3,
+                distance_fn=lambda _left, _right: 0.0,
+                metric_provenance={"metric_name": "synthetic"}, code_provenance={"test": "0" * 64},
+            )
+            config_path, manifest_path = path / "config.json", path / "manifest.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            config["evaluation_id"] = "other-valid-v2"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            manifest["artifacts"]["config.json"] = sha(config_path)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "inconsistent evaluation_id"):
+                load_evaluation_bundle(path)
 
     def test_non_string_initial_labels_and_loaded_metadata_are_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
