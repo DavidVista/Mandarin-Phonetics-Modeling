@@ -1,9 +1,7 @@
-"""Reproducible adapters for historical corpus and sound sources."""
+"""Pinned DuYu export and safe local sound archive helpers."""
 
-from .corpus import clean_aixblock_text, load_aixblock_lots
-from .labeller import annotate_corpus, load_labeller, predict_pinyin, train_labeller
-from .sounds import prepare_studycli_sounds
-from .preset import create_preparation_config
+from .archive import pack_sounds, unpack_sounds
+from .duyu import export_duyu
+from .sound_manifest import CHINESE_LESSONS_ALIASES, build_sound_manifest
 
-__all__ = ["clean_aixblock_text", "load_aixblock_lots", "train_labeller", "load_labeller",
-           "annotate_corpus", "predict_pinyin", "prepare_studycli_sounds", "create_preparation_config"]
+__all__ = ["CHINESE_LESSONS_ALIASES", "build_sound_manifest", "export_duyu", "pack_sounds", "unpack_sounds"]

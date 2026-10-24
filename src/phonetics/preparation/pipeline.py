@@ -8,21 +8,23 @@ import math
 import os
 import pickle
 import platform
-import random
 import shutil
 import sys
 import tempfile
 import time
 import uuid
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 from ..artifacts import read_jsonl, safe_artifact, sha256_file, write_json, write_jsonl
 from ..data_contract import DATA_CONTRACT_VERSION, FILTERS, pair_reason, sample_id, validate_acoustic, validate_wubi
-from ..pinyin import PINYIN_CONTRACT_VERSION, canonical_labels, decompose
+from ..pinyin import PINYIN_CONTRACT_VERSION, decompose
 from .config import SCHEMA_VERSION, validate_config
+from .acoustic_bundle import load_acoustic_bundle
 from .embeddings import embed_inventory
 from .readers import read_corpus, read_sounds, read_wubi
+from .corpus_processing import (CorpusConflictError, coverage as corpus_coverage,
+                                deduplicate_rows, filter_rows, normalize_rows, sample_rows)
 
 REQUIRED = {"corpus/train.csv", "embeddings/pinyin_embeddings.pkl", "wubi/chinese_to_wubi.pkl",
             "config.json", "reports/run_statistics.json", "reports/coverage.json", "reports/rejections.jsonl",
@@ -43,6 +45,8 @@ class StageFailure(ValueError):
 
 def prepare_dataset(config: dict, *, embedding_backend=None) -> Path:
     config = validate_config(config)
+    if "acoustic_bundle" in config and embedding_backend is not None:
+        raise ValueError("embedding_backend is invalid in precomputed mode")
     output = Path(config["output_root"]).resolve(); output.mkdir(parents=True, exist_ok=True)
     target = (output / config["dataset_id"]).resolve()
     if target.parent != output or target.exists():
@@ -78,12 +82,22 @@ def prepare_dataset(config: dict, *, embedding_backend=None) -> Path:
                 current["duration_seconds"] = time.perf_counter() - started
         corpus, corpus_src = run("load_corpus", "rows", lambda: _loaded(read_corpus(config["corpus"])))
         corpus = run("normalize_identity", "rows", lambda: _normalize(corpus, config["corpus"]["tone_convention"]), len(corpus))
-        sounds, sounds_src = run("sound_inventory", "files", lambda: _loaded(read_sounds(config["sounds"])))
+        if "acoustic_bundle" in config:
+            vectors, sounds, acoustic_manifest = load_acoustic_bundle(config["acoustic_bundle"]["path"],config["acoustic_bundle"]["manifest_sha256"])
+            sounds_src={"path":str(Path(config["acoustic_bundle"]["path"]).resolve()),"manifest_sha256":config["acoustic_bundle"]["manifest_sha256"]}
+            sounds = run("sound_inventory", "files", lambda: (sounds,{"input_count":len(sounds),"output_count":len(sounds),"rejected":0}))
+        else:
+            sounds, sounds_src = run("sound_inventory", "files", lambda: _loaded(read_sounds(config["sounds"])))
         wubi, wubi_src = run("validate_wubi", "entries", lambda: _loaded(read_wubi(config["wubi"])))
         filtered, rejections = _filter(corpus, wubi, {row["label"] for row in sounds}, stages)
         deduped = run("deduplicate", "rows", lambda: _deduplicate(filtered), len(filtered))
         selected = run("sampling", "rows", lambda: _sample(deduped, config["sampling"]), len(deduped))
-        embeddings, inference = run("embeddings", "syllables", lambda: _embeddings(sounds, config, embedding_backend), len(sounds))
+        if "acoustic_bundle" in config:
+            origin=acoustic_manifest["model"].get("backend")
+            inference={"computed":0,"cached":len(sounds),"errors":0,"backend":"precomputed","origin_backend":origin}
+            embeddings=run("embeddings","syllables",lambda:(vectors,{"input_count":len(sounds),"output_count":len(vectors),"rejected":0}),len(sounds))
+        else:
+            embeddings, inference = run("embeddings", "syllables", lambda: _embeddings(sounds, config, embedding_backend), len(sounds))
         _write_bundle(temp, config, deduped, selected, wubi, embeddings, sounds, rejections)
         stages.append({"name": "final_validation", "unit": "artifacts", "input_count": len(REQUIRED),
                        "output_count": len(REQUIRED), "rejected": 0, "status": "success",
@@ -96,8 +110,8 @@ def prepare_dataset(config: dict, *, embedding_backend=None) -> Path:
                  "outputs": {"csv_rows": len(selected), "embeddings": len(embeddings), "wubi_entries": len(wubi)},
                  "inference": inference}
         write_json(temp / "reports/run_statistics.json", stats)
-        sources = {"corpus": corpus_src, "sounds": sounds_src, "wubi": wubi_src}
-        _write_manifest(temp, config, sources, inference)
+        sources = {"corpus": corpus_src, "acoustic_bundle" if "acoustic_bundle" in config else "sounds": sounds_src, "wubi": wubi_src}
+        _write_manifest(temp, config, sources, inference, acoustic_manifest if "acoustic_bundle" in config else None)
         started = time.perf_counter()
         try:
             validate_prepared(temp)
@@ -106,7 +120,7 @@ def prepare_dataset(config: dict, *, embedding_backend=None) -> Path:
             raise
         finally:
             stages[-1]["duration_seconds"] = time.perf_counter() - started
-        write_json(temp / "reports/run_statistics.json", stats); _write_manifest(temp, config, sources, inference)
+        write_json(temp / "reports/run_statistics.json", stats); _write_manifest(temp, config, sources, inference, acoustic_manifest if "acoustic_bundle" in config else None)
         validate_prepared(temp)
         if target.exists(): raise FileExistsError(f"prepared dataset already exists: {target}")
         os.rename(temp, target)
@@ -131,58 +145,16 @@ def _loaded(result):
 
 
 def _normalize(rows, tone_convention):
-    normalized=[]
-    for row in rows:
-        error=None
-        try: labels=canonical_labels(row["raw_pinyin"], tone_convention=tone_convention) if row["raw_pinyin"] else []
-        except ValueError as exc: labels=list(row["raw_pinyin"]); error=str(exc)
-        normalized.append({**row,"labels":labels,"normalization_error":error})
-    return normalized,{"input_count":len(rows),"output_count":len(normalized),"rejected":0}
+    return normalize_rows(rows, tone_convention)
 
 
 def _filter(rows, wubi, acoustic, stages):
-    active, rejected_rows = list(rows), []
-    for stage in FILTERS:
-        started = time.perf_counter(); kept = []
-        for row in active:
-            failed = stage == "pinyin" and row.get("normalization_error")
-            if failed or pair_reason(row["text"], row["labels"], wubi, acoustic, stage=stage):
-                detail = {"reason": stage, **row}
-                if stage == "wubi": detail["missing_characters"] = sorted(set(row["text"]) - set(wubi))
-                if stage == "acoustic": detail["missing_tokens"] = sorted(set(row["labels"]) - set(acoustic))
-                rejected_rows.append(detail)
-            else: kept.append(row)
-        stages.append({"name": stage, "unit": "rows", "input_count": len(active), "output_count": len(kept),
-                       "rejected": len(active)-len(kept), "status": "success", "counts_complete":True,
-                       "duration_seconds": time.perf_counter()-started})
-        active = kept
-    return active, rejected_rows
+    return filter_rows(rows, wubi, acoustic, stages)
 
 
 def _deduplicate(rows):
-    grouped = defaultdict(list)
-    for row in rows:
-        grouped[row["text"]].append(row)
-    conflicts = []
-    for text, members in sorted(grouped.items()):
-        variants = defaultdict(list)
-        for row in members: variants[tuple(row["labels"])].append(row)
-        if len(variants) > 1:
-            conflicts.append({"text":text,"label_variants":[{"labels":list(labels),
-                "source_ids":sorted({r["source_id"] for r in variant}),
-                "source_rows":sorted(r["source_row"] for r in variant)} for labels,variant in sorted(variants.items())]})
-    if conflicts:
-        conflict_rows=sum(sum(len(v["source_rows"]) for v in group["label_variants"]) for group in conflicts)
-        raise StageFailure("conflicting labels for duplicate text", {"input_count":len(rows),"output_count":0,
-            "rejected":conflict_rows,"blocked_count":len(rows)-conflict_rows,"conflict_groups":len(conflicts),
-            "conflict_rows":conflict_rows,"conflicts":conflicts,"counts_complete":True})
-    result = []
-    for members in grouped.values():
-        row={**members[0],"source_ids":sorted({member["source_id"] for member in members})}
-        row["sample_id"] = sample_id(row["text"], row["labels"]); result.append(row)
-    result.sort(key=lambda row: row["sample_id"])
-    return result, {"input_count": len(rows), "output_count": len(result), "rejected": len(rows)-len(result),
-                    "duplicates":len(rows)-len(result),"conflict_groups":0,"conflict_rows":0}
+    try:return deduplicate_rows(rows)
+    except CorpusConflictError as exc:raise StageFailure(str(exc),exc.diagnostics) from exc
 
 
 def _sample(rows, spec):
@@ -190,9 +162,7 @@ def _sample(rows, spec):
     if size is not None and size > len(rows):
         raise StageFailure("sampling size exceeds eligible pool", {"input_count":len(rows),"output_count":0,
             "rejected":0,"blocked_count":len(rows),"requested_size":size,"counts_complete":True})
-    selected = list(rows) if size is None else random.Random(spec["seed"]).sample(rows, size)
-    selected.sort(key=lambda row: row["sample_id"])
-    return selected, {"input_count": len(rows), "output_count": len(selected), "rejected": len(rows)-len(selected)}
+    return sample_rows(rows,spec)
 
 
 def _embeddings(sounds, config, backend):
@@ -201,15 +171,7 @@ def _embeddings(sounds, config, backend):
 
 
 def _coverage(rows):
-    chars = Counter(ch for row in rows for ch in row["text"]); labels = Counter(x for row in rows for x in row["labels"])
-    readings = defaultdict(set)
-    for row in rows:
-        for character, label in zip(row["text"], row["labels"]): readings[character].add(label)
-    return {"rows": len(rows), "characters": sum(chars.values()), "lengths": dict(sorted(Counter(len(r["text"]) for r in rows).items())),
-            "unique_characters": len(chars), "pinyin": dict(sorted(labels.items())),
-            "tones": dict(sorted(Counter(x[-1] for x in labels.elements()).items())),
-            "neutral": sum(v for k,v in labels.items() if k.endswith("5")),
-            "polyphonic_readings": {k: sorted(v) for k,v in sorted(readings.items()) if len(v)>1}}
+    return corpus_coverage(rows)
 
 
 def _write_bundle(root, config, eligible, rows, wubi, acoustic, inventory, rejections):
@@ -225,7 +187,7 @@ def _write_bundle(root, config, eligible, rows, wubi, acoustic, inventory, rejec
     write_json(root/"reports/coverage.json", {"before_sampling": _coverage(eligible), "after_sampling": _coverage(rows)})
 
 
-def _write_manifest(root, config, sources, inference):
+def _write_manifest(root, config, sources, inference, acoustic_manifest=None):
     artifacts={str(p.relative_to(root)).replace("\\","/"):sha256_file(p) for p in root.rglob("*") if p.is_file() and p.name!="manifest.json"}
     code_root=Path(__file__).parents[1]
     code_files=[code_root/"pinyin.py",code_root/"data_contract.py",code_root/"artifacts.py", *sorted(Path(__file__).parent.glob("*.py"))]
@@ -240,11 +202,16 @@ def _write_manifest(root, config, sources, inference):
     write_json(root/"manifest.json", {"bundle_type":"prepared_dataset","schema_version":SCHEMA_VERSION,"dataset_id":config["dataset_id"],
         "data_contract":DATA_CONTRACT_VERSION,"pinyin_contract":PINYIN_CONTRACT_VERSION,"manifest_self_hash":"excluded",
         "artifacts":artifacts,"sources":sources,"code":code,"environment":environment,
-        "model":{**config["model"],"backend":inference["backend"]}})
+        "model":({**config["model"],"backend":inference["backend"]} if "model" in config else
+                 {**acoustic_manifest["model"],"backend":"precomputed","origin_backend":acoustic_manifest["model"].get("backend")}),
+        "acoustic_bundle":({"bundle_id":acoustic_manifest["bundle_id"],"manifest_sha256":config["acoustic_bundle"]["manifest_sha256"]} if acoustic_manifest else None)})
 
 
 def validate_prepared(path: str | Path) -> dict:
     root=Path(path).resolve(); manifest=json.loads((root/"manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("bundle_type")=="prepared_dataset" and manifest.get("schema_version")==2:
+        from .assembly import validate_assembled
+        return validate_assembled(root,manifest)
     if manifest.get("bundle_type")!="prepared_dataset" or manifest.get("schema_version")!=SCHEMA_VERSION or manifest.get("data_contract")!=DATA_CONTRACT_VERSION or manifest.get("pinyin_contract")!=PINYIN_CONTRACT_VERSION:
         raise ValueError("unsupported prepared dataset contract")
     artifacts=manifest.get("artifacts",{})

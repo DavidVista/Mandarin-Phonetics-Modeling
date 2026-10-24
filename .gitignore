@@ -242,3 +242,10 @@ datasets/evaluations/**
 !datasets/evaluations/**/config.json
 !datasets/evaluations/**/coverage.json
 datasets/evaluation-runs/**
+
+# Local source datasets and generated source manifests.
+datasets/source-data/
+
+# Generated corpus processing and assembled dataset bundles.
+datasets/processed-corpus/
+datasets/prepared/
