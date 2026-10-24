@@ -14,8 +14,8 @@ except ImportError as error:
 PROJECT = Path(__file__).resolve().parents[1]
 WORKSPACE = PROJECT.parent
 PREPARE = PROJECT / "notebooks" / "Datasets" / "Evaluation Setup" / "prepare-evaluation.ipynb"
-COMPOSITE = PROJECT / "notebooks" / "Evaluation" / "Geometry" / "geometry-analysis-composite.ipynb"
-STANDALONE = PROJECT / "notebooks" / "Evaluation" / "Geometry" / "geometry-analysis.ipynb"
+COMPOSITE = PROJECT / "notebooks" / "Evaluation" / "geometry-analysis-composite.ipynb"
+STANDALONE = PROJECT / "notebooks" / "Evaluation" / "geometry-analysis.ipynb"
 GENERATOR = WORKSPACE / "meta" / "tools" / "build_evaluation_notebooks.py"
 
 
@@ -33,6 +33,23 @@ def execute_embedded(path):
 
 
 class NotebookTests(unittest.TestCase):
+    def test_checkpoint_paths_match_training_outputs_and_fail_before_execution(self):
+        for path, prefix in ((COMPOSITE, "composite"), (STANDALONE, "standalone")):
+            notebook = json.loads(path.read_text(encoding="utf-8"))
+            config = code(next(cell for cell in notebook["cells"] if cell["id"] == prefix + "-config"))
+            namespace = {"find_project_root": lambda: PROJECT}
+            exec(compile(config, "analysis-config", "exec"), namespace)
+            runs = namespace["RUNS"]
+            self.assertEqual(runs[0]["checkpoint_path"], namespace["RUNS_ROOT"] / "ce_only/seed-42/best.pt")
+            self.assertEqual(runs[1]["checkpoint_path"], namespace["RUNS_ROOT"] / "combined/lambda-1/seed-42/best.pt")
+            self.assertNotIn('"models"', config)
+            run_source = code(next(cell for cell in notebook["cells"] if cell["id"] == prefix + "-run"))
+            namespace["run_evaluation"] = mock.Mock()
+            with mock.patch.object(Path, "is_file", return_value=False):
+                with self.assertRaisesRegex(FileNotFoundError, "Training checkpoints"):
+                    exec(compile(run_source, "analysis-run", "exec"), namespace)
+            namespace["run_evaluation"].assert_not_called()
+
     def test_standalone_cells_execute_without_project_runtime_imports_and_match_composite(self):
         notebook, standalone = execute_embedded(STANDALONE)
         rendered = STANDALONE.read_text(encoding="utf-8")

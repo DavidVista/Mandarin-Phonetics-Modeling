@@ -81,142 +81,65 @@ These structural changes are reflected behaviorally in the homophone probing ben
 
 ## Data & Local Setup
 
-The notebooks were originally authored on Kaggle and have been adapted to run locally against a shared `datasets/` directory at the repository root. Every notebook defines its data root near the top:
+The current workflow uses the supplied DuYu/Pinyin-Hanzi annotations and Chinese Lessons audio. Composite notebooks find the project root automatically and import the shared SDK from `src`. Portable notebooks contain the required implementation and use explicit input/output paths.
 
-```python
-import os
-ROOT_PATH = "../../.."                        # relative depth to the repo root (varies per notebook location)
-DATASETS = os.path.join(ROOT_PATH, "datasets")
-```
-
-All data paths are then built from `DATASETS` (e.g. `f"{DATASETS}/corpus/train.csv"`), so relocating the `datasets/` folder only requires editing `ROOT_PATH`.
+The findings above describe the historical research. Its former notebooks and generated data are retained in Git history; the current notebooks prepare reproducible experiments and DIMSIM evaluations.
 
 ### `datasets/` layout
 
-| Subfolder | Contents | Committed? |
+| Folder | Contents | Storage |
 | :-- | :-- | :-- |
-| `corpus/` | Labeled train/eval sentence corpora (`train.csv`, `eval.csv`) | ✅ |
-| `embeddings/` | Pinyin acoustic embeddings (`pinyin_embeddings*.pkl`) | ✅ |
-| `pinyin-tokens/` | Pinyin token vocabulary (`pinyin.txt`) | ✅ |
-| `wubi/` | Wubi ↔ character dictionaries | ✅ |
-| `sounds/` | Reference `.wav` recordings used to build embeddings | ✅ |
-| `probing/` | Homophone inventory and perturbed-phrase probing sets | ✅ |
-| `models/{lstm,bert}/{aligned,pinyin-aligned,pinyin}/` + `char2pinyin-encoder/`, `pinyin2char-decoder/` | Trained encoder/decoder/pipeline weights (`*.pt`) | ⚙️ generated |
-| `metrics/{lstm,bert}/{variant}/` | Training/evaluation metric dumps (`*.pkl`) | ⚙️ generated |
-| `representations/{lstm,bert}/{variant}/` | Extracted character/aggregated representations (`*.joblib`) | ⚙️ generated |
-| `regression/{lstm,bert}/{variant}/` | Similarity + PCA regression tables (`*.csv`) | ⚙️ generated |
-| `plots/{lstm,bert}/{variant}/` and `plots/embeddings/{base,zh-ch,sounds}/` | Figures (`.png`/`.svg`/`.pdf`) from the regression-analysis notebooks and HTML plots (`.html`) from the embedding-evaluation notebooks; each notebook writes via a `MEDIA_PATH` prefix | ⚙️ generated |
+| `chinese-lessons.zip` | Source archive for local audio extraction | Git |
+| `source-data/` | Local DuYu export, sounds and sound manifests | Ignored |
+| `wubi/` | Character/Wubi dictionaries | Git |
+| `pinyin-embeddings/` | Complete base and zh-cn acoustic bundles | Git |
+| `processed-corpus/` | Filtered and sampled corpus with audit reports | Ignored |
+| `prepared/` | Validated corpus, embeddings and Wubi assembled together | Ignored |
+| `experiments/<experiment_id>/` | Splits, vocabularies and model initialization | Generated; tracked config/manifest exceptions |
+| `runs/<experiment_id>/` | Training checkpoints, metrics and configuration | Ignored |
+| `evaluations/<evaluation_id>/` | Immutable DIMSIM evaluation bundle | Generated; tracked config/manifest/coverage exceptions |
+| `evaluation-runs/` | Representation analysis, metrics and comparisons | Ignored |
 
-> **⚙️ Model weights and other generated artifacts are not committed** — they are produced by running the notebooks. Their directory structure is kept in the repo via `.gitkeep` placeholders (and the contents are git-ignored). Because these paths only appear once the corresponding notebook has been run, a freshly cloned repo will show empty `models/`, `metrics/`, `representations/`, `regression/`, and `plots/` trees.
+Relative paths `corpus/train.csv` and `embeddings/pinyin_embeddings.pkl` remain part of the prepared-bundle contract. They are internal to that bundle.
 
 ### Run order
 
-Downstream notebooks consume the outputs of upstream ones, so they must be run in dependency order. The committed `datasets/` inputs (`corpus/`, `embeddings/`, `wubi/`, `probing/`, `pinyin-tokens/`, `sounds/`) already contain the results of steps 1–2, so a fresh clone can start from **step 3**; run steps 1–2 only to regenerate those inputs from scratch. Within a step, follow the sub-order shown.
+1. Export the pinned DuYu split in `prepare-corpus`. When the local export already exists, skip the export call.
+2. Unpack `chinese-lessons.zip` and build the sound manifest in `prepare-sounds`.
+3. Select an existing validated acoustic bundle, or run the portable/composite `prepare-pinyin-embeddings` notebook with an exact model revision.
+4. Run the local processing section of `prepare-corpus`: normalization, validation, exclusion of conflicting pronunciations, Wubi/audio coverage, deduplication and reproducible sampling. Current sample size is 100,000 rows with seed 42.
+5. Run `prepare-data` to assemble the processed corpus, Wubi and compatible embeddings without modifying their contents.
+6. Run `prepare-experiment` against that prepared bundle to create the train/validation/test splits and initialization.
+7. Train the selected objective: `ce_only`, `combined` or `mse_only`. Keep the experiment ID and seed consistent across comparisons.
+8. Run `prepare-evaluation` for the exact experiment and split, then geometry analysis with matching checkpoints. The evaluation runner checks experiment/checkpoint provenance; old weights must not be substituted for a new corpus.
 
-1. **Datasets — preparation** (order matters within this step):
-   1. `Datasets/Data Preparation/prepare-corpus` → exports the explicitly pinned DuYu split and its supplied labels.
-   2. `Datasets/Data Preparation/prepare-sounds` → optionally packs or unpacks the Chinese Lessons archive in `datasets/source-data/sounds` and builds its audited manifest under `datasets/source-data/sounds-manifest`.
-   3. `Datasets/Data Preparation/prepare-pinyin-embeddings` → runs as a self-contained Kaggle notebook with an embedded, hash-verified SDK snapshot and publishes a portable acoustic bundle. The adjacent `-composite` variant uses a mounted project checkout.
-   4. Return to the local processing section in `prepare-corpus` → normalize the existing export, exclude every row for texts with conflicting pronunciations, apply pinned Wubi and sound-inventory coverage, merge identical duplicates, and sample the survivors.
-   5. `Datasets/Data Preparation/prepare-data` → strictly assembles the processed corpus, Wubi mapping and any acoustic bundle with the identical inventory; it does not transform corpus rows.
-   6. `prepare_experiment` creates train/validation/test splits from the resulting prepared bundle.
-   7. `Datasets/Probing/exact-homophones` → `probing/homophone_inventory.pkl` (reads `corpus/eval.csv`), then `phrase-perturbation` → `probing/exact_homophone_phrases.csv`.
-2. **Tokenization** — `Tokenization/wubi-tokenizer` → builds `wubi/chinese_to_wubi.pkl` and `wubi/wubi_to_chinese.pkl`.
-3. **Training — encoder** → produces `models/{arch}/{variant}/…` encoder weights (reads `corpus/train.csv`, `embeddings/`, and `wubi/` for LSTM).
-4. **Training — decoder** (frozen / full pipeline) → reads the step-3 encoder weights, produces decoder / end-to-end weights.
-5. **Representations Extraction** → reads step-3/4 weights + `corpus/eval.csv`, dumps `representations/{arch}/{variant}/character_records.joblib`.
-6. **Regression Analysis** → reads the step-5 representations, writes `regression/{arch}/{variant}/…csv` and `plots/`.
-7. **Probing** → reads step-3 encoder + step-4 decoder weights + `probing/exact_homophone_phrases.csv`. Note: the character vocabulary (`char2idx`/`idx2char`) is rebuilt from **`corpus/train.csv`** — it must match the corpus the decoder was trained on (step 4) so the output indices and `vocab_size_char` align with the loaded weights; the benchmark itself still runs on the eval-derived perturbation set. Characters absent from the train vocab fall back to `<UNK>`.
+Training writes `datasets/runs/<experiment_id>/<condition>/seed-<seed>/best.pt`; the combined condition additionally uses `lambda-<value>/` before the seed directory. Geometry analysis checks that configured checkpoints exist before starting.
 
-Each variant (`aligned`, `pinyin-aligned`, `pinyin`) for each architecture (`lstm`, `bert`) forms an independent steps 3→7 chain. The results of previous Kaggle runs remain visible in the committed notebook outputs.
+## Notebooks
 
-## Notebooks Structure
+### Data preparation
 
-### Tokenization
-- [wubi-tokenizer.ipynb](notebooks/Tokenization/wubi-tokenizer.ipynb): Notebook for Wubi tokenization implementation and testing [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-tokenizer).
-
-### Datasets
-
-#### Pinyin Embeddings
-- [prepare-pinyin-embeddings.ipynb](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings.ipynb): Self-contained Kaggle full-inventory inference stage with an embedded, hash-verified minimal SDK; no project source mount is required.
-- [prepare-pinyin-embeddings-composite.ipynb](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings-composite.ipynb): Thin guarded variant for environments where the project source tree is mounted.
-- [prepare-sounds.ipynb](notebooks/Datasets/Data%20Preparation/prepare-sounds.ipynb): Local archive packing, unpacking, and audited sound-manifest creation.
-- [mandarin-sounds-dataset.ipynb](notebooks/Datasets/Data%20Preparation/mandarin-sounds-dataset.ipynb): Historical embedding research only. [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-sounds-dataset).
-- [evaluation-of-mandarin-sounds-dataset-base.ipynb](notebooks/Datasets/Pinyin%20Embeddings/evaluation-of-mandarin-sounds-dataset-base.ipynb): Notebook for evaluating the Mandarin sounds dataset using embeddings from the base Wav2Vec model [[Kaggle Link]](https://www.kaggle.com/code/davidvista/evaluation-of-mandarin-sounds-dataset?scriptVersionId=310537595).
-- [evaluation-of-mandarin-sounds-dataset-zh-ch.ipynb](notebooks/Datasets/Pinyin%20Embeddings/evaluation-of-mandarin-sounds-dataset-zh-ch.ipynb): Notebook for evaluating the Mandarin sounds dataset using embeddings from the finetuned Wav2Vec model [[Kaggle Link]](https://www.kaggle.com/code/davidvista/evaluation-of-mandarin-sounds-dataset?scriptVersionId=310537423).
-
-#### Pinyin Labeling
-The former model-based labeling notebooks were removed from the active workflow. Their historical versions remain available through Git history; the current path exports DuYu's supplied labels directly from a pinned revision. Historical column names such as `我们试试看！` and `wo3 men shi4 shi4 kan4 ！` are examples only and must be verified against that revision before export.
-
-#### Probing
-- [exact-homophones.ipynb](notebooks/Datasets/Probing/exact-homophones.ipynb): Notebook for sampling characters sharing exact pinyin (homophones) from the corpus with counting and filtering with minimal frequency threshold [[Kaggle Link]](https://www.kaggle.com/code/davidvista/exact-homophones).
-- [phrase-perturbation.ipynb](notebooks/Datasets/Probing/phrase-perturbation.ipynb): Notebook for collecting frequent bigrams (word-level parsing `jieba`) and random perturbation of character with a homophone substitute. A perturbed pair itself should infrequent in corpus to evaluate direct copy rate caused by character identity leakage [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phrase-perturbation).
+- [prepare-corpus.ipynb](notebooks/Datasets/Data%20Preparation/prepare-corpus.ipynb): pinned DuYu export and local corpus processing.
+- [prepare-sounds.ipynb](notebooks/Datasets/Data%20Preparation/prepare-sounds.ipynb): archive extraction and audited sound manifest.
+- [prepare-pinyin-embeddings.ipynb](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings.ipynb): portable acoustic inference; [Kaggle inference](https://www.kaggle.com/code/davidvista/wav2vec2-embeddings-v1).
+- [prepare-pinyin-embeddings-composite.ipynb](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings-composite.ipynb): acoustic inference using the local SDK.
+- [prepare-data.ipynb](notebooks/Datasets/Data%20Preparation/prepare-data.ipynb): strict artifact assembly.
+- [prepare-experiment.ipynb](notebooks/Datasets/Experiment%20Setup/prepare-experiment.ipynb): experiment splits and initialization.
+- [prepare-evaluation.ipynb](notebooks/Datasets/Evaluation%20Setup/prepare-evaluation.ipynb): pinned DIMSIM evaluation inputs.
 
 ### Training
 
-#### Pinyin Encoder (LSTM)
-- [wubi-tokenizer-mandarin-encoder.ipynb](notebooks/Training/LSTM/Pinyin%20Model/wubi-tokenizer-mandarin-encoder.ipynb): Training of Mandarin encoder with Wubi tokenizer using pinyin objective [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-tokenizer-mandarin-encoder).
-- [wubi-tokenizer-mandarin-frozen-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Model/wubi-tokenizer-mandarin-frozen-pipeline.ipynb): Frozen encoder training pipeline (decoder is trained only) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-tokenizer-mandarin-frozen-pipeline).
-- [wubi-tokenizer-mandarin-full-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Model/wubi-tokenizer-mandarin-full-pipeline.ipynb): Complete training pipeline for Mandarin encoder with Wubi tokenizer [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-tokenizer-mandarin-full-pipeline).
-- [wubi-tokenizer-scratch-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Model/wubi-tokenizer-scratch-pipeline.ipynb): Training pipeline for Wubi tokenizer from scratch (both encoder and decoder) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-tokenizer-scratch-pipeline).
+Each objective has a portable notebook and a composite notebook importing the local SDK.
 
-#### Pinyin Aligned Encoder (LSTM)
-- [phonetic-aware-representaions-learning.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-representaions-learning.ipynb): Training of Mandarin encoder with Wubi tokenizer and acoustic alignment [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phonetic-aware-representaions-learning).
-- [phonetic-aware-frozen-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-frozen-pipeline.ipynb): Frozen encoder training pipeline (decoder is trained only) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phonetic-aware-frozen-pipeline).
-- [phonetic-aware-frozen-pipeline-unstable-encoder.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-frozen-pipeline-unstable-encoder.ipynb): Frozen encoder training pipeline (decoder is trained only, training of encoder was not stable due to small alignment pressure). This notebook is used for contrasting the effect of proper alignment [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phonetic-aware-frozen-pipeline-unstable-encoder).
-- [phonetic-aware-full-pipeline.ipynb](notebooks/Training/LSTM/Pinyin%20Aligned%20Model/phonetic-aware-full-pipeline.ipynb): Complete training pipeline for phonetic-aware encoder (decoder and stable trained encoder) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phonetic-aware-full-pipeline).
+| Objective | Portable | Composite |
+| :-- | :-- | :-- |
+| Pinyin prediction | [Pinyin Model](notebooks/Training/Pinyin%20Model/wubi-tokenizer-mandarin-encoder.ipynb) | [Composite](notebooks/Training/Pinyin%20Model/wubi-tokenizer-mandarin-encoder-composite.ipynb) |
+| Combined prediction and alignment | [Pinyin Aligned Model](notebooks/Training/Pinyin%20Aligned%20Model/phonetic-aware-representaions-learning.ipynb) | [Composite](notebooks/Training/Pinyin%20Aligned%20Model/phonetic-aware-representaions-learning-composite.ipynb) |
+| Acoustic alignment | [Aligned Model](notebooks/Training/Aligned%20Model/pure-phonetic-encoder.ipynb) | [Composite](notebooks/Training/Aligned%20Model/pure-phonetic-encoder-composite.ipynb) |
 
-#### Aligned Encoder (LSTM)
-- [pure-phonetic-encoder.ipynb](notebooks/Training/LSTM/Aligned%20Model/pure-phonetic-encoder.ipynb): Training of Mandarin encoder with Wubi tokenizer using alignment only [[Kaggle Link]](https://www.kaggle.com/code/davidvista/pure-phonetic-encoder).
-- [pure-phonetic-frozen-pipeline.ipynb](notebooks/Training/LSTM/Aligned%20Model/pure-phonetic-frozen-pipeline.ipynb): Frozen encoder training pipeline (decoder is trained only) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/pure-phonetic-frozen-pipeline).
-- [pure-phonetic-full-pipeline.ipynb](notebooks/Training/LSTM/Aligned%20Model/pure-phonetic-full-pipeline.ipynb): Complete training pipeline for Mandarin encoder with Wubi tokenizer [[Kaggle Link]](https://www.kaggle.com/code/davidvista/pure-phonetic-full-pipeline).
+### Evaluation and utilities
 
-#### Pinyin Encoder (BERT)
-- [pinyin-bert-encoder.ipynb](notebooks/Training/BERT/Pinyin%20Model/pinyin-bert-encoder.ipynb): Training of Mandarin encoder based on BERT using pinyin objective only [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phonetic-bert?scriptVersionId=317433217).
-- [frozen-pinyin-bert-decoder-pipeline.ipynb](notebooks/Training/BERT/Pinyin%20Model/frozen-pinyin-bert-decoder-pipeline.ipynb): Frozen encoder training pipeline (decoder is trained only) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/frozen-bert-decoder-pipeline?scriptVersionId=317889620).
-
-#### Pinyin Aligned Encoder (BERT)
-- [pinyin-aligned-bert-encoder.ipynb](notebooks/Training/BERT/Pinyin%20Aligned%20Model/pinyin-aligned-bert-encoder.ipynb): Training of Mandarin encoder based on BERT using alignment and pinyin objective [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phonetic-bert?scriptVersionId=316276525).
-- [frozen-pinyin-aligned-bert-decoder-pipeline.ipynb](notebooks/Training/BERT/Pinyin%20Aligned%20Model/frozen-pinyin-aligned-bert-decoder-pipeline.ipynb): Frozen encoder training pipeline (decoder is trained only) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/frozen-bert-decoder-pipeline?scriptVersionId=316532205).
-
-#### Aligned Encoder (BERT)
-- [aligned-bert-encoder.ipynb](notebooks/Training/BERT/Aligned%20Model/aligned-bert-encoder.ipynb): Training of Mandarin encoder based on BERT using alignment only [[Kaggle Link]](https://www.kaggle.com/code/davidvista/phonetic-bert?scriptVersionId=321337105).
-- [frozen-aligned-bert-decoder-pipeline.ipynb](notebooks/Training/BERT/Aligned%20Model/frozen-aligned-bert-decoder-pipeline.ipynb): Frozen encoder training pipeline (decoder is trained only) [[Kaggle Link]](https://www.kaggle.com/code/davidvista/frozen-bert-alignment-only-decoder-pipeline).
-
-### Extracting Representations
-Extraction of context-averaged and context-aware representations for phonetic similarity analysis. Each notebook provides the data about characters in a given sentence from the evaluation corpus: hidden state, pinyin embedding, semantic embedding (BERT), decomposed pinyin, and Wubi tokens.
-
-#### LSTM Models
-- [pinyin-lstm-representations.ipynb](notebooks/Representations%20Extraction/LSTM/pinyin-lstm-representations.ipynb): representations of pinyin encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/context-level-representations?scriptVersionId=311539784).
-- [pinyin-aligned-lstm-representations.ipynb](notebooks/Representations%20Extraction/LSTM/pinyin-aligned-lstm-representations.ipynb): representations of pinyin-aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/context-level-representations?scriptVersionId=311513911).
-- [aligned-lstm-representations.ipynb](notebooks/Representations%20Extraction/LSTM/aligned-lstm-representations.ipynb): representations of aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/context-level-representations?scriptVersionId=316819489).
-
-#### BERT Models
-- [pinyin-bert-representations.ipynb](notebooks/Representations%20Extraction/BERT/pinyin-bert-representations.ipynb): representations of pinyin encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/context-level-representations?scriptVersionId=320799942).
-- [pinyin-aligned-bert-representations.ipynb](notebooks/Representations%20Extraction/BERT/pinyin-aligned-bert-representations.ipynb): representations of pinyin-aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/context-level-representations?scriptVersionId=316838929).
-- [aligned-bert-representations.ipynb](notebooks/Representations%20Extraction/BERT/aligned-bert-representations.ipynb): representations of aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/context-level-representations?scriptVersionId=322061408).
-
-### Regression Analysis
-
-#### LSTM Models
-- [lstm-pinyin-encoder-analysis.ipynb](notebooks/Regression%20Analysis/LSTM/lstm-pinyin-encoder-analysis.ipynb): analysis of pinyin encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322529379).
-- [lstm-pinyin-aligned-encoder-analysis.ipynb](notebooks/Regression%20Analysis/LSTM/lstm-pinyin-aligned-encoder-analysis.ipynb): analysis of pinyin-aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322528751).
-- [lstm-aligned-encoder-analysis.ipynb](notebooks/Regression%20Analysis/LSTM/lstm-aligned-encoder-analysis.ipynb): analysis of aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322529543).
-
-#### BERT Models
-- [bert-pinyin-encoder-analysis.ipynb](notebooks/Regression%20Analysis/BERT/bert-pinyin-encoder-analysis.ipynb): analysis of pinyin encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322530951).
-- [bert-pinyin-aligned-encoder-analysis.ipynb](notebooks/Regression%20Analysis/BERT/bert-pinyin-aligned-encoder-analysis.ipynb): analysis of pinyin-aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322530094).
-- [bert-aligned-encoder-analysis.ipynb](notebooks/Regression%20Analysis/BERT/bert-aligned-encoder-analysis.ipynb): analysis of aligned encoder [[Kaggle Link]](https://www.kaggle.com/code/davidvista/mandarin-regression-analysis?scriptVersionId=322067531).
-
-### Probing
-Evaluation of trained decoders on the probing dataset. Each perturbed bigram is passed through the respective encoder, and the hidden states of the encoder are fed into the respective decoder that predicts a probable output (greedy, top-k). The result is compared with the input to identify the copy and restore rates.
-
-#### LSTM Models
-- [pinyin-lstm-decoder-benchmarking.ipynb](notebooks/Probing/LSTM/pinyin-lstm-decoder-benchmarking.ipynb): results of pinyin pipeline [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-based-decoder-benchmarking?scriptVersionId=324435767).
-- [pinyin-aligned-lstm-decoder-benchmarking.ipynb](notebooks/Probing/LSTM/pinyin-aligned-lstm-decoder-benchmarking.ipynb): results of pinyin-aligned pipeline [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-based-decoder-benchmarking?scriptVersionId=324461905).
-- [aligned-lstm-decoder-benchmarking.ipynb](notebooks/Probing/LSTM/aligned-lstm-decoder-benchmarking.ipynb): results of aligned pipeline [[Kaggle Link]](https://www.kaggle.com/code/davidvista/wubi-based-decoder-benchmarking?scriptVersionId=324463259).
-
-#### BERT Models
-- [pinyin-bert-decoder-benchmarking.ipynb](notebooks/Probing/BERT/pinyin-bert-decoder-benchmarking.ipynb): results of pinyin pipeline [[Kaggle Link]](https://www.kaggle.com/code/davidvista/bert-based-decoder-benchmarking?scriptVersionId=324474723).
-- [pinyin-aligned-bert-decoder-benchmarking.ipynb](notebooks/Probing/BERT/pinyin-aligned-bert-decoder-benchmarking.ipynb): results of pinyin-aligned pipeline [[Kaggle Link]](https://www.kaggle.com/code/davidvista/bert-based-decoder-benchmarking?scriptVersionId=324480864).
-- [aligned-bert-decoder-benchmarking.ipynb](notebooks/Probing/BERT/aligned-bert-decoder-benchmarking.ipynb): results of aligned pipeline [[Kaggle Link]](https://www.kaggle.com/code/davidvista/bert-based-decoder-benchmarking?scriptVersionId=324476349).
+- [geometry-analysis.ipynb](notebooks/Evaluation/geometry-analysis.ipynb): portable geometry evaluation.
+- [geometry-analysis-composite.ipynb](notebooks/Evaluation/geometry-analysis-composite.ipynb): geometry evaluation using the local SDK.
+- [dimsim-distribution-analysis.ipynb](notebooks/DIMSIM/dimsim-distribution-analysis.ipynb): DIMSIM distance distribution analysis.
+- [wubi-tokenizer.ipynb](notebooks/Tokenization/wubi-tokenizer.ipynb): Wubi dictionary construction and inspection.

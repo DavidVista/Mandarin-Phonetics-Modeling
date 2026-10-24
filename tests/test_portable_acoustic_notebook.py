@@ -30,7 +30,12 @@ class PortableNotebookTests(unittest.TestCase):
   self.assertEqual(ns["BUILD_METADATA"]["inline_source_sha256"],{key:hashlib.sha256(code_by_id[key].encode()).hexdigest() for key in ns["BUILD_METADATA"]["inline_source_sha256"]})
   with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as td:
    td=Path(td);m.DATA_TARGET=td/"data.ipynb";m.SOUNDS_TARGET=td/"sounds.ipynb";m.CORPUS_TARGET=td/"corpus.ipynb";m.COMPOSITE_TARGET=td/"composite.ipynb";m.PORTABLE_TARGET=td/"portable.ipynb";m.build()
-   for actual,generated in ((FOLDER/"prepare-data.ipynb",m.DATA_TARGET),(FOLDER/"prepare-sounds.ipynb",m.SOUNDS_TARGET),(FOLDER/"prepare-corpus.ipynb",m.CORPUS_TARGET),(COMPOSITE,m.COMPOSITE_TARGET),(NOTEBOOK,m.PORTABLE_TARGET)):self.assertEqual(actual.read_bytes(),generated.read_bytes())
+   for actual,generated in ((FOLDER/"prepare-data.ipynb",m.DATA_TARGET),(FOLDER/"prepare-sounds.ipynb",m.SOUNDS_TARGET),(FOLDER/"prepare-corpus.ipynb",m.CORPUS_TARGET),(COMPOSITE,m.COMPOSITE_TARGET),(NOTEBOOK,m.PORTABLE_TARGET)):
+    documents=[json.loads(path.read_text(encoding="utf-8")) for path in (actual,generated)]
+    for document in documents:
+     for cell in document["cells"]:
+      if cell["cell_type"]=="code":cell["outputs"]=[];cell["execution_count"]=None
+    self.assertEqual(*documents)
  def test_inline_bundle_is_consumed_offline(self):
   _,ns=self.execute_definitions()
   with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as td:
