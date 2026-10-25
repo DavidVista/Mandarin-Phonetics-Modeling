@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ..artifacts import read_jsonl, safe_artifact, sha256_file, write_json, write_jsonl
 from ..data_contract import DATA_CONTRACT_VERSION, FILTERS, pair_reason, sample_id, validate_acoustic, validate_wubi
-from ..pinyin import PINYIN_CONTRACT_VERSION, decompose
+from ..pinyin import PARSER_PROVENANCE, PINYIN_CONTRACT_VERSION, decompose, validate_canonical_label
 from .config import SCHEMA_VERSION, validate_config
 from .acoustic_bundle import load_acoustic_bundle
 from .embeddings import embed_inventory
@@ -200,7 +200,7 @@ def _write_manifest(root, config, sources, inference, acoustic_manifest=None):
         import torch; environment["torch"] = torch.__version__
     except ImportError: pass
     write_json(root/"manifest.json", {"bundle_type":"prepared_dataset","schema_version":SCHEMA_VERSION,"dataset_id":config["dataset_id"],
-        "data_contract":DATA_CONTRACT_VERSION,"pinyin_contract":PINYIN_CONTRACT_VERSION,"manifest_self_hash":"excluded",
+        "data_contract":DATA_CONTRACT_VERSION,"pinyin_contract":PINYIN_CONTRACT_VERSION,"parser_provenance":PARSER_PROVENANCE,"manifest_self_hash":"excluded",
         "artifacts":artifacts,"sources":sources,"code":code,"environment":environment,
         "model":({**config["model"],"backend":inference["backend"]} if "model" in config else
                  {**acoustic_manifest["model"],"backend":"precomputed","origin_backend":acoustic_manifest["model"].get("backend")}),
@@ -212,7 +212,7 @@ def validate_prepared(path: str | Path) -> dict:
     if manifest.get("bundle_type")=="prepared_dataset" and manifest.get("schema_version")==2:
         from .assembly import validate_assembled
         return validate_assembled(root,manifest)
-    if manifest.get("bundle_type")!="prepared_dataset" or manifest.get("schema_version")!=SCHEMA_VERSION or manifest.get("data_contract")!=DATA_CONTRACT_VERSION or manifest.get("pinyin_contract")!=PINYIN_CONTRACT_VERSION:
+    if manifest.get("bundle_type")!="prepared_dataset" or manifest.get("schema_version")!=SCHEMA_VERSION or manifest.get("data_contract")!=DATA_CONTRACT_VERSION or manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE:
         raise ValueError("unsupported prepared dataset contract")
     artifacts=manifest.get("artifacts",{})
     if not REQUIRED.issubset(artifacts): raise ValueError("manifest is missing required prepared artifacts")
@@ -227,7 +227,7 @@ def validate_prepared(path: str | Path) -> dict:
         raise ValueError("invalid run statistics identity/status")
     if stats.get("config_sha256") != sha256_file(root/"config.json"): raise ValueError("run statistics config hash mismatch")
     if len({row.get("label") for row in inventory}) != len(inventory): raise ValueError("duplicate inventory labels")
-    for row in inventory: decompose(row.get("label"))
+    for row in inventory: decompose(validate_canonical_label(row.get("label")))
     with (root/"wubi/chinese_to_wubi.pkl").open("rb") as h: wubi=validate_wubi(pickle.load(h),alphabet=config["wubi"].get("alphabet","abcdefghijklmnopqrstuvwxyz0123456789"))
     with (root/"embeddings/pinyin_embeddings.pkl").open("rb") as h: acoustic=pickle.load(h)
     validate_acoustic(acoustic,expected_keys=[r["label"] for r in inventory])

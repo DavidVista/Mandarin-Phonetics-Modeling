@@ -18,12 +18,12 @@ from torch.utils.data import DataLoader, Dataset
 
 from .model import build_encoder
 from .reproducibility import make_generator, seed_everything
-from .pinyin import INITIALS, FINALS, TONES, ZERO_INITIAL, _canonical_labels, _decompose
+from .pinyin import INITIALS, FINALS, TONES, PINYIN_CONTRACT_VERSION, PARSER_PROVENANCE, canonical_labels, decompose, validate_canonical_label
 from .data_contract import pair_reason, sample_id
 from .artifacts import sha256_file
 from .preparation import validate_prepared
 
-PREPARATION_VERSION = "2"
+PREPARATION_VERSION = "3"
 
 
 def _sha(path: Path) -> str:
@@ -103,20 +103,27 @@ def prepare_experiment(experiment_id: str, *, datasets_root: str | Path, output_
             pinyin_value = row.get("pinyin")
             text = text_value if isinstance(text_value, str) else ""
             raw = pinyin_value.split() if isinstance(pinyin_value, str) else []
-            canonical = _canonical_labels(raw) if raw else []
+            try:
+                canonical = canonical_labels(raw, tone_convention="explicit" if prepared_manifest is not None else "neutral_unmarked") if raw else []
+            except (ValueError, TypeError, IndexError):
+                canonical = []
+                normalization_failed = bool(raw)
+            else:
+                normalization_failed = False
             reason = None
             if prepared_manifest is not None:
                 reason = pair_reason(text, canonical, valid_wubi, acoustic)
                 if reason: raise ValueError(f"prepared row {row_number} rejected by common contract: {reason}")
                 if text in seen: raise ValueError(f"duplicate text in prepared dataset at rows {seen[text][0]} and {row_number}")
-                components = [_decompose(x) for x in canonical]
+                components = [decompose(x) for x in canonical]
             elif not text or not raw: reason = "invalid_row"
+            elif normalization_failed: reason = "invalid_decomposition"
             elif len(text) != len(raw): reason = "length_mismatch"
             elif text in seen and seen[text][1] != canonical: raise ValueError(f"conflicting labels for duplicate text at rows {seen[text][0]} and {row_number}")
             elif text in seen: reason = "duplicate_text"
             elif any(ch not in valid_wubi for ch in text): reason = "invalid_wubi_mapping"
             else:
-                try: components = [_decompose(x) for x in canonical]
+                try: components = [decompose(x) for x in canonical]
                 except ValueError: reason = "invalid_decomposition"
                 if reason is None and any(x not in acoustic_ids for x in canonical): reason = "missing_acoustic_coverage"
             if reason:
@@ -157,6 +164,7 @@ def prepare_experiment(experiment_id: str, *, datasets_root: str | Path, output_
         code_files = [Path(__file__), Path(__file__).with_name("model.py"), Path(__file__).with_name("reproducibility.py"),
                       Path(__file__).with_name("pinyin.py"), Path(__file__).with_name("data_contract.py")]
         manifest = {"schema_version": 1, "experiment_id": experiment_id, "preparation_version": PREPARATION_VERSION,
+                    "pinyin_contract": PINYIN_CONTRACT_VERSION, "parser_provenance": PARSER_PROVENANCE,
                     "code": {p.name: _sha(p) for p in code_files},
                     "environment": {"python": platform.python_version(), "torch": torch.__version__, "numpy": np.__version__},
                     "sources": {k: {"path": str(v), "sha256": source_hashes[k]} for k,v in sources.items()},
@@ -195,6 +203,8 @@ def load_experiment(path: str | Path) -> dict:
     root = Path(path).resolve(); manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("schema_version") != 1 or manifest.get("preparation_version") != PREPARATION_VERSION:
         raise ValueError("unsupported manifest schema/preparation version")
+    if manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE:
+        raise ValueError("unsupported Pinyin parser contract")
     required = {"samples.jsonl", "vocab.json", "wubi_mapping.pkl", "splits.json", "config.json", "acoustic_targets.pt"}
     required |= {f"initialization/seed-{seed}.pt" for seed in manifest.get("counts", {}).get("seeds", [42])}
     if not required.issubset(manifest.get("artifacts", {})):
@@ -204,6 +214,8 @@ def load_experiment(path: str | Path) -> dict:
         if root not in artifact.parents: raise ValueError(f"unsafe artifact path: {relative}")
         if not artifact.is_file() or _sha(artifact) != digest: raise ValueError(f"artifact checksum mismatch: {relative}")
     config = json.loads((root / "config.json").read_text(encoding="utf-8")); vocab = json.loads((root / "vocab.json").read_text(encoding="utf-8")); splits = json.loads((root / "splits.json").read_text(encoding="utf-8"))
+    if vocab.get("labels") != {"initials": INITIALS, "finals": FINALS, "tones": TONES}:
+        raise ValueError("experiment component vocabulary violates Pinyin contract")
     with (root / "wubi_mapping.pkl").open("rb") as handle: wubi = pickle.load(handle)
     if config.get("schema_version") != 1 or config.get("seeds") != [42] or config.get("split_seed") != 42 or config.get("split_ratios") != [0.8, 0.1, 0.1] or config.get("training", {}).get("epochs") != 20:
         raise ValueError("config violates fixed experiment protocol")
@@ -229,7 +241,7 @@ def load_experiment(path: str | Path) -> dict:
         if spans[0][0] != 0 or spans[-1][1] != len(sample["token_ids"]) or any(a >= b or (i and a != spans[i-1][1]) for i,(a,b) in enumerate(spans)): raise ValueError("invalid character spans")
         encoded, encoded_spans = _encode(sample["text"], wubi, {v:i for i,v in enumerate(vocab["wubi_tokens"])})
         if encoded != sample["token_ids"] or encoded_spans != spans: raise ValueError("text encoding disagrees with bundled Wubi mapping")
-        expected_components = [list(_decompose(vocab["acoustic_tokens"][i])) for i in sample["acoustic_ids"]]
+        expected_components = [list(decompose(validate_canonical_label(vocab["acoustic_tokens"][i]))) for i in sample["acoustic_ids"]]
         if sample["component_labels"] != expected_components: raise ValueError("component labels disagree with acoustic labels")
     train_chars = sorted({ch for sid in splits["train"] for ch in by_id[sid]["text"]})
     if vocab["char_tokens"] != ["[PAD]", "[UNK]", *train_chars]: raise ValueError("character vocabulary is not exactly train-derived")

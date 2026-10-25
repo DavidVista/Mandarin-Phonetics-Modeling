@@ -20,6 +20,7 @@ sys.modules.setdefault("phonetics", phonetics_package)
 sys.modules.setdefault("phonetics.evaluation", evaluation_package)
 
 bundle_module = importlib.import_module("phonetics.evaluation.bundle")
+pinyin_module = importlib.import_module("phonetics.pinyin")
 sampling_module = importlib.import_module("phonetics.evaluation.sampling")
 load_evaluation_bundle = bundle_module.load_evaluation_bundle
 prepare_evaluation_bundle = bundle_module.prepare_evaluation_bundle
@@ -62,7 +63,7 @@ class EvaluationBundleTests(unittest.TestCase):
         (experiment / "vocab.json").write_text(json.dumps(vocab), encoding="utf-8")
         (experiment / "config.json").write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
         artifacts = {name: sha(experiment / name) for name in ("samples.jsonl", "splits.json", "vocab.json", "config.json")}
-        (experiment / "manifest.json").write_text(json.dumps({"experiment_id": "synthetic", "artifacts": artifacts}), encoding="utf-8")
+        (experiment / "manifest.json").write_text(json.dumps({"experiment_id": "synthetic", "artifacts": artifacts, "pinyin_contract": pinyin_module.PINYIN_CONTRACT_VERSION, "parser_provenance": pinyin_module.PARSER_PROVENANCE}), encoding="utf-8")
         return experiment
 
     def test_bundle_ids_groups_pairs_and_tamper_rejection(self):
@@ -96,6 +97,29 @@ class EvaluationBundleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 load_evaluation_bundle(bundle_path)
 
+    def test_source_rejects_missing_contract_and_forged_components(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+            root = Path(temporary)
+            experiment = self.make_experiment(root)
+            manifest_path = experiment / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            del manifest["pinyin_contract"]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Pinyin contract"):
+                prepare_evaluation_bundle("old", experiment_path=experiment, output_root=root / "out",
+                    distance_fn=lambda _left, _right: 0.0, metric_provenance={"metric_name":"synthetic"}, code_provenance={"test":"0" * 64})
+
+            manifest["pinyin_contract"] = pinyin_module.PINYIN_CONTRACT_VERSION
+            samples_path = experiment / "samples.jsonl"
+            rows = [json.loads(line) for line in samples_path.read_text(encoding="utf-8").splitlines()]
+            rows[0]["component_labels"][0] = [1, 0, 0]
+            samples_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+            manifest["artifacts"]["samples.jsonl"] = sha(samples_path)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "component labels disagree"):
+                prepare_evaluation_bundle("forged", experiment_path=experiment, output_root=root / "out",
+                    distance_fn=lambda _left, _right: 0.0, metric_provenance={"metric_name":"synthetic"}, code_provenance={"test":"0" * 64})
+
     def test_invalid_distance_is_retained(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
             root = Path(temporary)
@@ -126,7 +150,7 @@ class EvaluationBundleTests(unittest.TestCase):
         (experiment / "vocab.json").write_text(json.dumps(vocab), encoding="utf-8")
         (experiment / "config.json").write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
         artifacts = {name: sha(experiment / name) for name in ("samples.jsonl", "splits.json", "vocab.json", "config.json")}
-        (experiment / "manifest.json").write_text(json.dumps({"experiment_id": "synthetic", "artifacts": artifacts}), encoding="utf-8")
+        (experiment / "manifest.json").write_text(json.dumps({"experiment_id": "synthetic", "artifacts": artifacts, "pinyin_contract": pinyin_module.PINYIN_CONTRACT_VERSION, "parser_provenance": pinyin_module.PARSER_PROVENANCE}), encoding="utf-8")
         return experiment
 
     def test_nonzero_policy_preserves_context_and_samples_only_eligible_population(self):
@@ -311,6 +335,52 @@ class EvaluationBundleTests(unittest.TestCase):
             manifest["artifacts"]["occurrences.jsonl"] = sha(occurrence_path); manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "initial metadata must be strings"):
                 load_evaluation_bundle(path)
+
+
+    def _tampered_bundle(self, temporary, relative, mutate):
+        root = Path(temporary)
+        path = prepare_evaluation_bundle(
+            "fixture", experiment_path=self.make_experiment(root), output_root=root / "out",
+            contextual_pair_count=1, character_pair_count=1,
+            distance_fn=lambda _left, _right: 0.0,
+            metric_provenance={"metric_name": "synthetic"}, code_provenance={"test": "0" * 64})
+        artifact = path / relative
+        rows = [json.loads(line) for line in artifact.read_text(encoding="utf-8").splitlines()]
+        mutate(rows)
+        artifact.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        manifest_path = path / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["artifacts"][relative] = sha(artifact)
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return path
+
+    def test_loader_rejects_checksum_consistent_labels_and_components(self):
+        for relative in ("occurrences.jsonl", "groups.jsonl"):
+            for update in ({"pinyin": "lu:", "final": "FORGED"}, {"pinyin": "ma"},
+                           {"final": "FORGED"}, {"tone": "5"}):
+                with self.subTest(relative=relative, update=update), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+                    path = self._tampered_bundle(temporary, relative, lambda rows: rows[0].update(update))
+                    with self.assertRaises(ValueError): load_evaluation_bundle(path)
+
+    def test_loader_rejects_checksum_consistent_group_inconsistency(self):
+        updates = ({"pinyin": "ba1", "initial": "b", "final": "a", "tone": "1"},
+                   {"keys": ["FORGED"]}, {"occurrence_count": 999})
+        for update in updates:
+            with self.subTest(update=update), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+                def mutate(rows):
+                    row = next(row for row in rows if row["pinyin"] == "ma1")
+                    row.update(update)
+                path = self._tampered_bundle(temporary, "groups.jsonl", mutate)
+                with self.assertRaisesRegex(ValueError, "group metadata"):
+                    load_evaluation_bundle(path)
+
+    def test_loader_rejects_checksum_consistent_pair_metadata(self):
+        for update in ({"left_pinyin": "lu:"}, {"equal_final": False}, {"overlap_mask": "FORGED"}):
+            with self.subTest(update=update), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+                path = self._tampered_bundle(temporary, "pairs/contextual.jsonl", lambda rows: rows[0].update(update))
+                with self.assertRaisesRegex(ValueError, "pair"):
+                    load_evaluation_bundle(path)
+
 
 
 if __name__ == "__main__":

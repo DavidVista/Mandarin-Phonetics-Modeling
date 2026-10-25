@@ -14,14 +14,14 @@ contract = importlib.import_module("phonetics.data_contract")
 
 
 class DataContractTests(unittest.TestCase):
-    def test_historical_components_and_no_spelling_guess(self):
+    def test_strict_components_and_no_spelling_guess(self):
         self.assertEqual(pinyin.canonical_labels(["de", "ma1"]), ["de5", "ma1"])
         for token, components in {"ai4": ("", "ai", "4"), "qu2": ("q", "v", "2"),
                                   "gu1": ("g", "u", "1"), "yuan2": ("", "van", "2")}.items():
             indexes = pinyin.decompose(token)
             self.assertEqual(tuple(values[index] for values, index in
                                    zip((pinyin.INITIALS, pinyin.FINALS, pinyin.TONES), indexes)), components)
-        for invalid in ("MA1", "nü3", "ma0", "bad9"):
+        for invalid in ("ma0", "bad9", "abc1"):
             with self.assertRaises(ValueError):
                 pinyin.decompose(invalid)
         with self.assertRaises(ValueError):

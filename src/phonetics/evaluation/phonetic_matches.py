@@ -12,6 +12,8 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from ..pinyin import FINALS
+
 
 def _pairs(values: Iterable[tuple[str, str]]) -> frozenset[frozenset[str]]:
     return frozenset(frozenset(pair) for pair in values)
@@ -29,17 +31,16 @@ INITIAL_SENSITIVITY_RELATIONS = {
 FINAL_RELATIONS = {
     "nasal_coda": _pairs((("an", "ang"), ("en", "eng"), ("in", "ing"), ("uan", "uang"))),
     # These involve real frontness/rounding changes; "near" does not mean identical.
-    "frontness_rounding": _pairs((("i", "ü"), ("ie", "üe"), ("ian", "üan"), ("in", "ün"))),
-    "apical_place": _pairs((("apical_dental", "apical_postalveolar"),)),
+    "frontness_rounding": _pairs((("i", "v"), ("ie", "ve"), ("ian", "van"), ("in", "vn"))),
 }
 FINAL_EXTENDED_RELATIONS = {
     "glide_or_rime_extension": _pairs(
         (("a", "ia"), ("a", "ua"), ("ai", "uai"), ("an", "ian"), ("an", "uan"),
-         ("ang", "iang"), ("ang", "uang"), ("ao", "iao"), ("e", "ie"), ("e", "üe"),
-         ("en", "in"), ("en", "uen"), ("en", "ün"), ("eng", "ing"), ("eng", "ong"),
+         ("ang", "iang"), ("ang", "uang"), ("ao", "iao"), ("e", "ie"), ("e", "ve"),
+         ("en", "in"), ("en", "uen"), ("en", "vn"), ("eng", "ing"), ("eng", "ong"),
          ("i", "ia"), ("i", "ie"), ("in", "ian"), ("ing", "iang"), ("ing", "iong"),
-         ("o", "uo"), ("ou", "iou"), ("u", "ua"), ("u", "uo"), ("uan", "üan"),
-         ("uen", "ün"), ("u", "ü"))
+         ("o", "uo"), ("ou", "iou"), ("u", "ua"), ("u", "uo"), ("uan", "van"),
+         ("uen", "vn"), ("u", "v"))
     ),
 }
 
@@ -58,27 +59,14 @@ COMPONENT_INVENTORY = (
     + _inventory_rows("final", "core", FINAL_RELATIONS,
                       "Explicit nasal, rounding/frontness, or apical-place contrast; real vowel effects remain.")
     + _inventory_rows("final", "extended", FINAL_EXTENDED_RELATIONS,
-                      "Broader glide/rime sensitivity relation; u–ü is extension-only.")
+                      "Broader glide/rime sensitivity relation; u–v is extension-only.")
 )
 
-_ALIASES = {"ui": "uei", "iu": "iou", "un": "uen", "v": "ü", "van": "üan", "ve": "üe", "vn": "ün"}
-_DENTAL = frozenset(("z", "c", "s"))
-_POSTALVEOLAR = frozenset(("zh", "ch", "sh", "r"))
-_PALATAL = frozenset(("j", "q", "x"))
-
-
-def normalize_final(initial: Any, final: Any) -> str:
-    """Return a robust canonical final, preserving contextual apical ``i``."""
-    ini = str(initial).strip().lower()
-    raw = str(final).strip().lower().replace("u:", "ü")
-    if raw == "i" and ini in _DENTAL:
-        return "apical_dental"
-    if raw == "i" and ini in _POSTALVEOLAR:
-        return "apical_postalveolar"
-    canonical = _ALIASES.get(raw, raw)
-    if ini in _PALATAL:
-        canonical = {"u": "ü", "uan": "üan", "uen": "ün", "ue": "üe"}.get(canonical, canonical)
-    return canonical
+def canonical_final(final: Any) -> str:
+    """Validate a final already produced by the common strict parser."""
+    if not isinstance(final, str) or final not in FINALS:
+        raise ValueError(f"expected canonical strict final: {final!r}")
+    return final
 
 
 def _relation(a: str, b: str, relations: dict[str, frozenset[frozenset[str]]]) -> str:
@@ -101,8 +89,8 @@ def classify_pairs(columns: dict[str, np.ndarray], profile: str = "core") -> dic
         raise ValueError("pair columns must have equal lengths")
     li = np.asarray(columns["left_gold_initial"]).astype(str)
     ri = np.asarray(columns["right_gold_initial"]).astype(str)
-    lf = np.asarray([normalize_final(a, b) for a, b in zip(li, columns["left_gold_final"])])
-    rf = np.asarray([normalize_final(a, b) for a, b in zip(ri, columns["right_gold_final"])])
+    lf = np.asarray([canonical_final(value) for value in columns["left_gold_final"]])
+    rf = np.asarray([canonical_final(value) for value in columns["right_gold_final"]])
     initial_relations = dict(INITIAL_RELATIONS)
     final_relations = dict(FINAL_RELATIONS)
     if profile == "extended":

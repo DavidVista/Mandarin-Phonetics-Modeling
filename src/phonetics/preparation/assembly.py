@@ -5,7 +5,7 @@ import json,math,os,pickle,platform,shutil,tempfile,time,uuid
 from pathlib import Path
 from ..artifacts import read_jsonl,safe_artifact,sha256_file,write_json
 from ..data_contract import DATA_CONTRACT_VERSION,pair_reason,validate_acoustic,validate_wubi
-from ..pinyin import PINYIN_CONTRACT_VERSION
+from ..pinyin import PARSER_PROVENANCE, PINYIN_CONTRACT_VERSION
 from .acoustic_bundle import load_acoustic_bundle
 from .corpus_bundle import validate_corpus_bundle
 from .readers import read_wubi
@@ -56,7 +56,7 @@ def assemble_dataset(config):
         write_json(temp/"reports/run_statistics.json",stats)
         artifacts={str(p.relative_to(temp)).replace("\\","/"):sha256_file(p) for p in temp.rglob("*") if p.is_file()}
         write_json(temp/"manifest.json",{"bundle_type":"prepared_dataset","schema_version":2,"assembly_contract":ASSEMBLY_CONTRACT_VERSION,
-            "dataset_id":config["dataset_id"],"data_contract":DATA_CONTRACT_VERSION,"pinyin_contract":PINYIN_CONTRACT_VERSION,
+            "dataset_id":config["dataset_id"],"data_contract":DATA_CONTRACT_VERSION,"pinyin_contract":PINYIN_CONTRACT_VERSION,"parser_provenance":PARSER_PROVENANCE,
             "artifacts":artifacts,"processed_corpus":{"manifest_sha256":config["processed_corpus"]["manifest_sha256"],"corpus_contract":cm["corpus_contract"]},
             "acoustic_bundle":{"manifest_sha256":config["acoustic_bundle"]["manifest_sha256"],"bundle_id":am["bundle_id"]},
             "pins":{"wubi_sha256":config["wubi"]["sha256"],"sound_inventory_sha256":am["inventory_sha256"]},
@@ -69,7 +69,7 @@ def assemble_dataset(config):
 def validate_assembled(root,manifest):
     root=Path(root).resolve()
     if (manifest.get("bundle_type")!="prepared_dataset" or manifest.get("schema_version")!=2 or manifest.get("assembly_contract")!=ASSEMBLY_CONTRACT_VERSION
-            or manifest.get("data_contract")!=DATA_CONTRACT_VERSION or manifest.get("pinyin_contract")!=PINYIN_CONTRACT_VERSION):raise ValueError("unsupported assembly contract")
+            or manifest.get("data_contract")!=DATA_CONTRACT_VERSION or manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE):raise ValueError("unsupported assembly contract")
     arts=manifest.get("artifacts",{})
     if not REQUIRED.issubset(arts):raise ValueError("assembled dataset artifacts missing")
     for rel,digest in arts.items():

@@ -18,6 +18,7 @@ from typing import Any
 
 from .dimsim import DimsimDistance
 from .sampling import make_pair_plan, pair_count
+from ..pinyin import PINYIN_CONTRACT_VERSION, PARSER_PROVENANCE, parse_components, validate_canonical_label
 
 BUNDLE_SCHEMA_VERSION = 2
 PAIRING_POLICY = "nonzero_nonzero"
@@ -82,6 +83,8 @@ def _load_source_experiment(root: Path, split: str, sentence_limit: int | None, 
     if missing:
         raise FileNotFoundError(missing)
     manifest = _read_json(files["manifest.json"])
+    if manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE:
+        raise ValueError("unsupported source experiment Pinyin contract")
     artifacts = manifest.get("artifacts", {})
     for name in ("samples.jsonl", "splits.json", "vocab.json", "config.json"):
         expected = artifacts.get(name)
@@ -143,6 +146,9 @@ def _build_occurrences(samples: list[dict], vocab: dict) -> list[dict]:
             except (IndexError, TypeError) as error:
                 raise ValueError(f"component ID outside vocabulary in sample {sample_id}") from error
             pinyin = acoustic_tokens[acoustic_id]
+            parsed = parse_components(validate_canonical_label(pinyin))
+            if (initial, final, tone) != (parsed.initial, parsed.final, parsed.tone):
+                raise ValueError(f"component labels disagree with acoustic label in sample {sample_id}")
             rows.append({
                 "occurrence_id": _occurrence_id(sample_id, position), "sample_id": sample_id,
                 "character_position": position, "character": character, "pinyin": pinyin,
@@ -323,6 +329,7 @@ def prepare_evaluation_bundle(
         artifacts = {str(path.relative_to(target)).replace("\\", "/"): _sha256(path) for path in target.rglob("*") if path.is_file()}
         manifest = {
             "schema_version": BUNDLE_SCHEMA_VERSION, "evaluation_id": evaluation_id,
+            "pinyin_contract": PINYIN_CONTRACT_VERSION, "parser_provenance": PARSER_PROVENANCE,
             "pairing_policy": PAIRING_POLICY,
             "source_experiment": {
                 "path": str(experiment_root), "experiment_id": source_manifest.get("experiment_id"),
@@ -351,6 +358,8 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
     manifest = _read_json(root / "manifest.json")
     if manifest.get("schema_version") != BUNDLE_SCHEMA_VERSION:
         raise ValueError("unsupported evaluation bundle schema")
+    if manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE:
+        raise ValueError("unsupported evaluation Pinyin contract")
     config = _read_json(root / "config.json")
     if config.get("schema_version") != BUNDLE_SCHEMA_VERSION:
         raise ValueError("unsupported evaluation config schema")
@@ -379,6 +388,17 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
         raise ValueError("evaluation group IDs are invalid or duplicated")
     if any(not isinstance(row.get("initial"), str) for row in occurrences + groups):
         raise ValueError("evaluation initial metadata must be strings")
+    for row in occurrences + groups:
+        label = validate_canonical_label(row.get("pinyin"))
+        parsed = parse_components(label)
+        if tuple(row.get(key) for key in ("initial", "final", "tone")) != (parsed.initial, parsed.final, parsed.tone):
+            raise ValueError("stored evaluation components disagree with canonical Pinyin label")
+    try:
+        _, expected_groups = _build_groups(occurrences)
+    except (KeyError, TypeError) as error:
+        raise ValueError("invalid occurrence group metadata") from error
+    if {row["group_id"]: row for row in groups} != expected_groups:
+        raise ValueError("stored evaluation group metadata is inconsistent with occurrences")
     pairs = {kind: _read_jsonl(root / f"pairs/{kind}.jsonl") for kind in ("contextual", "character_pinyin", "syllable")}
     occurrence_id_set = set(occurrence_ids)
     valid_ids = {
@@ -407,12 +427,20 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
             expected = hashlib.sha256(json.dumps([row["left_id"], row["right_id"]], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
             if row["pair_id"] != expected:
                 raise ValueError(f"{kind} pair ID does not match endpoints")
+            left = metadata[kind][row["left_id"]]
+            right = metadata[kind][row["right_id"]]
             left_zero = metadata[kind][row["left_id"]].get("initial") == ""
             right_zero = metadata[kind][row["right_id"]].get("initial") == ""
             if left_zero or right_zero:
                 raise ValueError(f"{kind} pair violates {PAIRING_POLICY} policy")
             if row.get("left_zero_initial") is not False or row.get("right_zero_initial") is not False or row.get("no_zero_initial_diagnostic") is not True:
                 raise ValueError(f"{kind} pair has inconsistent zero-initial flags")
+            if row.get("left_pinyin") != left["pinyin"] or row.get("right_pinyin") != right["pinyin"]:
+                raise ValueError(f"{kind} pair Pinyin labels disagree with endpoints")
+            equal = [left[key] == right[key] for key in ("initial", "final", "tone")]
+            if (any(row.get("equal_" + key) is not value for key, value in zip(("initial", "final", "tone"), equal))
+                    or row.get("overlap_mask") != "".join(str(int(value)) for value in equal)):
+                raise ValueError(f"{kind} pair component metadata disagrees with endpoints")
         original_count = len(valid_ids[kind])
         eligible_count = sum(isinstance(metadata[kind][object_id].get("initial"), str) and bool(metadata[kind][object_id]["initial"])
                              for object_id in valid_ids[kind])

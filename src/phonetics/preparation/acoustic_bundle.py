@@ -4,7 +4,7 @@ import importlib.metadata,json,os,pickle,platform,re,shutil,tempfile
 from pathlib import Path
 from ..artifacts import read_jsonl,safe_artifact,sha256_file,write_json,write_jsonl
 from ..data_contract import DATA_CONTRACT_VERSION,validate_acoustic
-from ..pinyin import PINYIN_CONTRACT_VERSION,canonical_labels,decompose
+from ..pinyin import PARSER_PROVENANCE, PINYIN_CONTRACT_VERSION,canonical_labels,decompose
 from .config import SCHEMA_VERSION,validate_model_config,_keys
 from .embeddings import embed_inventory
 from .readers import read_sounds
@@ -39,7 +39,7 @@ def prepare_acoustic_bundle(config,*,embedding_backend=None):
         code={str(p.relative_to(code_root)).replace("\\","/"):sha256_file(p) for p in code_files}
         model={**cfg["model"],"backend":inference["backend"]}
         write_json(temp/"manifest.json",{"bundle_type":"acoustic_embeddings","schema_version":SCHEMA_VERSION,"data_contract":DATA_CONTRACT_VERSION,
-          "pinyin_contract":PINYIN_CONTRACT_VERSION,"bundle_id":bid,"manifest_self_hash":"excluded","artifacts":artifacts,"source":source,
+          "pinyin_contract":PINYIN_CONTRACT_VERSION,"parser_provenance":PARSER_PROVENANCE,"bundle_id":bid,"manifest_self_hash":"excluded","artifacts":artifacts,"source":source,
           "inventory_sha256":sha256_file(temp/"sound_inventory.jsonl"),"count":len(inventory),"dimension":len(next(iter(vectors.values()))),
           "model":model,"inference":inference,"environment":env,"code":code})
         validate_acoustic_bundle(temp);os.rename(temp,target);return target
@@ -49,7 +49,7 @@ def validate_acoustic_bundle(path,*,expected_manifest_sha256=None):
     root=Path(path).resolve();mp=root/"manifest.json"
     if expected_manifest_sha256 and sha256_file(mp)!=expected_manifest_sha256: raise ValueError("acoustic bundle manifest checksum mismatch")
     manifest=json.loads(mp.read_text(encoding="utf-8"))
-    if manifest.get("bundle_type")!="acoustic_embeddings" or manifest.get("schema_version")!=1 or manifest.get("data_contract")!=DATA_CONTRACT_VERSION or manifest.get("pinyin_contract")!=PINYIN_CONTRACT_VERSION: raise ValueError("unsupported acoustic bundle")
+    if manifest.get("bundle_type")!="acoustic_embeddings" or manifest.get("schema_version")!=1 or manifest.get("data_contract")!=DATA_CONTRACT_VERSION or manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE: raise ValueError("unsupported acoustic bundle")
     arts=manifest.get("artifacts",{});
     if not REQUIRED.issubset(arts): raise ValueError("missing acoustic bundle artifacts")
     for rel,digest in arts.items():

@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 from ..artifacts import read_jsonl,safe_artifact,sha256_file,write_json,write_jsonl
 from ..data_contract import DATA_CONTRACT_VERSION,FILTERS
-from ..pinyin import PINYIN_CONTRACT_VERSION
+from ..pinyin import PARSER_PROVENANCE, PINYIN_CONTRACT_VERSION
 from .acoustic_bundle import load_acoustic_bundle
 from .readers import read_corpus,read_wubi
 from .corpus_processing import CorpusConflictError,normalize_rows,filter_rows,exclude_conflicts,deduplicate_rows,sample_rows,coverage
@@ -75,7 +75,7 @@ def prepare_corpus(config):
         invhash=acoustic_manifest["artifacts"]["sound_inventory.jsonl"]
         artifacts={str(p.relative_to(temp)).replace("\\","/"):sha256_file(p) for p in temp.rglob("*") if p.is_file()}
         write_json(temp/"manifest.json",{"bundle_type":"processed_corpus","schema_version":1,"corpus_contract":CORPUS_CONTRACT_VERSION,
-            "data_contract":DATA_CONTRACT_VERSION,"pinyin_contract":PINYIN_CONTRACT_VERSION,"corpus_id":config["corpus_id"],"artifacts":artifacts,
+            "data_contract":DATA_CONTRACT_VERSION,"pinyin_contract":PINYIN_CONTRACT_VERSION,"parser_provenance":PARSER_PROVENANCE,"corpus_id":config["corpus_id"],"artifacts":artifacts,
             "sources":{"corpus":corpus_src,"wubi":wubi_src,"acoustic_bundle_manifest_sha256":config["acoustic_bundle"]["manifest_sha256"],
                        "sound_inventory_sha256":invhash},"environment":{"python":platform.python_version()}})
         validate_corpus_bundle(temp);os.rename(temp,target);return target
@@ -104,7 +104,7 @@ def validate_corpus_bundle(path,expected_manifest_sha256=None):
     if expected_manifest_sha256 and sha256_file(mp)!=expected_manifest_sha256:raise ValueError("processed corpus manifest checksum mismatch")
     m=json.loads(mp.read_text(encoding="utf8"))
     if (m.get("bundle_type")!="processed_corpus" or m.get("schema_version")!=1 or m.get("corpus_contract")!=CORPUS_CONTRACT_VERSION
-            or m.get("data_contract")!=DATA_CONTRACT_VERSION or m.get("pinyin_contract")!=PINYIN_CONTRACT_VERSION):raise ValueError("unsupported processed corpus bundle")
+            or m.get("data_contract")!=DATA_CONTRACT_VERSION or m.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or m.get("parser_provenance") != PARSER_PROVENANCE):raise ValueError("unsupported processed corpus bundle")
     if not REQUIRED.issubset(m.get("artifacts",{})):raise ValueError("processed corpus artifacts missing")
     for rel,digest in m["artifacts"].items():
         p=safe_artifact(root,rel)
@@ -122,12 +122,12 @@ def validate_corpus_bundle(path,expected_manifest_sha256=None):
     selection=read_jsonl(root/"reports/selection.jsonl")
     if len(rows)!=len(selection) or any(r["text"]!=s.get("text") or r["pinyin"].split()!=s.get("labels") for r,s in zip(rows,selection)):raise ValueError("processed corpus selection mismatch")
     from ..data_contract import sample_id
-    from ..pinyin import decompose
+    from ..pinyin import decompose, validate_canonical_label
     ids=[];texts=[]
     for row,selected in zip(rows,selection):
         labels=row["pinyin"].split()
         if not row["text"] or len(row["text"])!=len(labels) or not isinstance(selected.get("source_ids"),list) or not selected["source_ids"]:raise ValueError("processed corpus row invalid")
-        for label in labels:decompose(label)
+        for label in labels:decompose(validate_canonical_label(label))
         expected=sample_id(row["text"],labels)
         if selected.get("sample_id")!=expected:raise ValueError("processed corpus sample ID mismatch")
         ids.append(expected);texts.append(row["text"])

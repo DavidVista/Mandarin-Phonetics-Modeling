@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from phonetics.evaluation.phonetic_matches import classify_pairs, normalize_final, summarize
+from phonetics.evaluation.phonetic_matches import classify_pairs, canonical_final, summarize
 
 
 def _columns(left_i, right_i, left_f, right_f, distance=None, mask=None):
@@ -15,22 +15,26 @@ def _columns(left_i, right_i, left_f, right_f, distance=None, mask=None):
     }
 
 
-def test_contextual_palatal_u_normalization_does_not_affect_g():
-    assert normalize_final("q", "u") == "ü"
-    assert normalize_final("q", "uan") == "üan"
-    assert normalize_final("q", "un") == "ün"
-    assert normalize_final("q", "ue") == "üe"
-    assert normalize_final("g", "u") == "u"
-    result = classify_pairs(_columns(["g"], ["q"], ["u"], ["u"]))
+def test_analysis_requires_canonical_finals_without_rewriting():
+    for final in ("v", "van", "vn", "ve", "u", "iou", "ueng"):
+        assert canonical_final(final) == final
+    for final in ("ü", "u:", "iu", "ui", "un", "apical_dental"):
+        try:
+            canonical_final(final)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"noncanonical final accepted: {final}")
+    result = classify_pairs(_columns(["g"], ["q"], ["u"], ["v"]))
     assert not result["normalized_equal_final"][0]
     assert not result["close_final"][0]
-    assert classify_pairs(_columns(["g"], ["q"], ["u"], ["u"]), "extended")["close_final"][0]
+    assert classify_pairs(_columns(["g"], ["q"], ["u"], ["v"]), "extended")["close_final"][0]
 
 
-def test_apical_i_is_contextual_and_not_ordinary_i():
+def test_canonical_i_is_not_replaced_by_apical_categories():
     result = classify_pairs(_columns(["z", "zh", "b"], ["zh", "b", "p"], ["i"] * 3, ["i"] * 3))
-    assert result["relation_final"].tolist() == ["apical_place", "", ""]
-    assert result["normalized_equal_final"].tolist() == [False, False, True]
+    assert result["relation_final"].tolist() == ["", "", ""]
+    assert result["normalized_equal_final"].tolist() == [True, True, True]
 
 
 def test_relations_are_symmetric_and_not_transitively_expanded():
