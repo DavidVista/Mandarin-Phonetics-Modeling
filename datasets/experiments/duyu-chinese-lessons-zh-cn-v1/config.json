@@ -1,0 +1,35 @@
+{
+  "acoustic_dim": 1024,
+  "architecture": {
+    "dropout": 0.3,
+    "embedding_dim": 100,
+    "hidden_dim": 512,
+    "mlp_hidden_dim": 256,
+    "num_layers": 4
+  },
+  "schema_version": 1,
+  "seeds": [
+    42
+  ],
+  "split_ratios": [
+    0.8,
+    0.1,
+    0.1
+  ],
+  "split_seed": 42,
+  "training": {
+    "batch_size": 32,
+    "checkpoint_selection": "minimum condition-specific validation objective",
+    "combined_lambda_mse": 1.0,
+    "combined_lambda_mse_options": [
+      1.0,
+      100.0
+    ],
+    "early_stopping": false,
+    "epochs": 20,
+    "learning_rate": 0.001,
+    "optimizer": "AdamW",
+    "scheduler": "constant",
+    "weight_decay": 0.0001
+  }
+}

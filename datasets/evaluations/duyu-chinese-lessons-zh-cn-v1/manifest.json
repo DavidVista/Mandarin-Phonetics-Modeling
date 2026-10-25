@@ -1,0 +1,64 @@
+{
+  "artifacts": {
+    "config.json": "6841dde5267193354267235e2a6eb877f3a1bee5e27bcf12f099c4faf4b2fd0c",
+    "coverage.json": "f497c08a05680e11816ec807162b9929b14c5693076f256269938b46c5f26719",
+    "groups.jsonl": "c8299db2cbec7c1929495540a0ec576c94e8d1b29ac9543251bba4e0240df1cd",
+    "occurrences.jsonl": "81e484b7a8459e4c1bd135322ffe5082b30de2ba629867308e974e205da73009",
+    "pairs/character_pinyin.jsonl": "36ec1018a3ae1d35008db8bb6a4f4721205e1e422832ae3947d66d37312814ff",
+    "pairs/contextual.jsonl": "47ac45ae74b8bbbc00700d513f5a63521d9f5db5b740aa497065fe0faad4c960",
+    "pairs/syllable.jsonl": "e579b33ac6164d2303a07eaf12f15dd89bd11f46afed2ee2227cb59bcc410ef5",
+    "sentences.jsonl": "ccb236e85df23227f134c5f46edac999c9f178ad84cabf3d7ac5cac1c5a9e3b9"
+  },
+  "code_provenance": {
+    "evaluation/bundle.py": "0070c4f280ceb0e5802577fa58faf25e107f6e087790b5ba29974f1c0874d41d",
+    "evaluation/dimsim.py": "38712d92358e8378539935fd669f5e9a375193010007a3798faaea02c88e0195",
+    "evaluation/sampling.py": "39c473e643f1f30c62951d28d4e5b6004ed819256676ff351355d098ebeab0c8"
+  },
+  "counts": {
+    "character_pinyin_groups": 3684,
+    "occurrences": 54927,
+    "pairs": {
+      "character_pinyin": 25000,
+      "contextual": 25000,
+      "syllable": 432915
+    },
+    "sentences": 10000,
+    "syllable_groups": 1033
+  },
+  "evaluation_id": "duyu-chinese-lessons-zh-cn-v1",
+  "metric": {
+    "api": "dimsim.get_distance([left], [right], pinyin=True)",
+    "canonical_weights_modified": false,
+    "dependencies": {
+      "dimsim": "0.2.2",
+      "pypinyin": "0.55.0"
+    },
+    "metric_name": "dimsim",
+    "metric_version": "0.2.2",
+    "package_file_sha256": {
+      "__init__.py": "0639d51a755311cdb43f96bfde4f11f4e83d69f043643dc168cdef9e8b1e8bf8",
+      "core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "core/model.py": "491fe06c68be3558c979f4f345e16e16df7c84edd0ba7a632e1a8e0857a566e6",
+      "data/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "data/pinyin_to_simplified.pickle": "905a9e3e9d2fb6c6be1e36f21bd7fe7545468b1ef2de64c39b63a6b2c3749b83",
+      "data/pinyin_to_traditional.pickle": "d4ef54cc2cbf6b928f832b6ebc6b4cc83dfc75691ad3c939bf0313de72bcf73a",
+      "utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "utils/maps.py": "f75e2010975ed0499f5beadbac54e5d7874b6f5d74b0d2c496973b71dc64730a",
+      "utils/pinyin.py": "cc5ac54e237f685f8cb8f05e3e3b9977c65349fa6ed72f4f04ba943b0566daac",
+      "utils/utils.py": "dd0f67b3afc3aa800e024d945ca0e9e98082c1fcecbf827aec3964e530471234"
+    }
+  },
+  "pairing_policy": "nonzero_nonzero",
+  "schema_version": 2,
+  "source_experiment": {
+    "experiment_id": "duyu-chinese-lessons-zh-cn-v1",
+    "hashes": {
+      "config.json": "6ccbd330d7c8edfbc04439bf17f702061a39a6bde6277558b9a54365bbdaf57e",
+      "manifest.json": "b0f261e5e7a056db77d0aa97cb78d53dc0e41808a6042dff56de83aee86a6afc",
+      "samples.jsonl": "5d95d27573f20f2d8f127dd43ac4967c9ec6df23547dbca424559557879880a7",
+      "splits.json": "54a4f3897d1929880f3c8994ac72e8f4ab01c13081dac5a0171e0729b63814fa",
+      "vocab.json": "e49b1c48e1a4eddefd33bb3c239e9d32593d8c7ddccf10189a758e638c608517"
+    },
+    "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\experiments\\duyu-chinese-lessons-zh-cn-v1"
+  }
+}

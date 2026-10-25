@@ -1,0 +1,58 @@
+{
+  "artifacts": {
+    "acoustic_targets.pt": "31164d2fef24cf91ec6e79ae28ad6613144a27814644964a94d610b1a64984c2",
+    "config.json": "6ccbd330d7c8edfbc04439bf17f702061a39a6bde6277558b9a54365bbdaf57e",
+    "initialization/seed-42.pt": "432103f3db09068150801c94b3bbf3e387e722503266cc12ca795de31b54e94b",
+    "samples.jsonl": "5d95d27573f20f2d8f127dd43ac4967c9ec6df23547dbca424559557879880a7",
+    "splits.json": "54a4f3897d1929880f3c8994ac72e8f4ab01c13081dac5a0171e0729b63814fa",
+    "vocab.json": "e49b1c48e1a4eddefd33bb3c239e9d32593d8c7ddccf10189a758e638c608517",
+    "wubi_mapping.pkl": "80d3228546097490632cfdc1b42666b706840e2d7f1f76f64712449c9cfe927e"
+  },
+  "code": {
+    "data.py": "91cc7349c629a986731ef703ce0534682835ef6b2107b9419771d326c2e0131d",
+    "data_contract.py": "96e5dd2a0390836d8892badb1baea513b83fb496fb1e4f48dd24ae6bb5229b4d",
+    "model.py": "9f6bd2de95cec891c875280e518726ec1c9f6f0ec6080b55fe564a88170415af",
+    "pinyin.py": "35b58f1dda4a8de2e65df40c375bc1efe64095c9cc931d5e211c8ecc639a6e83",
+    "reproducibility.py": "ad47bd3899c536a7d4a8d151469b1d206b15a653bd00e6498eeddb90a37446f3"
+  },
+  "counts": {
+    "accepted": 100000,
+    "input_rows": 100000,
+    "rejected": {},
+    "seeds": [
+      42
+    ],
+    "splits": {
+      "test": 10000,
+      "train": 80000,
+      "validation": 10000
+    }
+  },
+  "environment": {
+    "numpy": "2.2.6",
+    "python": "3.11.2",
+    "torch": "2.6.0+cpu"
+  },
+  "experiment_id": "duyu-chinese-lessons-zh-cn-v1",
+  "preparation_version": "2",
+  "prepared_dataset": {
+    "contract": "prepared-1",
+    "id": "duyu-chinese-lessons-zh-cn-v1",
+    "manifest_sha256": "df7a80149b3fc7f27dda4cea95521f616c6c6ed73a3a0afd545b1f9caf383076"
+  },
+  "schema_version": 1,
+  "sources": {
+    "acoustic": {
+      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\prepared\\duyu-chinese-lessons-zh-cn-v1\\embeddings\\pinyin_embeddings.pkl",
+      "sha256": "eca0b2c4e627bc5ab05535203f1821ba3ff9d7e682f71083e42866caabfb7565"
+    },
+    "corpus": {
+      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\prepared\\duyu-chinese-lessons-zh-cn-v1\\corpus\\train.csv",
+      "sha256": "0cb6f0e3e1c3a5df7e94a244363f6bf8812d8bec734088eb25eb5b96189c7db5"
+    },
+    "wubi": {
+      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\prepared\\duyu-chinese-lessons-zh-cn-v1\\wubi\\chinese_to_wubi.pkl",
+      "sha256": "80d3228546097490632cfdc1b42666b706840e2d7f1f76f64712449c9cfe927e"
+    }
+  }
+}

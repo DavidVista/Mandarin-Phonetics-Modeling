@@ -1,0 +1,13 @@
+{
+  "character_pair_count": 25000,
+  "contextual_pair_count": 25000,
+  "evaluation_id": "duyu-chinese-lessons-zh-cn-v1",
+  "max_all_pairs": 1000000,
+  "pairing_policy": "nonzero_nonzero",
+  "sampling_seed": 42,
+  "schema_version": 2,
+  "sentence_limit": null,
+  "sentence_seed": 42,
+  "split": "test",
+  "syllable_pair_count": null
+}

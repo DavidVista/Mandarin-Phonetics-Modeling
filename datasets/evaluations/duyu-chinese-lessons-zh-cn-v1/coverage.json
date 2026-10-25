@@ -1,0 +1,76 @@
+{
+  "groups": {
+    "character_pinyin": 3684,
+    "syllable": 1033
+  },
+  "levels": {
+    "character_pinyin": {
+      "distance_status_counts": {
+        "ok": 25000
+      },
+      "objects": {
+        "eligible": 3171,
+        "excluded": 513,
+        "excluded_by_reason": {
+          "zero_initial": 513
+        },
+        "original": 3684
+      },
+      "selection_count": 25000,
+      "unordered_pair_population": {
+        "eligible": 5026035,
+        "excluded": 1758051,
+        "excluded_by_reason": {
+          "zero_initial": 1758051
+        },
+        "original": 6784086
+      }
+    },
+    "contextual": {
+      "distance_status_counts": {
+        "ok": 25000
+      },
+      "objects": {
+        "eligible": 46935,
+        "excluded": 7992,
+        "excluded_by_reason": {
+          "zero_initial": 7992
+        },
+        "original": 54927
+      },
+      "selection_count": 25000,
+      "unordered_pair_population": {
+        "eligible": 1101423645,
+        "excluded": 407036556,
+        "excluded_by_reason": {
+          "zero_initial": 407036556
+        },
+        "original": 1508460201
+      }
+    },
+    "syllable": {
+      "distance_status_counts": {
+        "ok": 432915
+      },
+      "objects": {
+        "eligible": 931,
+        "excluded": 102,
+        "excluded_by_reason": {
+          "zero_initial": 102
+        },
+        "original": 1033
+      },
+      "selection_count": 432915,
+      "unordered_pair_population": {
+        "eligible": 432915,
+        "excluded": 100113,
+        "excluded_by_reason": {
+          "zero_initial": 100113
+        },
+        "original": 533028
+      }
+    }
+  },
+  "occurrences": 54927,
+  "sentences": 10000
+}
