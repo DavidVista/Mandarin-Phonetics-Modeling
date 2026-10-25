@@ -236,3 +236,6 @@ datasets/source-data/
 # Generated corpus processing and assembled dataset bundles.
 datasets/processed-corpus/
 datasets/prepared/
+
+# Generated DIMSIM parser-alignment tables and run manifests.
+/outputs/dimsim-parser-alignment/
