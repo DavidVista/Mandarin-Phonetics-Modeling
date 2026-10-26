@@ -59,3 +59,96 @@ label = "Zh-cn \u2212 Base"
 color = "#171717"
 linestyle = "solid"
 marker = "o"
+
+[figures.dimsim_distributions]
+status = "approved"
+kind = "distribution_triptych"
+name = "DIMSIM distributions"
+xlabel = "DIMSIM distance"
+ylabel = "Pair count / ECDF"
+series = ["population"]
+order = ["population"]
+scale = "linear"
+
+[figures.dimsim_overlap_distributions]
+status = "approved"
+kind = "ecdf"
+name = "Component overlap distributions"
+xlabel = "DIMSIM distance"
+ylabel = "ECDF"
+series = ["000", "001", "010", "011", "100", "101", "110", "111"]
+order = ["000", "001", "010", "011", "100", "101", "110", "111"]
+scale = "linear"
+ylim = [0.0, 1.0]
+
+[figures.dimsim_component_contributions]
+status = "approved"
+kind = "stacked_bar"
+name = "DIMSIM component contributions"
+xlabel = "DIMSIM interval"
+ylabel = "Share of mean DIMSIM distance"
+series = ["initial", "final", "tone"]
+order = ["initial", "final", "tone"]
+scale = "linear"
+
+[semantics.population]
+label = "All pairs"
+color = "#171717"
+linestyle = "solid"
+marker = "o"
+
+[semantics.000]
+label = "000"
+color = "#171717"
+linestyle = "solid"
+marker = "o"
+[semantics.001]
+label = "001"
+color = "#444444"
+linestyle = "dashed"
+marker = "s"
+[semantics.010]
+label = "010"
+color = "#666666"
+linestyle = "dotted"
+marker = "^"
+[semantics.011]
+label = "011"
+color = "#888888"
+linestyle = "dashdot"
+marker = "v"
+[semantics.100]
+label = "100"
+color = "#303030"
+linestyle = "solid"
+marker = "D"
+[semantics.101]
+label = "101"
+color = "#606060"
+linestyle = "dashed"
+marker = "P"
+[semantics.110]
+label = "110"
+color = "#909090"
+linestyle = "dotted"
+marker = "X"
+[semantics.111]
+label = "111"
+color = "#c0c0c0"
+linestyle = "dashdot"
+marker = "*"
+[semantics.initial]
+label = "Initial"
+color = "#303030"
+linestyle = "solid"
+marker = "o"
+[semantics.final]
+label = "Final"
+color = "#888888"
+linestyle = "solid"
+marker = "s"
+[semantics.tone]
+label = "Tone"
+color = "#d0d0d0"
+linestyle = "solid"
+marker = "^"

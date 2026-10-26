@@ -139,6 +139,56 @@ def reconstruct_distance(left: str, right: str) -> dict[str, Any]:
     }
 
 
+def compute_retained_population(root: str | Path, *, expected_manifest_sha256: str) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    """Compute only the population columns required by the retained figures."""
+    root=Path(root).resolve(); manifest_path=root/"manifest.json"; actual_hash=sha256_file(manifest_path)
+    if actual_hash != expected_manifest_sha256: raise ValueError("unexpected evaluation manifest SHA256")
+    manifest=_read_json(manifest_path)
+    if manifest.get("schema_version") not in {1,2} or manifest.get("pairing_policy") != "nonzero_nonzero" or not isinstance(manifest.get("evaluation_id"),str):
+        raise ValueError("unsupported evaluation schema, identity, or pairing policy")
+    artifacts=manifest.get("artifacts")
+    if not isinstance(artifacts,dict) or not {"groups.jsonl","pairs/syllable.jsonl"}.issubset(artifacts): raise ValueError("evaluation manifest lacks required payloads")
+    verified={}
+    for relative,expected in artifacts.items():
+        path=(root/relative).resolve()
+        if root not in path.parents or not path.is_file() or sha256_file(path)!=expected: raise ValueError(f"invalid evaluation artifact: {relative}")
+        verified[relative]=expected
+    groups=[]
+    for number,row in enumerate(_jsonl(root/"groups.jsonl"),1):
+        if row.get("group_kind")!="syllable": continue
+        required=("group_id","pinyin","initial","final","tone")
+        if any(key not in row for key in required) or not all(isinstance(row[key],str) for key in required): raise ValueError(f"invalid syllable group metadata at row {number}")
+        if row["initial"].strip(): groups.append(row)
+    groups.sort(key=lambda row:row["group_id"]); by_id={row["group_id"]:row for row in groups}
+    if not groups or len(by_id)!=len(groups): raise ValueError("eligible syllable population is empty or duplicated")
+    triples=[(row["initial"],row["final"],row["tone"]) for row in groups]
+    if len(triples)!=len(set(triples)): raise ValueError("eligible gold component triples are duplicated")
+    pairs=list(_jsonl(root/"pairs/syllable.jsonl")); expected_count=len(groups)*(len(groups)-1)//2
+    if len(pairs)!=expected_count: raise ValueError("pair population is incomplete")
+    expected_endpoints=((groups[i]["group_id"],groups[j]["group_id"]) for i in range(len(groups)) for j in range(i+1,len(groups)))
+    metric=DimsimDistance(); rows=[]; max_bundle=max_formula=max_reverse=0.; tolerance=1e-10
+    for number,(pair,(expected_left,expected_right)) in enumerate(zip(pairs,expected_endpoints),1):
+        left_id,right_id=pair.get("left_id"),pair.get("right_id")
+        if (left_id,right_id)!=(expected_left,expected_right): raise ValueError(f"noncanonical or duplicate pair endpoints at row {number}")
+        left_group,right_group=by_id[left_id],by_id[right_id]; left,right=left_group["pinyin"],right_group["pinyin"]
+        flags=(left_group["initial"]==right_group["initial"],left_group["final"]==right_group["final"],left_group["tone"]==right_group["tone"]); mask="".join("1" if flag else "0" for flag in flags)
+        pair_id=hashlib.sha256(json.dumps([left_id,right_id],ensure_ascii=False,separators=(",",":")).encode()).hexdigest()
+        required_values={"left_pinyin":left,"right_pinyin":right,"equal_initial":flags[0],"equal_final":flags[1],"equal_tone":flags[2],"overlap_mask":mask,"pair_id":pair_id,"left_zero_initial":False,"right_zero_initial":False,"no_zero_initial_diagnostic":True,"distance_status":"ok"}
+        if any(pair.get(key)!=value or (isinstance(value,bool) and type(pair.get(key)) is not bool) for key,value in required_values.items()): raise ValueError(f"pair labels, flags, mask, or identity mismatch at row {number}")
+        bundled=float(pair.get("dimsim_distance",float("nan")))
+        if not math.isfinite(bundled) or bundled<0: raise ValueError(f"invalid bundle distance at row {number}")
+        public=metric(left,right); reverse=metric(right,left); formula=reconstruct_distance(left,right)
+        if formula["hardcode_applied"]: raise ValueError("component decomposition requires no hardcodeMap override")
+        max_bundle=max(max_bundle,abs(public-bundled)); max_formula=max(max_formula,abs(public-float(formula["distance"]))); max_reverse=max(max_reverse,abs(public-reverse))
+        rows.append({"left_id":left_id,"right_id":right_id,"distance":public,"bundle_distance":bundled,"overlap_mask":mask,"equal_initial":flags[0],"equal_final":flags[1],"equal_tone":flags[2],**formula})
+    max_diagonal=max(abs(metric(row["pinyin"],row["pinyin"])) for row in groups)
+    if max(max_bundle,max_formula,max_reverse,max_diagonal)>tolerance: raise ValueError("distance validation exceeded numerical tolerance")
+    columns=_rows_to_columns(rows); distances=columns["distance"].astype(float)
+    if not np.isfinite(distances).all() or np.any(distances<0): raise ValueError("DIMSIM returned a nonfinite or negative distance")
+    validation={"manifest_sha256":actual_hash,"evaluation_id":manifest["evaluation_id"],"artifact_sha256":verified,"syllable_count":len(groups),"pair_count":len(pairs),"expected_pair_count":expected_count,"finite":True,"nonnegative":True,"max_bundle_absolute_error":max_bundle,"max_formula_absolute_error":max_formula,"max_reverse_absolute_error":max_reverse,"max_diagonal_absolute_error":max_diagonal,"tolerance":tolerance,"hardcode_applied_pair_count":0,"metric_provenance":metric.provenance}
+    return columns,validation
+
+
 def _rows_to_columns(rows: list[dict[str, Any]]) -> dict[str, np.ndarray]:
     keys = rows[0].keys()
     return {key: np.asarray([row[key] for row in rows]) for key in keys}
@@ -493,3 +543,131 @@ def load_cache(output_dir: str | Path, *, code_path: str | Path, bundle_manifest
             raise ValueError(f"distribution cache artifact hash mismatch: {relative}")
     archive = np.load(output / "population.npz", allow_pickle=False)
     return ({key: archive[key] for key in archive.files}, _read_json(output / "summary.json"), _read_json(output / "historical.json"))
+
+
+def load_verified_population_cache(
+    cache_root: str | Path,
+    bundle_root: str | Path,
+    *,
+    expected_cache_manifest_sha256: str,
+    expected_bundle_manifest_sha256: str,
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    """Load the pinned numeric population without invoking broad legacy summaries.
+
+    Both identities are parameters so a research wrapper cannot silently migrate to
+    a newer bundle or cache. Every declared payload in both manifests is verified.
+    """
+    cache_root, bundle_root = Path(cache_root).resolve(), Path(bundle_root).resolve()
+    cache_manifest_path, bundle_manifest_path = cache_root / "manifest.json", bundle_root / "manifest.json"
+    if sha256_file(cache_manifest_path) != expected_cache_manifest_sha256:
+        raise ValueError("unexpected distribution cache manifest SHA256")
+    if sha256_file(bundle_manifest_path) != expected_bundle_manifest_sha256:
+        raise ValueError("unexpected evaluation bundle manifest SHA256")
+    cache_manifest, bundle_manifest = _read_json(cache_manifest_path), _read_json(bundle_manifest_path)
+    for root, manifest, label in ((cache_root, cache_manifest, "cache"), (bundle_root, bundle_manifest, "bundle")):
+        artifacts = manifest.get("artifacts")
+        if not isinstance(artifacts, dict) or not artifacts:
+            raise ValueError(f"{label} manifest has no artifacts")
+        for relative, expected in artifacts.items():
+            path = (root / relative).resolve()
+            if root not in path.parents or not path.is_file() or sha256_file(path) != expected:
+                raise ValueError(f"invalid {label} artifact: {relative}")
+    if cache_manifest.get("bundle_manifest_sha256") != expected_bundle_manifest_sha256:
+        raise ValueError("cache was not built from the selected bundle")
+    if bundle_manifest.get("evaluation_id") != "1.0.0" or bundle_manifest.get("pairing_policy") != "nonzero_nonzero":
+        raise ValueError("unexpected evaluation schema or pairing policy")
+    groups = [row for row in _jsonl(bundle_root / "groups.jsonl") if row.get("group_kind") == "syllable" and row.get("initial")]
+    groups.sort(key=lambda row: row["group_id"]); ids = {row["group_id"] for row in groups}
+    if len(groups) != EXPECTED_ELIGIBLE_SYLLABLES or len(ids) != len(groups):
+        raise ValueError("unexpected or duplicate eligible syllable population")
+    endpoints = set(); bundle_pairs = []
+    for row in _jsonl(bundle_root / "pairs/syllable.jsonl"):
+        left, right = row.get("left_id"), row.get("right_id")
+        expected_mask = "".join("1" if row.get(key) is True else "0" for key in ("equal_initial","equal_final","equal_tone"))
+        if left not in ids or right not in ids or left >= right or row.get("overlap_mask") != expected_mask or (left,right) in endpoints:
+            raise ValueError("invalid pair schema, endpoint, mask, or duplicate")
+        endpoints.add((left,right)); bundle_pairs.append((left,right,row["overlap_mask"],float(row["dimsim_distance"])))
+    complete = {(groups[i]["group_id"],groups[j]["group_id"]) for i in range(len(groups)) for j in range(i+1,len(groups))}
+    if endpoints != complete or len(endpoints) != EXPECTED_PAIR_COUNT:
+        raise ValueError("pair population is incomplete")
+    cached_summary = _read_json(cache_root / "summary.json"); validation = cached_summary.get("validation",{})
+    provenance = validation.get("metric_provenance",{})
+    if validation.get("syllable_count") != EXPECTED_ELIGIBLE_SYLLABLES or validation.get("pair_count") != EXPECTED_PAIR_COUNT:
+        raise ValueError("cache validation population does not match selected bundle")
+    if provenance.get("metric_version") != "0.2.2" or provenance.get("dependencies",{}).get("dimsim") != "0.2.2":
+        raise ValueError("cache does not document pinned dimsim==0.2.2")
+    archive = np.load(cache_root / "population.npz", allow_pickle=False)
+    columns = {key: archive[key] for key in archive.files}
+    _validate_cached_population(columns,bundle_pairs,validation,expected_bundle_manifest_sha256)
+    return columns, {"cache_manifest": cache_manifest, "bundle_manifest": bundle_manifest}
+
+
+def _validate_cached_population(columns, bundle_pairs, validation, expected_bundle_manifest_sha256):
+    """Reject any cache whose plotted population or validation evidence is stale."""
+    required = {"distance", "overlap_mask", "consonant_distance", "vowel_distance", "tone_distance", "multiplier", "hardcode_applied"}
+    if required - set(columns):
+        raise ValueError(f"population cache lacks columns: {sorted(required - set(columns))}")
+    n = len(columns["distance"])
+    if n < 1 or any(len(columns[key]) != n for key in required):
+        raise ValueError("population cache columns are empty or misaligned")
+    if not {"left_id","right_id","bundle_distance"}.issubset(columns) or n != len(bundle_pairs):
+        raise ValueError("cache cannot be bound to bundle pair rows")
+    cached_endpoints=list(zip(columns["left_id"].astype(str),columns["right_id"].astype(str)))
+    if cached_endpoints != [(str(a),str(b)) for a,b,_,_ in bundle_pairs]:
+        raise ValueError("cache pair IDs/order do not match selected bundle")
+    if not np.array_equal(columns["overlap_mask"].astype(str),np.asarray([m for _,_,m,_ in bundle_pairs])):
+        raise ValueError("cache masks do not match selected bundle")
+    if not np.allclose(columns["bundle_distance"].astype(float),np.asarray([d for *_,d in bundle_pairs]),rtol=0,atol=0):
+        raise ValueError("cache distances do not match selected bundle")
+    distances = columns["distance"].astype(float)
+    if not np.isfinite(distances).all() or np.any(distances < 0):
+        raise ValueError("population distances must be finite and non-negative")
+    masks = columns["overlap_mask"].astype(str)
+    if not set(masks).issubset({f"{i:03b}" for i in range(8)}):
+        raise ValueError("invalid exact overlap mask")
+    tolerance=validation.get("tolerance")
+    mandatory=("max_bundle_absolute_error","max_formula_absolute_error","max_reverse_absolute_error","max_diagonal_absolute_error")
+    if not isinstance(tolerance,(int,float)) or not math.isfinite(tolerance) or tolerance<0:
+        raise ValueError("cache validation tolerance is missing or invalid")
+    if validation.get("manifest_sha256") != expected_bundle_manifest_sha256 or validation.get("expected_pair_count") != EXPECTED_PAIR_COUNT:
+        raise ValueError("cache validation bundle identity or expected pair count mismatch")
+    if validation.get("finite") is not True or validation.get("nonnegative") is not True:
+        raise ValueError("cache validation did not pass finite/nonnegative checks")
+    if any(not isinstance(validation.get(key),(int,float)) or not math.isfinite(validation[key]) or validation[key]>tolerance for key in mandatory):
+        raise ValueError("cache validation numerical invariant failed")
+    actual=np.asarray([d for *_,d in bundle_pairs],float)
+    if not np.allclose(distances,actual,rtol=0,atol=tolerance):
+        raise ValueError("plotted cache distance differs from selected bundle")
+
+
+def retained_distribution_data(columns: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarray], list[dict[str, Any]]]:
+    """Derive lossless plot data for the three approved distribution figures."""
+    d = np.asarray(columns["distance"], dtype=float)
+    masks = np.asarray(columns["overlap_mask"], dtype=str)
+    hardcode = np.asarray(columns["hardcode_applied"], dtype=bool)
+    if hardcode.any():
+        raise ValueError("component decomposition requires no hardcodeMap override")
+    initial = np.asarray(columns["consonant_distance"], float) * np.asarray(columns["multiplier"], float)
+    final = np.asarray(columns["vowel_distance"], float) * np.asarray(columns["multiplier"], float)
+    tone = np.asarray(columns["tone_distance"], float) * np.asarray(columns["multiplier"], float)
+    if not np.allclose(initial + final + tone, d, rtol=1e-12, atol=1e-12):
+        raise ValueError("component contributions do not reconstruct DIMSIM distance")
+    rows = []
+    for low in range(0, 121, 10):
+        high = low + 10 if low < 120 else np.inf
+        selected = (d >= low) & (d < high)
+        count = int(selected.sum())
+        means = np.array([initial[selected].mean(), final[selected].mean(), tone[selected].mean()]) if count else np.full(3, np.nan)
+        mean_distance = float(d[selected].mean()) if count else np.nan
+        shares = means / mean_distance if count and mean_distance != 0 else np.full(3, np.nan)
+        rows.append({"bin": f"[{low},{low+10})" if low < 120 else "[120,+inf)", "count": count,
+                     "mean_distance": mean_distance if np.isfinite(mean_distance) else None,
+                     "mean_initial": float(means[0]) if np.isfinite(means[0]) else None,
+                     "mean_final": float(means[1]) if np.isfinite(means[1]) else None,
+                     "mean_tone": float(means[2]) if np.isfinite(means[2]) else None,
+                     "initial_share": float(shares[0]) if np.isfinite(shares[0]) else None,
+                     "final_share": float(shares[1]) if np.isfinite(shares[1]) else None,
+                     "tone_share": float(shares[2]) if np.isfinite(shares[2]) else None})
+    full_edges = np.r_[np.arange(0.0, 121.0, 10.0), max(120.0, float(d.max())) + 1e-6]
+    return {"distance": d, "overlap_mask": masks, "initial_contribution": initial, "final_contribution": final,
+            "tone_contribution": tone, "full_histogram_edges": full_edges, "detail_values": d[d < 10]}, rows

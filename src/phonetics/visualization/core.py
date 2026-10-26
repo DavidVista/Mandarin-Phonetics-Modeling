@@ -48,7 +48,7 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
  for fid,f in r["figures"].items():
   _unknown(f,FIGURE_KEYS,f"figures.{fid}");req={"status","kind","name","xlabel","ylabel","series","order","scale"}
   if req-set(f):raise VisualizationError(f"Missing required registry keys for {fid}")
-  if f["status"] not in {"draft","approved"} or f["kind"] not in {"ecdf","histogram","bootstrap_histogram"} or f["scale"] not in {"linear","log"}:raise VisualizationError(f"Invalid status/kind/scale for {fid}")
+  if f["status"] not in {"draft","approved"} or f["kind"] not in {"ecdf","histogram","bootstrap_histogram","distribution_triptych","stacked_bar"} or f["scale"] not in {"linear","log"}:raise VisualizationError(f"Invalid status/kind/scale for {fid}")
   if not all(isinstance(f[k],str) and f[k].strip() for k in ("name","xlabel","ylabel")):raise VisualizationError(f"Invalid labels for {fid}")
   if f["series"]!=f["order"] or not f["series"] or len(set(f["series"]))!=len(f["series"]) or set(f["series"])-set(r["semantics"]):raise VisualizationError(f"Invalid series/order for {fid}")
   if "bin_rule" in f and f["bin_rule"]!="pooled_fd_sturges":raise VisualizationError(f"Invalid bin_rule for {fid}")
@@ -57,7 +57,7 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
   if f["scale"]=="log" and "xlim" in f and f["xlim"][0]<=0:raise VisualizationError(f"Log xlim must be positive for {fid}")
   if f["kind"]=="ecdf":
    if "ylim" not in f or not isinstance(f["ylim"],list) or len(f["ylim"])!=2 or not all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in f["ylim"]) or f["ylim"][0]>=f["ylim"][1]:raise VisualizationError(f"ECDF ylim must be two ascending finite values for {fid}")
-  else:
+  elif f["kind"] in {"histogram","bootstrap_histogram"}:
    if not isinstance(f.get("density"),bool):raise VisualizationError(f"Histogram density must be boolean for {fid}")
    y=f.get("ylim")
    if not isinstance(y,list) or len(y) not in {1,2} or not all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in y) or (len(y)==2 and y[0]>=y[1]):raise VisualizationError(f"Histogram ylim must be a finite bottom or ascending pair for {fid}")
@@ -76,13 +76,18 @@ def apply_style(p):
  import matplotlib as mpl
  require_arial();s=p.style;f=s["font"];a=s["axes"];c=s["color"]
  rc={"font.family":f["family"],"font.weight":f["normal_weight"],"font.size":f["tick_pt"],"axes.labelsize":f["axis_label_pt"],"axes.titlesize":f["panel_heading_pt"],"axes.labelweight":f["normal_weight"],"axes.titleweight":f["normal_weight"],"xtick.labelsize":f["tick_pt"],"ytick.labelsize":f["tick_pt"],"legend.fontsize":f["legend_pt"],"axes.linewidth":s["line"]["axes_pt"],"lines.linewidth":s["line"]["data_pt"],"lines.markersize":s["marker"]["size_pt"],"lines.markeredgewidth":s["marker"]["edge_pt"],"lines.markerfacecolor":s["marker"]["face"],"axes.edgecolor":c["foreground"],"axes.labelcolor":c["foreground"],"text.color":c["foreground"],"xtick.color":c["foreground"],"ytick.color":c["foreground"],"figure.facecolor":c["background"],"axes.facecolor":c["background"],"axes.grid":a["grid"],"xtick.direction":a["tick_direction"],"ytick.direction":a["tick_direction"],"xtick.top":False,"ytick.right":False,"xtick.minor.visible":False,"ytick.minor.visible":False,"xtick.major.size":a["major_length_pt"],"ytick.major.size":a["major_length_pt"],"xtick.major.width":a["major_width_pt"],"ytick.major.width":a["major_width_pt"],"xtick.major.pad":a["major_pad_pt"],"ytick.major.pad":a["major_pad_pt"],"axes.spines.left":True,"axes.spines.right":True,"axes.spines.top":True,"axes.spines.bottom":True};rc.update(s["backend"]["rcparams"]);mpl.rcParams.update(rc)
-def layout(n,p,*,columns=None,legend_rows=0):
+def layout(n,p,*,columns=None,legend_rows=0,width_mm=None):
  import matplotlib.pyplot as plt
  from matplotlib.ticker import MaxNLocator
  if not isinstance(n,int) or not 1<=n<=26:raise VisualizationError("Panel count must be 1..26")
  l=p.style["layout"];cols=columns if columns is not None else (l["default_columns"][n-1] if n<=7 else 3)
  if not isinstance(cols,int) or not 1<=cols<=min(3,n):raise VisualizationError("columns must be 1..min(3,n)")
- rows=(n+cols-1)//cols;width=l["single_width_mm"] if cols==1 else l["multi_width_mm"];pw=(width-l["left_mm"]-l["right_mm"]-(cols-1)*l["hgap_mm"])/cols;ph=pw/l["panel_aspect"];leg=legend_rows*l["legend_row_mm"]+(l["legend_gap_mm"] if legend_rows else 0);height=l["bottom_mm"]+l["top_mm"]+leg+rows*ph+(rows-1)*l["vgap_mm"];fig=plt.figure(figsize=(width/MM_PER_INCH,height/MM_PER_INCH));axes=[];a=p.style["axes"]
+ if width_mm is not None:
+  _positive(width_mm,"width_mm");width=float(width_mm)
+ else:width=l["single_width_mm"] if cols==1 else l["multi_width_mm"]
+ rows=(n+cols-1)//cols;pw=(width-l["left_mm"]-l["right_mm"]-(cols-1)*l["hgap_mm"])/cols
+ if pw<=0:raise VisualizationError("width_mm is too small for physical margins")
+ ph=pw/l["panel_aspect"];leg=legend_rows*l["legend_row_mm"]+(l["legend_gap_mm"] if legend_rows else 0);height=l["bottom_mm"]+l["top_mm"]+leg+rows*ph+(rows-1)*l["vgap_mm"];fig=plt.figure(figsize=(width/MM_PER_INCH,height/MM_PER_INCH));axes=[];a=p.style["axes"]
  for i in range(n):
   row=i//cols;nr=min(cols,n-row*cols);col=i%cols;x=l["left_mm"]+(cols-nr)*(pw+l["hgap_mm"])/2+col*(pw+l["hgap_mm"]);y=l["bottom_mm"]+(rows-1-row)*(ph+l["vgap_mm"]);ax=fig.add_axes([x/width,y/height,pw/width,ph/height]);axes.append(ax);ax.tick_params(top=False,right=False,bottom=True,left=True,direction="in",length=a["major_length_pt"],width=a["major_width_pt"],pad=a["major_pad_pt"]);ax.minorticks_off();ax.grid(False);ax.xaxis.set_major_locator(MaxNLocator(a["major_target"]));ax.yaxis.set_major_locator(MaxNLocator(a["major_target"]));ax.text(a["panel_label_x_mm"]/pw,1+a["panel_label_y_mm"]/ph,chr(97+i),transform=ax.transAxes,fontsize=p.style["font"]["panel_letter_pt"],fontweight=p.style["font"]["panel_letter_weight"],va="bottom")
  return fig,axes
