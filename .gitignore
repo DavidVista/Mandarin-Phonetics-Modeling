@@ -237,5 +237,5 @@ datasets/source-data/
 datasets/processed-corpus/
 datasets/prepared/
 
-# Generated DIMSIM parser-alignment tables and run manifests.
-/outputs/dimsim-parser-alignment/
+# Generated research outputs.
+/outputs/
