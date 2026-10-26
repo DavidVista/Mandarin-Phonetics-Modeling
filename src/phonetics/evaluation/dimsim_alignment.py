@@ -605,6 +605,25 @@ def export_alignment(output_dir: str | Path, *, config: dict, decompositions: li
     return target
 
 
+def write_alignment_research_artifacts(root: str | Path, *, decompositions: list[dict], alignment: dict,
+                                       statistics: dict, validation: dict) -> list[str]:
+    """Write the legacy scientific tables into the shared research-run layout."""
+    root=Path(root); coverage=coverage_rows(decompositions)
+    files={
+        "tables/decompositions.csv":(decompositions,list(decompositions[0]) if decompositions else ["label","category"]),
+        "tables/coverage.csv":(coverage,["population","measure","count","denominator","fraction"]),
+        "tables/pairs.csv.gz":(alignment["affected_pairs"],_PAIR_HEADERS),
+        "tables/symmetry-summary.csv":([alignment["symmetry_summary"]],list(alignment["symmetry_summary"])),
+        "tables/symmetry-exceptions.csv.gz":(alignment["symmetry_exceptions"],_PAIR_HEADERS),
+        "tables/statistics-by-syllable.csv":(statistics["statistics_by_syllable"],["syllable","category","direction",*_STAT_HEADERS,"bootstrap"]),
+        "tables/statistics-by-category.csv":(statistics["statistics_by_category"],["scope","source_syllables",*_STAT_HEADERS]),
+    }
+    for relative,(rows,headers) in files.items(): _csv_rows(root/relative,rows,headers,compressed=relative.endswith(".gz"))
+    (root/"diagnostics/bootstrap-diagnostics.json").write_text(json.dumps(_json_safe(statistics["bootstrap_diagnostics"]),indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")
+    (root/"diagnostics/validation.json").write_text(json.dumps(_json_safe(validation),indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")
+    return [*files,"diagnostics/bootstrap-diagnostics.json","diagnostics/validation.json"]
+
+
 def run_alignment(config: dict) -> Path:
     """Validate the pinned input, compute the analysis, and atomically export it."""
 
