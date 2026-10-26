@@ -1,0 +1,61 @@
+[schema]
+version = 1
+
+[figures.pilot_ecdf]
+status = "approved"
+kind = "ecdf"
+name = "Cosine distributions"
+xlabel = "Cosine similarity"
+ylabel = "ECDF"
+series = ["base", "zh_cn"]
+order = ["base", "zh_cn"]
+scale = "linear"
+xlim = [-1.0, 1.0]
+ylim = [0.0, 1.0]
+
+[figures.pilot_histogram]
+status = "approved"
+kind = "histogram"
+name = "Cosine density"
+xlabel = "Cosine similarity"
+ylabel = "Density"
+series = ["base", "zh_cn"]
+order = ["base", "zh_cn"]
+scale = "linear"
+density = true
+xlim = [-1.0, 1.0]
+ylim = [0.0]
+edges_start = -1.0
+edges_stop = 1.0
+edges_count = 61
+
+[figures.pilot_bootstrap]
+status = "approved"
+kind = "bootstrap_histogram"
+name = "Bootstrap differences"
+xlabel = "Zh-cn \u2212 Base"
+ylabel = "Bootstrap repeats"
+series = ["delta"]
+order = ["delta"]
+scale = "linear"
+bins = 40
+density = false
+ylim = [0.0]
+
+[semantics.base]
+label = "Base"
+color = "#171717"
+linestyle = "solid"
+marker = "o"
+
+[semantics.zh_cn]
+label = "Zh-cn"
+color = "#666666"
+linestyle = "dashed"
+marker = "s"
+
+[semantics.delta]
+label = "Zh-cn \u2212 Base"
+color = "#171717"
+linestyle = "solid"
+marker = "o"

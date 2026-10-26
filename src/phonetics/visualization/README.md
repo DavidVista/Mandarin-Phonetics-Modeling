@@ -1,0 +1,11 @@
+# Phonetics visualization protocol
+
+This package is the single styling and layout authority for project figures. `style.toml` is the strict versioned appearance schema; `registry.toml` holds stable figure IDs, semantic labels, ordering, scales, and bin choices. Unknown keys are errors. Figure-specific style overrides and arbitrary Matplotlib `rcParams` are intentionally unsupported; only the three explicitly listed font-embedding parameters are accepted.
+
+Load with `load_protocol()`, call `apply_style()` before creating figures, obtain equal 4:3 panels with `layout()`, and use `plot_ecdf()` or `plot_histogram()`. The default row patterns for one through seven panels are 1, 2, 2+1, 2+2, 3+2, 3+3, and 3+3+1; `columns=` explicitly selects a smaller semantic layout. Incomplete last rows are centered without empty axes.
+
+Registry entries remain `draft` until their short English name, labels, mappings, scale, and bins are approved. Draft figures may be inspected but `export_figure()` refuses them. Approved export creates PNG at 300 dpi and EPS at the same uncropped physical extent plus adjacent JSON metadata containing resolved semantics, scientific provenance, and configuration hashes. Transparency, missing Arial, accidental overwrite, and detected clipping fail explicitly.
+
+ECDF is an exact post-step curve with no markers. Non-finite observations fail unless the caller explicitly selects `finite_policy="drop"`. Comparison histograms use caller-supplied fixed shared edges or deterministic pooled Freedman–Diaconis edges with Sturges fallback for zero IQR. Bootstrap histograms preserve the registry's explicit 40 bins. These helpers do not calculate bootstrap samples, confidence intervals, model outputs, or other scientific estimates.
+
+For a portable notebook, call `create_snapshot(new_directory, protocol)`, embed that directory, and load its package before plotting. Call `verify_snapshot()` first; it rejects modified source/config/registry. The snapshot contains no machine-specific paths. When verifying in environments where importing `phonetics` pulls optional ML dependencies, load the snapshot package directly with `importlib.util.spec_from_file_location(..., submodule_search_locations=[...])`.
