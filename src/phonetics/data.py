@@ -201,6 +201,8 @@ def _collate(samples):
 
 def load_experiment(path: str | Path) -> dict:
     root = Path(path).resolve(); manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("schema_version") == 3 and manifest.get("bundle_type") == "experiment_dataset":
+        raise ValueError("schema 3 is a dataset-only bundle; use phonetics.experiment.load_experiment; the legacy training loader is incompatible")
     if manifest.get("schema_version") != 1 or manifest.get("preparation_version") != PREPARATION_VERSION:
         raise ValueError("unsupported manifest schema/preparation version")
     if manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE:
@@ -258,6 +260,8 @@ def load_experiment(path: str | Path) -> dict:
 
 
 def create_loaders(experiment: dict, seed: int, batch_size: int | None = None, num_workers: int = 0) -> dict[str, DataLoader]:
+    if experiment.get("manifest", {}).get("schema_version") == 3 and experiment.get("manifest", {}).get("bundle_type") == "experiment_dataset":
+        raise ValueError("schema 3 is a dataset-only bundle; the legacy training loader is incompatible")
     batch = batch_size or int(experiment["config"]["training"]["batch_size"])
     result = {}
     for stream, split in enumerate(("train", "validation", "test"), start=1):
