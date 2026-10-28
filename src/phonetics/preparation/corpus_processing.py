@@ -1,4 +1,4 @@
-"""Shared deterministic corpus transformations used by legacy and staged flows."""
+"""Shared deterministic corpus transformations used by direct and staged flows."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import time
 from collections import Counter, defaultdict
 
 from ..data_contract import FILTERS, pair_reason, sample_id
+from ..ids import encode_text
 from ..pinyin import canonical_labels
 
 
@@ -26,23 +27,36 @@ def normalize_rows(rows, tone_convention):
     return normalized,{"input_count":len(rows),"output_count":len(normalized),"rejected":0}
 
 
-def filter_rows(rows,wubi,acoustic,stages,stages_to_run=None):
+def filter_rows(rows,ids_mapping,vocabulary,acoustic,stages,stages_to_run=None):
     active,rejected_rows=list(rows),[]
     for stage in FILTERS if stages_to_run is None else stages_to_run:
         started=time.perf_counter();kept=[]
         for row in active:
             failed=stage=="pinyin" and row.get("normalization_error")
-            if failed or pair_reason(row["text"],row["labels"],wubi,acoustic,stage=stage):
+            if failed or pair_reason(row["text"],row["labels"],ids_mapping["characters"],acoustic,stage=stage):
                 detail={"reason":stage,**row}
-                if stage=="wubi":detail["missing_characters"]=sorted(set(row["text"])-set(wubi))
+                if stage=="ids":
+                    missing=sorted(set(row["text"])-set(ids_mapping["characters"]),key=ord)
+                    detail.update({"missing_characters":missing,"source_ids":row.get("source_ids",[row["source_id"]])})
                 if stage=="acoustic":detail["missing_tokens"]=sorted(set(row["labels"])-set(acoustic))
                 rejected_rows.append(detail)
-            else:kept.append(row)
+            else:
+                if stage=="ids":
+                    sequences,lengths,missing=encode_text(row["text"],ids_mapping,vocabulary)
+                    if missing is not None: raise ValueError("IDS coverage changed during filtering")
+                    row={**row,"ids_sequences":sequences,"component_lengths":lengths}
+                kept.append(row)
         stages.append({"name":stage,"unit":"rows","input_count":len(active),"output_count":len(kept),
                        "rejected":len(active)-len(kept),"status":"success","counts_complete":True,
-                       "duration_seconds":time.perf_counter()-started})
+                       "duration_seconds":time.perf_counter()-started,
+                       "input_characters":character_counts(active),"output_characters":character_counts(kept)})
         active=kept
     return active,rejected_rows
+
+
+def character_counts(rows):
+    counts=Counter(ch for row in rows for ch in row["text"])
+    return {"unique_characters":len(counts),"occurrences":sum(counts.values())}
 
 
 def _conflict_groups(rows):

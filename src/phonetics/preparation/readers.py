@@ -8,7 +8,7 @@ import wave
 from pathlib import Path
 
 from ..artifacts import sha256_file
-from ..data_contract import validate_wubi
+from ..ids import build_mapping
 from ..pinyin import canonical_labels
 
 
@@ -44,11 +44,9 @@ def read_corpus(spec):
     return rows, {"path": str(path), "sha256": digest}
 
 
-def read_wubi(spec):
-    path, digest = verify_source(spec["path"], spec.get("sha256"))
-    with path.open("rb") as handle:
-        mapping = pickle.load(handle)
-    return validate_wubi(mapping, alphabet=spec.get("alphabet", "abcdefghijklmnopqrstuvwxyz0123456789")), {"path": str(path), "sha256": digest}
+def read_ids(spec):
+    mapping, vocabulary, provenance = build_mapping(spec)
+    return mapping, vocabulary, provenance
 
 
 def read_sounds(spec):

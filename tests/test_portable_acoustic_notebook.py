@@ -5,6 +5,8 @@ import numpy as np
 from phonetics.artifacts import sha256_file
 from phonetics.preparation import prepare_dataset,validate_acoustic_bundle,validate_prepared
 ROOT=Path(__file__).parents[2];BUILDER=ROOT/"meta/tools/build_preparation_notebook.py";FOLDER=ROOT/"project/notebooks/Datasets/Data Preparation";NOTEBOOK=FOLDER/"prepare-pinyin-embeddings.ipynb";COMPOSITE=FOLDER/"prepare-pinyin-embeddings-composite.ipynb"
+from ids_fixture import ids_pin
+
 class Stub:
  cache_id="portable-fixture"
  def __call__(self,entry,config):return np.array([1.0,len(entry["label"])],dtype=np.float32)
@@ -46,7 +48,6 @@ class PortableNotebookTests(unittest.TestCase):
    with sm.open("w",encoding="utf-8",newline="") as h:w=csv.writer(h,lineterminator="\n");w.writerow(["path","pinyin"]);w.writerows([["ma1.wav","ma1"],["ba2.wav","ba2"]])
    model={"id":"fixture","revision":"r1","layer":-1,"pooling":"mean_all","sample_rate":8000,"mono":True,"padding":"none","dtype":"float32","device":"cpu"};cfg={"bundle_id":"portable","output_root":str(root/"bundles"),"cache_root":str(root/"cache"),"sounds":{"path":str(sounds),"manifest":str(sm),"sha256":sha256_file(sm),"tone_convention":"explicit"},"model":model}
    bundle=ns["prepare_acoustic_bundle"](cfg,embedding_backend=Stub());pin=sha256_file(bundle/"manifest.json");validate_acoustic_bundle(bundle,expected_manifest_sha256=pin);shutil.rmtree(sounds);sm.unlink()
-   corpus=root/"corpus.csv";corpus.write_text("text,pinyin\n妈,ma1\n爸,ba2\n",encoding="utf-8");wubi=root/"wubi.pkl"
-   with wubi.open("wb") as h:pickle.dump({"妈":"abc","爸":"def"},h)
-   prepared=prepare_dataset({"dataset_id":"ready","output_root":str(root/"prepared"),"corpus":{"path":str(corpus),"sha256":sha256_file(corpus),"tone_convention":"explicit"},"wubi":{"path":str(wubi),"sha256":sha256_file(wubi)},"sampling":{"size":None,"strategy":"uniform","seed":1},"acoustic_bundle":{"path":str(bundle),"manifest_sha256":pin}});validate_prepared(prepared)
+   corpus=root/"corpus.csv";corpus.write_text("text,pinyin\n妈,ma1\n爸,ba2\n",encoding="utf-8");dictionary_pin=ids_pin(root,"妈爸")
+   prepared=prepare_dataset({"dataset_id":"ready","output_root":str(root/"prepared"),"corpus":{"path":str(corpus),"sha256":sha256_file(corpus),"tone_convention":"explicit"},"ids":dictionary_pin,"sampling":{"size":None,"strategy":"uniform","seed":1},"acoustic_bundle":{"path":str(bundle),"manifest_sha256":pin}});validate_prepared(prepared)
 if __name__=="__main__":unittest.main()

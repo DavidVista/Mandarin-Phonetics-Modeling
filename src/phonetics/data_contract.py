@@ -8,7 +8,7 @@ import json
 from .pinyin import PINYIN_CONTRACT_VERSION, canonical_labels, decompose
 
 DATA_CONTRACT_VERSION = "prepared-1"
-FILTERS = ("nonempty", "characters", "alignment", "pinyin", "wubi", "acoustic")
+FILTERS = ("nonempty", "characters", "alignment", "pinyin", "ids", "acoustic")
 
 
 def sample_id(text, labels):
@@ -22,7 +22,7 @@ def is_han(character):
             or 0xF900 <= code <= 0xFAFF or 0x20000 <= code <= 0x323AF)
 
 
-def pair_reason(text, labels, wubi, acoustic, *, stage=None):
+def pair_reason(text, labels, ids_mapping, acoustic, *, stage=None):
     """Return the first failing stage; a supplied stage checks only that rule."""
     stages = FILTERS if stage is None else (stage,)
     for current in stages:
@@ -41,8 +41,8 @@ def pair_reason(text, labels, wubi, acoustic, *, stage=None):
                     decompose(label)
             except (ValueError, TypeError, IndexError):
                 return current
-        elif current == "wubi":
-            if any(ch not in wubi for ch in text):
+        elif current == "ids":
+            if any(ch not in ids_mapping for ch in text):
                 return current
         elif current == "acoustic":
             if any(label not in acoustic for label in labels):
@@ -53,13 +53,13 @@ def pair_reason(text, labels, wubi, acoustic, *, stage=None):
 
 
 def validate_wubi(mapping, *, alphabet="abcdefghijklmnopqrstuvwxyz0123456789"):
-    """Validate supplied codes without stripping index digits or reversing maps."""
+    """Validate the separately maintained historical inference mapping."""
     if not isinstance(mapping, dict) or not mapping:
-        raise ValueError("Wubi mapping must be a non-empty dict")
+        raise ValueError("mapping must be a non-empty dict")
     for key, value in mapping.items():
         if (not isinstance(key, str) or len(key) != 1 or not isinstance(value, str)
                 or not value or any(symbol not in alphabet for symbol in value)):
-            raise ValueError(f"invalid Wubi entry: {key!r}")
+            raise ValueError(f"invalid mapping entry: {key!r}")
     return dict(sorted(mapping.items()))
 
 

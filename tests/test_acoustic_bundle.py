@@ -5,6 +5,8 @@ import numpy as np
 from phonetics.artifacts import sha256_file
 from phonetics.preparation import prepare_acoustic_bundle,validate_acoustic_bundle,prepare_dataset,validate_prepared
 
+from ids_fixture import ids_pin
+
 class Backend:
     cache_id="fixture-v1"
     def __call__(self,entry,config):return np.array([len(entry["label"]),1.0],dtype=np.float32)
@@ -30,10 +32,9 @@ class AcousticBundleTests(unittest.TestCase):
  def test_precomputed_dataset_needs_no_audio_or_inference(self):
   b=self.bundle();pin=sha256_file(b/"manifest.json");shutil.rmtree(self.s);self.sm.unlink()
   corpus=self.r/"corpus.csv";corpus.write_text("text,pinyin\n妈,ma1\n爸,ba2\n",encoding="utf-8")
-  wubi=self.r/"wubi.pkl"
-  with wubi.open("wb") as handle:pickle.dump({"妈":"abc","爸":"def"},handle)
-  cfg={"dataset_id":"prepared","output_root":str(self.r/"prepared"),"corpus":{"path":str(corpus),"sha256":sha256_file(corpus),"tone_convention":"explicit"},"wubi":{"path":str(wubi),"sha256":sha256_file(wubi)},"sampling":{"size":1,"strategy":"uniform","seed":7},"acoustic_bundle":{"path":str(b),"manifest_sha256":pin}}
-  out=prepare_dataset(cfg);manifest=validate_prepared(out);self.assertEqual(manifest["model"]["backend"],"precomputed");self.assertEqual(manifest["model"]["origin_backend"],"stub")
+  dictionary_pin=ids_pin(self.r,"妈爸")
+  cfg={"dataset_id":"prepared","output_root":str(self.r/"prepared"),"corpus":{"path":str(corpus),"sha256":sha256_file(corpus),"tone_convention":"explicit"},"ids":dictionary_pin,"sampling":{"size":1,"strategy":"uniform","seed":7},"acoustic_bundle":{"path":str(b),"manifest_sha256":pin}}
+  out=prepare_dataset(cfg);manifest=validate_prepared(out);self.assertEqual(manifest["acoustic"]["backend"],"stub");self.assertEqual(manifest["acoustic"]["bundle_id"],"audio-v1")
   with self.assertRaisesRegex(ValueError,"embedding_backend"):
    cfg["dataset_id"]="bad";prepare_dataset(cfg,embedding_backend=Backend())
  def test_tampered_vector_artifact_rejected(self):

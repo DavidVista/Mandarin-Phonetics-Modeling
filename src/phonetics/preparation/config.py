@@ -1,4 +1,4 @@
-"""Strict configuration parsing for prepared datasets."""
+﻿"""Strict configuration parsing for prepared datasets."""
 
 from __future__ import annotations
 
@@ -11,23 +11,23 @@ SCHEMA_VERSION = 1
 def validate_config(value: dict) -> dict:
     if not isinstance(value, dict):
         raise TypeError("config must be a dict")
-    legacy = {"dataset_id", "output_root", "cache_root", "corpus", "sounds", "wubi", "model", "sampling"}
-    precomputed = {"dataset_id", "output_root", "corpus", "wubi", "sampling", "acoustic_bundle"}
-    if set(value) not in (legacy, precomputed):
+    raw_audio_mode = {"dataset_id", "output_root", "cache_root", "corpus", "sounds", "ids", "model", "sampling"}
+    precomputed = {"dataset_id", "output_root", "corpus", "ids", "sampling", "acoustic_bundle"}
+    if set(value) not in (raw_audio_mode, precomputed):
         raise ValueError("config must use exactly one acoustic mode")
     config = deepcopy(value)
     dataset_id = config["dataset_id"]
     if not isinstance(dataset_id, str) or not dataset_id or Path(dataset_id).name != dataset_id or dataset_id in {".", ".."}:
         raise ValueError("dataset_id must be one safe path component")
-    for section in set(config) & {"corpus", "sounds", "wubi", "model", "sampling", "acoustic_bundle"}:
+    for section in set(config) & {"corpus", "sounds", "ids", "model", "sampling", "acoustic_bundle"}:
         if not isinstance(config[section], dict):
             raise ValueError(f"{section} must be an object")
     _keys(config["corpus"], {"path", "tone_convention"}, {"sha256", "source_id"}, "corpus")
-    _keys(config["wubi"], {"path"}, {"sha256", "alphabet"}, "wubi")
+    _keys(config["ids"], {"path", "sha256", "snapshot_commit", "license", "attribution"}, set(), "ids")
     _keys(config["sampling"], {"size", "strategy", "seed"}, set(), "sampling")
     if config["corpus"]["tone_convention"] not in {"explicit", "neutral_unmarked"}:
         raise ValueError("tone_convention is required and must be explicit or neutral_unmarked")
-    if set(value) == legacy:
+    if set(value) == raw_audio_mode:
         _keys(config["sounds"], {"path", "tone_convention"}, {"sha256", "manifest"}, "sounds")
         if config["sounds"]["tone_convention"] not in {"explicit", "neutral_unmarked"}: raise ValueError("invalid sounds tone convention")
         validate_model_config(config["model"])

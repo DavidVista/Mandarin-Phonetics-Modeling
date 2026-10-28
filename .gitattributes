@@ -8,3 +8,4 @@ datasets/evaluations/**/manifest.json -text
 datasets/evaluations/**/config.json -text
 datasets/evaluations/**/coverage.json -text
 datasets/pinyin-embeddings/** -text
+datasets/ids-decomposition/** -text
