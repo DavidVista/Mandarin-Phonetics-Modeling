@@ -171,6 +171,46 @@ class TorchTrainingRuntimeTests(unittest.TestCase):
         torch.testing.assert_close(h_single[0, 0], h_mixed[0, 0])
         self.assertEqual(mask.tolist(), [[True, False], [True, True]])
 
+    def test_objective_families_share_initial_encoder_and_checkpoint_roundtrip(self):
+        from phonetics.model import build_encoder, shared_encoder_sha256
+        from phonetics.objectives import combined_model_id
+        config = {"architecture": self.architecture}
+        vocab = {**self.vocab, "labels": {"initials": [str(i) for i in range(22)],
+                                           "finals": [str(i) for i in range(36)],
+                                           "tones": [str(i) for i in range(5)]}}
+        reference = build_encoder(config, vocab, "components", seed=19)
+        reference_hash = shared_encoder_sha256(reference)
+        model_ids = ("components", "acoustic", *(combined_model_id(w) for w in (-0.5, 0, 0.25, 2.5)))
+        from phonetics.data import collate_experiment
+        from phonetics.metrics import batch_objective
+        batch = collate_experiment([self.sample("loss", "甲", [[1]])])
+        acoustic_targets = torch.tensor([[1.0, 0.0, 0.0]])
+        for model_id in model_ids:
+            with self.subTest(model_id=model_id):
+                model = build_encoder(config, vocab, model_id, seed=19)
+                self.assertEqual(shared_encoder_sha256(model), reference_hash)
+                model.eval()
+                with torch.no_grad():
+                    outputs = model(batch)
+                loss = batch_objective(outputs, batch, acoustic_targets, model_id)
+                family, weight = __import__("phonetics.objectives", fromlist=["parse_model_id"]).parse_model_id(model_id)
+                if family == "components":
+                    self.assertAlmostEqual(loss["objective"].item(), loss["component_ce_sum"].item(), places=6)
+                elif family == "acoustic":
+                    self.assertAlmostEqual(loss["objective"].item(), loss["cosine_sum"].item(), places=6)
+                else:
+                    expected = loss["component_ce_sum"] + weight * loss["cosine_sum"]
+                    self.assertAlmostEqual(loss["objective"].item(), expected.item(), places=6)
+                    component_heads_mean = sum(loss[f"{name}_ce_sum"] for name in ("initials", "finals", "tones")) / 3
+                    self.assertAlmostEqual(loss["component_ce_sum"].item(), component_heads_mean.item(), places=6)
+                with tempfile.TemporaryDirectory() as folder:
+                    checkpoint = Path(folder) / "model.pt"
+                    torch.save({"model_id": model_id, "seed": 19, "state_dict": model.state_dict()}, checkpoint)
+                    restored = torch.load(checkpoint, map_location="cpu", weights_only=True)
+                    clone = build_encoder(config, vocab, restored["model_id"], seed=restored["seed"])
+                    clone.load_state_dict(restored["state_dict"], strict=True)
+                    self.assertEqual(shared_encoder_sha256(clone), reference_hash)
+
     def test_syllable_objective_uses_real_positions_including_class_zero(self):
         from phonetics.metrics import batch_objective, finalize_epoch
         from phonetics.data import collate_experiment
@@ -208,6 +248,11 @@ class TorchTrainingRuntimeTests(unittest.TestCase):
                 actual = batch_objective(outputs, batch, targets, combined_model_id(weight))
                 self.assertAlmostEqual(actual["weighted_cosine_sum"].item(), weight, places=6)
                 self.assertAlmostEqual(actual["objective"].item(), expected_component_mean + weight, places=6)
+        from phonetics.objectives import parse_model_id
+        for invalid in ("components-acoustic-lambda-nan", "components-acoustic-lambda-inf",
+                        "components-acoustic-lambda-", "components-acoustic-lambda-1e999"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                parse_model_id(invalid)
 
 
     def test_nonfinite_gradient_norm_is_detected(self):

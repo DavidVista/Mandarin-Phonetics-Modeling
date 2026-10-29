@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +15,7 @@ from ..experiment import load_experiment
 from ..model import build_encoder
 from ..objectives import canonical_model_id, parse_model_id
 from .bundle import load_evaluation_bundle
-from .representations import save_representations, validate_matrix
+from .representations import save_contextual_representations, save_representations, validate_matrix
 
 
 def _sha256(path: Path) -> str:
@@ -34,10 +35,11 @@ def _checkpoint_hash_contract(source_hashes: dict, experiment_manifest: dict) ->
 
 def extract_bilstm(
     bundle_path: str | Path, *, experiment_path: str | Path, checkpoint_path: str | Path,
-    output_dir: str | Path, device: str = "cpu", batch_size: int = 32,
+    output_dir: str | Path, device: str = "cpu", batch_size: int = 32, contextual_only: bool = False,
+    expected_model_id: str | None = None, expected_seed: int | None = None,
 ) -> Path:
     """Extract full-sentence BiLSTM outputs and save exact occurrence alignment."""
-    if batch_size <= 0 or isinstance(batch_size, bool):
+    if not isinstance(batch_size, int) or batch_size <= 0 or isinstance(batch_size, bool):
         raise ValueError("batch_size must be a positive integer")
     bundle = load_evaluation_bundle(bundle_path)
     experiment_root, checkpoint_file = Path(experiment_path).resolve(), Path(checkpoint_path).resolve()
@@ -51,6 +53,13 @@ def extract_bilstm(
     config, vocab = experiment["config"], experiment["vocab"]
     checkpoint = torch.load(checkpoint_file, map_location="cpu", weights_only=True)
     model_id = canonical_model_id(checkpoint.get("model_id"))
+    seed = checkpoint.get("seed")
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError("checkpoint seed must be an integer")
+    if expected_model_id is not None and canonical_model_id(expected_model_id) != model_id:
+        raise ValueError("checkpoint model_id does not match expected_model_id")
+    if expected_seed is not None and (not isinstance(expected_seed, int) or isinstance(expected_seed, bool) or expected_seed != seed):
+        raise ValueError("checkpoint seed does not match expected_seed")
     _, lambda_cosine = parse_model_id(model_id)
     if "lambda_cosine" in checkpoint and checkpoint["lambda_cosine"] != lambda_cosine:
         raise ValueError("checkpoint lambda disagrees with model_id")
@@ -58,7 +67,7 @@ def extract_bilstm(
         raise ValueError("checkpoint provenance does not match evaluation experiment")
     if checkpoint.get("config_sha256") != source_hashes["config.json"] or checkpoint.get("vocab_sha256") != source_hashes["vocab.json"]:
         raise ValueError("checkpoint config or vocabulary provenance mismatch")
-    model = build_encoder(config, vocab, model_id=model_id, seed=checkpoint["seed"])
+    model = build_encoder(config, vocab, model_id=model_id, seed=seed)
     model.load_state_dict(checkpoint["state_dict"], strict=True)
     model.to(torch.device(device)).eval()
 
@@ -77,6 +86,14 @@ def extract_bilstm(
             batch = {key: value.to(device) if torch.is_tensor(value) else value
                      for key, value in collate_experiment(selected).items()}
             outputs, output_mask = model.encode(batch)
+            expected_mask = batch["char_mask"]
+            context_dimension = getattr(model, "context_dim", None)
+            if (not torch.is_tensor(outputs) or not torch.is_tensor(output_mask)
+                    or not torch.is_tensor(expected_mask) or expected_mask.dtype != torch.bool
+                    or outputs.ndim != 3 or outputs.shape[:2] != expected_mask.shape
+                    or not isinstance(context_dimension, int) or outputs.shape[2] != context_dimension
+                    or output_mask.shape != expected_mask.shape or output_mask.dtype != torch.bool):
+                raise ValueError("encoder output shape or mask shape/type is invalid")
             outputs = outputs.detach().cpu().numpy()
             if not torch.equal(output_mask, batch["char_mask"]):
                 raise ValueError("encoder output mask differs from source positions")
@@ -91,14 +108,22 @@ def extract_bilstm(
     occurrence_ids = sorted(row["occurrence_id"] for row in bundle["occurrences"])
     if set(extracted) != set(occurrence_ids):
         raise ValueError("encoder extraction did not produce every expected occurrence")
-    hidden = np.stack([extracted[occurrence_id] for occurrence_id in occurrence_ids]).astype(np.float32)
+    hidden = np.stack([extracted[occurrence_id] for occurrence_id in occurrence_ids])
     validate_matrix(occurrence_ids, hidden)
     provenance = {
         "adapter": "phonetics.evaluation.encoders.extract_bilstm", "device": str(device),
         "checkpoint_path": str(checkpoint_file), "checkpoint_sha256": _sha256(checkpoint_file),
         "bundle_manifest_sha256": _sha256(Path(bundle_path).resolve() / "manifest.json"),
-        "experiment_hashes": source_hashes, "model_id": checkpoint["model_id"],
-        "hidden_dimension": int(hidden.shape[1]),
+        "experiment_hashes": expected_checkpoint_hashes, "config_sha256": source_hashes["config.json"],
+        "vocab_sha256": source_hashes["vocab.json"], "model_id": model_id,
+        "seed": seed, "hidden_dimension": int(hidden.shape[1]),
+        "evaluation_mode": model.training is False, "output_dtype": str(hidden.dtype),
+        "environment": {"python": platform.python_version(), "numpy": np.__version__, "torch": torch.__version__,
+                        "platform": platform.platform(), "device": str(device)},
+        "source_sha256": _sha256(Path(__file__).resolve()),
     }
+    if contextual_only:
+        return save_contextual_representations(output_dir, occurrence_ids=occurrence_ids,
+                                               hidden=hidden, provenance=provenance)
     return save_representations(output_dir, occurrence_ids=occurrence_ids, hidden=hidden,
                                 groups=bundle["groups"], provenance=provenance)
