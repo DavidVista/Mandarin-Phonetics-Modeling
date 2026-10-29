@@ -1,61 +1,74 @@
-"""Character-weighted objectives and metrics shared by all conditions."""
+"""Character-weighted losses and diagnostic metrics for training objectives."""
+from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
 
-EPS = 1e-12
+from .training_data import valid_initial_final_pairs
+from .objectives import parse_model_id
+
+COSINE_EPSILON = 1e-8
 
 
-def normalize_vectors(vectors: torch.Tensor) -> torch.Tensor:
-    if not torch.isfinite(vectors).all(): raise ValueError("vectors contain non-finite values")
-    norms = torch.linalg.vector_norm(vectors.double(), dim=-1)
-    if not torch.isfinite(norms).all() or torch.any(norms <= EPS): raise ValueError("vectors have zero, tiny, or overflowed norms")
-    return vectors.double() / norms.unsqueeze(-1)
+def batch_objective(outputs: dict, batch: dict, acoustic_targets: torch.Tensor, model_id: str) -> dict:
+    family, weight = parse_model_id(model_id)
+    mask = outputs["mask"]
+    count = int(mask.sum().item())
+    if count <= 0 or not torch.equal(mask, batch["acoustic_ids"] >= 0):
+        raise ValueError("batch target masks are empty or misaligned")
+    values = {"characters": count, "objective_sum": outputs["hidden"].new_zeros(())}
+    if family == "syllable":
+        target = batch["syllable_ids"][mask]
+        loss = F.cross_entropy(outputs["syllable_logits"][mask], target, reduction="sum")
+        values["syllable_ce_sum"] = loss
+        values["objective_sum"] = values["objective_sum"] + loss
+        values["syllable_correct"] = int((outputs["syllable_logits"][mask].argmax(-1) == target).sum().item())
+    if family in {"components", "components-acoustic"}:
+        labels = batch["component_labels"][mask]
+        ce_sums = []
+        for index, name in enumerate(("initials", "finals", "tones")):
+            logits = outputs["component_logits"][name][mask]
+            target = labels[:, index]
+            loss = F.cross_entropy(logits, target, reduction="sum")
+            values[f"{name}_ce_sum"] = loss
+            values[f"{name}_correct"] = int((logits.argmax(-1) == target).sum().item())
+            ce_sums.append(loss)
+        component_sum = sum(ce_sums) / 3.0
+        values["component_ce_sum"] = component_sum
+        values["objective_sum"] = values["objective_sum"] + component_sum
+        predicted = torch.stack([outputs["component_logits"][n][mask].argmax(-1) for n in ("initials", "finals")], dim=-1)
+        valid_pairs = torch.tensor(sorted(valid_initial_final_pairs()), dtype=torch.long, device=predicted.device)
+        valid = (predicted[:, None, :] == valid_pairs[None, :, :]).all(dim=-1).any(dim=-1)
+        values["invalid_if_count"] = int((~valid).sum().item())
+        values["joint_ift_correct"] = int((torch.stack([outputs["component_logits"][n][mask].argmax(-1) for n in ("initials", "finals", "tones")], dim=-1) == labels).all(dim=-1).sum().item())
+    if family in {"acoustic", "components-acoustic"}:
+        target_ids = batch["acoustic_ids"][mask]
+        prediction = outputs["acoustic_prediction"][mask]
+        targets = acoustic_targets[target_ids]
+        cosine_distance = 1.0 - F.cosine_similarity(prediction, targets, dim=-1, eps=COSINE_EPSILON)
+        cosine_sum = cosine_distance.sum()
+        values["cosine_sum"] = cosine_sum
+        values["predicted_norm_below_epsilon"] = int((torch.linalg.vector_norm(prediction.float(), dim=-1) < COSINE_EPSILON).sum().item())
+        weighted = (weight if family == "components-acoustic" else 1.0) * cosine_sum
+        values["weighted_cosine_sum"] = weighted
+        values["objective_sum"] = values["objective_sum"] + weighted
+    values["objective"] = values["objective_sum"] / count
+    return values
 
 
-def batch_statistics(outputs, batch, acoustic_targets, condition: str, lambda_mse: float = 1.0):
-    initial, final, tone, hidden = outputs
-    labels = batch["component_labels"]
-    mask = labels[..., 0] != -100
-    count = int(mask.sum())
-    if count == 0: raise ValueError("batch contains no valid characters")
-    if not torch.equal(mask, batch["acoustic_ids"] >= 0): raise ValueError("classification and acoustic masks differ")
-    if condition == "combined" and (not torch.isfinite(torch.tensor(lambda_mse)) or lambda_mse < 0): raise ValueError("lambda_mse must be finite and nonnegative")
-    ce_sum = None if condition == "mse_only" else sum(F.cross_entropy(logits[mask], labels[..., i][mask], reduction="sum") for i, logits in enumerate((initial, final, tone)))
-    predicted = normalize_vectors(hidden[mask]); target = normalize_vectors(acoustic_targets[batch["acoustic_ids"][mask]])
-    squared = (predicted - target).square().mean(dim=-1)
-    delta = predicted - target; distance = torch.linalg.vector_norm(delta, dim=-1)
-    mse_sum = squared.sum(); distance_sum = distance.sum(); squared_distance_sum = distance.square().sum()
-    l1_sum = delta.abs().sum(dim=-1).sum(); rmse_sum = torch.sqrt(squared).sum()
-    cosine_direct_sum = (predicted * target).sum(dim=-1).sum()
-    cosine_from_squared_sum = (1.0 - 0.5 * distance.square()).sum()
-    if condition == "ce_only": objective_sum = ce_sum
-    elif condition == "mse_only": objective_sum = mse_sum
-    elif condition == "combined": objective_sum = ce_sum + float(lambda_mse) * mse_sum
-    else: raise ValueError(f"unknown condition: {condition}")
-    stats = {"characters": count, "objective_sum": objective_sum, "mse_sum": mse_sum, "distance_sum": distance_sum,
-             "squared_distance_sum": squared_distance_sum, "l1_sum": l1_sum, "rmse_sum": rmse_sum,
-             "cosine_direct_sum": cosine_direct_sum, "cosine_from_squared_sum": cosine_from_squared_sum}
-    if condition != "mse_only":
-        stats["ce_sum"] = ce_sum
-        stats.update({f"{name}_correct": (logits[mask].argmax(-1) == labels[..., i][mask]).sum()
-                      for i, (name, logits) in enumerate(zip(("initial", "final", "tone"), (initial, final, tone)))})
-        predictions = torch.stack([x[mask].argmax(-1) for x in (initial, final, tone)], dim=-1)
-        stats["exact_correct"] = (predictions == labels[mask]).all(dim=-1).sum()
-    return stats
-
-
-def finalize_statistics(totals: dict, condition: str) -> dict:
-    count = totals.get("characters", 0)
-    if count <= 0: raise ValueError("loader contains no valid characters")
-    result = {"characters": count, "num_characters": count, "objective": totals["objective_sum"] / count,
-              "normalized_mse": totals["mse_sum"] / count, "avg_mse": totals["mse_sum"] / count,
-              "avg_squared_distance": totals["squared_distance_sum"] / count,
-              "avg_distance": totals["distance_sum"] / count, "avg_l1_distance": totals["l1_sum"] / count,
-              "avg_rmse": totals["rmse_sum"] / count, "avg_cosine_direct": totals["cosine_direct_sum"] / count,
-              "avg_cosine_from_squared_distance": totals["cosine_from_squared_sum"] / count}
-    if condition != "mse_only":
-        result["ce"] = totals["ce_sum"] / count
-        result["exact_accuracy"] = totals["exact_correct"] / count
-        for name in ("initial", "final", "tone"): result[f"{name}_accuracy"] = totals[f"{name}_correct"] / count
+def finalize_epoch(totals: dict) -> dict:
+    count = int(totals.get("characters", 0))
+    if count <= 0:
+        raise ValueError("loader contains no valid characters")
+    result = {"characters": count, "objective": totals["objective_sum"] / count}
+    for key, value in totals.items():
+        if key.endswith("_sum") and key != "objective_sum":
+            result[key.removesuffix("_sum")] = value / count
+    for key in ("syllable_correct", "initials_correct", "finals_correct", "tones_correct", "joint_ift_correct"):
+        if key in totals: result[key.removesuffix("_correct") + "_accuracy"] = totals[key] / count
+    if "invalid_if_count" in totals:
+        result["invalid_if_rate"] = totals["invalid_if_count"] / count
+        result["invalid_if_count"] = totals["invalid_if_count"]
+    if "predicted_norm_below_epsilon" in totals:
+        result["predicted_norm_below_epsilon"] = totals["predicted_norm_below_epsilon"]
     return result

@@ -109,7 +109,13 @@ def validate_corpus_bundle(path,expected_manifest_sha256=None):
     cfg=json.loads((root/"config.json").read_text(encoding="utf-8"));stats=json.loads((root/"reports/processing_statistics.json").read_text(encoding="utf-8"))
     if cfg.get("schema_version")!=2 or cfg.get("conflict_policy") not in {"exclude","error"} or cfg.get("corpus_id")!=m.get("corpus_id") or stats.get("config_sha256")!=sha256_file(root/"config.json"):raise ValueError("processed corpus identity mismatch")
     mapping=json.loads((root/"ids/mapping.json").read_text(encoding="utf-8"));vocab=json.loads((root/"ids/vocabulary.json").read_text(encoding="utf-8"))
-    rebuilt,rebuilt_vocab,provenance=build_mapping(cfg["ids"],dictionary_path=root/"ids/dictionary.jsonl")
+    # Config records the caller's path; the manifest records resolved source provenance.
+    # Neither historical path is resolved when validating a portable bundle.
+    ids_source=m["sources"]["ids"]
+    if (set(cfg["ids"])!=set(ids_source) or
+        any(cfg["ids"][key]!=ids_source[key] for key in ids_source if key!="path")):
+        raise ValueError("processed corpus config IDS provenance mismatch")
+    rebuilt,rebuilt_vocab,provenance=build_mapping(ids_source,dictionary_path=root/"ids/dictionary.jsonl")
     if mapping!=rebuilt or vocab!=rebuilt_vocab:raise ValueError("processed corpus IDS mapping or vocabulary mismatch")
     if m["sources"].get("ids")!=provenance or m["ids"].get("mapping_sha256")!=sha256_file(root/"ids/mapping.json") or m["ids"].get("vocabulary_sha256")!=sha256_file(root/"ids/vocabulary.json"):raise ValueError("processed corpus IDS provenance mismatch")
     if m["ids"].get("license_notices_sha256")!={name:sha256_file(root/f"ids/{name}") for name in ("COPYING","LGPL")}:raise ValueError("processed corpus IDS license notice mismatch")

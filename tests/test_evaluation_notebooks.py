@@ -1,4 +1,5 @@
 import ast
+import importlib.metadata
 import importlib.util
 import json
 import sys
@@ -6,6 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+
+from phonetics.objectives import combined_model_id
 
 try:
     import numpy as np
@@ -38,11 +41,19 @@ class NotebookTests(unittest.TestCase):
         for path, prefix in ((COMPOSITE, "composite"), (STANDALONE, "standalone")):
             notebook = json.loads(path.read_text(encoding="utf-8"))
             config = code(next(cell for cell in notebook["cells"] if cell["id"] == prefix + "-config"))
-            namespace = {"find_project_root": lambda: PROJECT}
-            exec(compile(config, "analysis-config", "exec"), namespace)
+            namespace = {"find_project_root": lambda: PROJECT, "combined_model_id": combined_model_id}
+            actual_manifest = PROJECT / "datasets" / "experiments" / "duyu-chinese-lessons-zh-cn-v1" / "manifest.json"
+            manifest_bytes = actual_manifest.read_bytes()
+            real_read_bytes = Path.read_bytes
+            def read_bytes(path_value):
+                if path_value.name == "manifest.json":
+                    return manifest_bytes
+                return real_read_bytes(path_value)
+            with mock.patch.object(Path, "read_bytes", new=read_bytes):
+                exec(compile(config, "analysis-config", "exec"), namespace)
             runs = namespace["RUNS"]
-            self.assertEqual(runs[0]["checkpoint_path"], namespace["RUNS_ROOT"] / "ce_only/seed-42/best.pt")
-            self.assertEqual(runs[1]["checkpoint_path"], namespace["RUNS_ROOT"] / "combined/lambda-1/seed-42/best.pt")
+            self.assertEqual(runs[0]["checkpoint_path"], namespace["RUNS_ROOT"] / "components/REPLACE_WITH_COMPONENTS_RUN_ID/seed-0/best.pt")
+            self.assertEqual(runs[1]["checkpoint_path"], namespace["RUNS_ROOT"] / "components-acoustic-lambda-1/REPLACE_WITH_COMBINED_RUN_ID/seed-0/best.pt")
             self.assertNotIn('"models"', config)
             run_source = code(next(cell for cell in notebook["cells"] if cell["id"] == prefix + "-run"))
             namespace["run_evaluation"] = mock.Mock()
@@ -52,6 +63,10 @@ class NotebookTests(unittest.TestCase):
             namespace["run_evaluation"].assert_not_called()
 
     def test_standalone_cells_execute_without_project_runtime_imports_and_match_composite(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("Torch is unavailable; standalone model-adapter execution is not runtime-verified")
         notebook, standalone = execute_embedded(STANDALONE)
         rendered = STANDALONE.read_text(encoding="utf-8")
         self.assertNotIn("from phonetics", rendered)
@@ -90,6 +105,10 @@ class NotebookTests(unittest.TestCase):
         self.assertIn('code_provenance=BUILD_METADATA["source_sha256"]', run_source)
 
     def test_dependency_setup_paths_and_storage_contract(self):
+        try:
+            importlib.metadata.version("scipy")
+        except importlib.metadata.PackageNotFoundError:
+            self.skipTest("SciPy distribution metadata is unavailable; dependency execution is not runtime-verified")
         prepare = json.loads(PREPARE.read_text(encoding="utf-8"))
         dependency_source = code(next(cell for cell in prepare["cells"] if cell["id"] == "prep-dependencies"))
         for enabled in (False, True):

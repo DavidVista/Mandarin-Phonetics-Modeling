@@ -9,13 +9,27 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from ..data import collate_experiment
+from ..experiment import load_experiment
 from ..model import build_encoder
+from ..objectives import canonical_model_id, parse_model_id
 from .bundle import load_evaluation_bundle
 from .representations import save_representations, validate_matrix
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _checkpoint_hash_contract(source_hashes: dict, experiment_manifest: dict) -> dict:
+    """Complete evaluation's five-file source pin with its validated acoustic artifact pin."""
+    required = {"manifest.json", "config.json", "vocab.json", "samples.jsonl", "splits.json"}
+    if not isinstance(source_hashes, dict) or set(source_hashes) != required:
+        raise ValueError("evaluation source experiment hash set is invalid")
+    acoustic_hash = experiment_manifest.get("artifacts", {}).get("acoustic_targets.npy")
+    if not isinstance(acoustic_hash, str) or len(acoustic_hash) != 64 or any(c not in "0123456789abcdef" for c in acoustic_hash):
+        raise ValueError("validated experiment manifest lacks acoustic target hash")
+    return {**source_hashes, "acoustic_targets.npy": acoustic_hash}
 
 
 def extract_bilstm(
@@ -28,25 +42,27 @@ def extract_bilstm(
     bundle = load_evaluation_bundle(bundle_path)
     experiment_root, checkpoint_file = Path(experiment_path).resolve(), Path(checkpoint_path).resolve()
     source_hashes = bundle["manifest"]["source_experiment"]["hashes"]
-    for name in ("manifest.json", "config.json", "vocab.json", "samples.jsonl"):
+    for name in ("manifest.json", "config.json", "vocab.json", "samples.jsonl", "splits.json"):
         path = experiment_root / name
         if not path.is_file() or _sha256(path) != source_hashes.get(name):
             raise ValueError(f"experiment does not match evaluation source hash: {name}")
-    config = json.loads((experiment_root / "config.json").read_text(encoding="utf-8"))
-    vocab = json.loads((experiment_root / "vocab.json").read_text(encoding="utf-8"))
+    experiment = load_experiment(experiment_root)
+    expected_checkpoint_hashes = _checkpoint_hash_contract(source_hashes, experiment["manifest"])
+    config, vocab = experiment["config"], experiment["vocab"]
     checkpoint = torch.load(checkpoint_file, map_location="cpu", weights_only=True)
-    expected = {
-        "manifest_sha256": source_hashes["manifest.json"], "config_sha256": source_hashes["config.json"],
-        "vocab_sha256": source_hashes["vocab.json"],
-    }
-    if any(checkpoint.get(key) != value for key, value in expected.items()):
+    model_id = canonical_model_id(checkpoint.get("model_id"))
+    _, lambda_cosine = parse_model_id(model_id)
+    if "lambda_cosine" in checkpoint and checkpoint["lambda_cosine"] != lambda_cosine:
+        raise ValueError("checkpoint lambda disagrees with model_id")
+    if checkpoint.get("experiment_hashes") != expected_checkpoint_hashes:
         raise ValueError("checkpoint provenance does not match evaluation experiment")
-    model = build_encoder(config, vocab)
+    if checkpoint.get("config_sha256") != source_hashes["config.json"] or checkpoint.get("vocab_sha256") != source_hashes["vocab.json"]:
+        raise ValueError("checkpoint config or vocabulary provenance mismatch")
+    model = build_encoder(config, vocab, model_id=model_id, seed=checkpoint["seed"])
     model.load_state_dict(checkpoint["state_dict"], strict=True)
     model.to(torch.device(device)).eval()
 
-    sample_rows = [json.loads(line) for line in (experiment_root / "samples.jsonl").read_text(encoding="utf-8").splitlines()]
-    samples = {row["sample_id"]: row for row in sample_rows}
+    samples = experiment["samples"]
     occurrence_by_sample: dict[str, list[dict]] = {}
     for occurrence in bundle["occurrences"]:
         occurrence_by_sample.setdefault(occurrence["sample_id"], []).append(occurrence)
@@ -58,17 +74,12 @@ def extract_bilstm(
         for start in range(0, len(sentence_ids), batch_size):
             batch_ids = sentence_ids[start:start + batch_size]
             selected = [samples[sample_id] for sample_id in batch_ids]
-            token_ids, offsets, cursor = [], [], 0
-            for sample in selected:
-                token_ids.extend(sample["token_ids"])
-                offsets.extend(cursor + span[0] for span in sample["character_spans"])
-                cursor += len(sample["token_ids"])
-            lengths = torch.tensor([len(sample["character_spans"]) for sample in selected], dtype=torch.long)
-            outputs = model(
-                torch.tensor(token_ids, dtype=torch.long, device=device),
-                torch.tensor(offsets, dtype=torch.long, device=device), lengths,
-                return_hidden=True,
-            )[-1].detach().cpu().numpy()
+            batch = {key: value.to(device) if torch.is_tensor(value) else value
+                     for key, value in collate_experiment(selected).items()}
+            outputs, output_mask = model.encode(batch)
+            outputs = outputs.detach().cpu().numpy()
+            if not torch.equal(output_mask, batch["char_mask"]):
+                raise ValueError("encoder output mask differs from source positions")
             for row_index, (sample_id, sample) in enumerate(zip(batch_ids, selected)):
                 expected_positions = sorted(occurrence_by_sample[sample_id], key=lambda row: row["character_position"])
                 if [row["character_position"] for row in expected_positions] != list(range(len(sample["text"]))) or any(
@@ -86,7 +97,8 @@ def extract_bilstm(
         "adapter": "phonetics.evaluation.encoders.extract_bilstm", "device": str(device),
         "checkpoint_path": str(checkpoint_file), "checkpoint_sha256": _sha256(checkpoint_file),
         "bundle_manifest_sha256": _sha256(Path(bundle_path).resolve() / "manifest.json"),
-        "experiment_hashes": expected, "hidden_dimension": int(hidden.shape[1]),
+        "experiment_hashes": source_hashes, "model_id": checkpoint["model_id"],
+        "hidden_dimension": int(hidden.shape[1]),
     }
     return save_representations(output_dir, occurrence_ids=occurrence_ids, hidden=hidden,
                                 groups=bundle["groups"], provenance=provenance)

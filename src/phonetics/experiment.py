@@ -15,6 +15,7 @@ import numpy as np
 
 from .artifacts import read_jsonl, safe_artifact, sha256_file, write_json
 from .data_contract import sample_id
+from .objectives import canonical_model_id
 from .ids import IDS_RULES_VERSION, build_mapping
 from .pinyin import (
     FINALS, INITIALS, PARSER_PROVENANCE, PINYIN_CONTRACT_VERSION, TONES,
@@ -23,7 +24,7 @@ from .pinyin import (
 
 PREPARED_SHA256 = "c562722d2a866f4f1904c746c86c5863a310a66ee3875d86fc36f254fd2d7c10"
 SCHEMA_VERSION = 3
-MODES = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+DEFAULT_MODEL_IDS = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
 REQUIRED_FILES = {
     "samples.jsonl", "ids/mapping.json", "ids/vocabulary.json", "ids/dictionary.jsonl",
     "ids/COPYING", "ids/LGPL", "acoustic_targets.npy", "vocab.json", "splits.json", "config.json",
@@ -47,7 +48,7 @@ def default_experiment_config(acoustic_dim=1024):
     return {"schema_version": SCHEMA_VERSION, "prepared_manifest_sha256": PREPARED_SHA256,
             "split_ratios": [0.8, 0.1, 0.1], "split_seed": 0, "training_seeds": [0, 1, 2, 3, 4],
             "architecture": {**_ARCH, "acoustic_dim": acoustic_dim},
-            "training": copy.deepcopy(_TRAIN), "model_ids": list(MODES)}
+            "training": copy.deepcopy(_TRAIN), "model_ids": list(DEFAULT_MODEL_IDS)}
 
 
 def _validate_config(value, acoustic_dim):
@@ -62,8 +63,14 @@ def _validate_config(value, acoustic_dim):
         return actual == wanted
     if (type(cfg["schema_version"]) is not int or cfg["schema_version"] != SCHEMA_VERSION or
         not exact_type_value(cfg["architecture"], expected["architecture"]) or
-        not exact_type_value(cfg["training"], _TRAIN) or not exact_type_value(cfg["model_ids"], MODES)):
+        not exact_type_value(cfg["training"], _TRAIN)):
         raise ValueError("experiment config conflicts with the training protocol")
+    model_ids = cfg["model_ids"]
+    if not isinstance(model_ids, list) or not model_ids:
+        raise ValueError("model_ids must be a nonempty list")
+    canonical_ids = [canonical_model_id(model_id) for model_id in model_ids]
+    if len(set(canonical_ids)) != len(canonical_ids):
+        raise ValueError("model_ids must identify distinct objectives")
     pin = cfg["prepared_manifest_sha256"]
     if not isinstance(pin, str) or len(pin) != 64 or any(c not in "0123456789abcdef" for c in pin):
         raise ValueError("prepared_manifest_sha256 must be a lowercase SHA-256")

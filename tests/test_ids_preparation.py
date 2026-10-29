@@ -1,5 +1,6 @@
-import csv,json,shutil,sys,tempfile,unittest,wave
+import csv,json,os,shutil,sys,tempfile,unittest,wave
 from pathlib import Path
+from unittest.mock import patch
 import numpy as np
 sys.path.insert(0,str(Path(__file__).parents[1]/"src"))
 from phonetics.artifacts import sha256_file,write_json
@@ -48,6 +49,38 @@ class IDSPreparationTests(unittest.TestCase):
   self.assertEqual(mapping["characters"]["丁"]["tokens"],["一"])
   self.assertEqual(vocab["tokens"][0],"[PAD]");self.assertEqual(vocab["stoi"]["[PAD]"],0)
   self.assertEqual(sorted(vocab["tokens"][1:],key=ord),vocab["tokens"][1:])
+ def test_bundled_mapping_preserves_foreign_source_paths_and_checks_hash(self):
+  expected_mapping,expected_vocab,_=build_mapping(self.ids)
+  resolve=Path.resolve
+  for source in (r"Z:\unavailable-client\dictionary.txt","/unavailable-client/dictionary.txt"):
+   with self.subTest(source=source):
+    pin={**self.ids,"path":source}
+    def resolve_bundle_only(path,*args,**kwargs):
+     if str(path)==source:raise AssertionError("Historical source path must not be resolved")
+     return resolve(path,*args,**kwargs)
+    with patch.object(Path,"resolve",resolve_bundle_only):
+     mapping,vocab,provenance=build_mapping(pin,dictionary_path=self.dictionary)
+    self.assertEqual(provenance["path"],source)
+    self.assertEqual(mapping,{**expected_mapping,"provenance":{**expected_mapping["provenance"],"path":source}})
+    self.assertEqual(vocab,expected_vocab)
+    with self.assertRaisesRegex(ValueError,"checksum mismatch"):
+     build_mapping({**pin,"sha256":"0"*64},dictionary_path=self.dictionary)
+ def test_relative_and_forward_slash_ids_paths_survive_bundle_relocation(self):
+  raw=self.corpus("portable-paths.csv",[["妈","ma1","a"],["爸","ba4","b"]])
+  for index,source in enumerate((os.path.relpath(self.dictionary,Path.cwd()),self.dictionary.resolve().as_posix())):
+   with self.subTest(source=source):
+    cfg=self.cfg(raw,f"paths-{index}");cfg["ids"]={**self.ids,"path":source}
+    corpus=prepare_corpus(cfg)
+    prepared=assemble_dataset({"dataset_id":f"prepared-{index}","output_root":str(self.root/"prepared"),"processed_corpus":{"path":str(corpus),"manifest_sha256":sha256_file(corpus/"manifest.json")},"acoustic_bundle":cfg["acoustic_bundle"]})
+    moved=self.root/f"moved-{index}";shutil.move(str(corpus),moved)
+    resolve=Path.resolve
+    original_path=str(self.dictionary.resolve())
+    def resolve_without_source(path,*args,**kwargs):
+     if str(path) in {source,original_path}:raise AssertionError("Historical source path must not be resolved")
+     return resolve(path,*args,**kwargs)
+    with patch.object(Path,"resolve",resolve_without_source):
+     validate_corpus_bundle(moved)
+     validate_prepared(prepared)
  def test_missing_rows_coverage_dedup_and_staged_prepared(self):
   raw=self.corpus("input.csv",[["妈","ma1","a"],["爸","ba4","b"],["妈爸","ma1 ba4","c"],["坏","ma1","d"],["爸","ba4","e"]])
   corpus=prepare_corpus(self.cfg(raw));cm=validate_corpus_bundle(corpus)

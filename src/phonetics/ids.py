@@ -103,7 +103,8 @@ def build_mapping(spec: dict, *, dictionary_path: str | Path | None = None) -> t
             raise ValueError("bundled IDS dictionary checksum mismatch")
         if spec["snapshot_commit"] != EXPECTED_SNAPSHOT or spec["license"] != EXPECTED_LICENSE or not str(spec["attribution"]).strip():
             raise ValueError("IDS source provenance mismatch")
-        path, digest = Path(spec["path"]).resolve(), spec["sha256"]
+        # The source path is historical provenance, not a location on this host.
+        path, digest = spec["path"], spec["sha256"]
     records = read_dictionary(records_path)
     tokens = sorted({token for record in records.values() for token in record["tokens"]}, key=ord)
     vocabulary = [PAD, *tokens]
