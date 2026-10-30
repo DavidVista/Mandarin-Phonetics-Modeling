@@ -40,6 +40,19 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["analysis_status"], "invalid:KeyError")
 
+    def test_stable_cosine_handles_tiny_and_huge_raw_vectors(self):
+        for scale in (1e-300, 1e300):
+            rows = module.cosine_rows(
+                [{"pair_id": "p", "left_id": "a", "right_id": "b", "dimsim_distance": 1.0,
+                  "distance_status": "ok", "overlap_mask": "000", "no_zero_initial_diagnostic": True}],
+                ["a", "b"], np.asarray([[scale, scale], [scale, scale]], dtype=np.float64))
+            self.assertAlmostEqual(rows[0]["cosine_similarity"], 1.0)
+        with self.assertRaisesRegex(ValueError, "zero-norm occurrences.*a"):
+            module.cosine_rows(
+                [{"pair_id": "p", "left_id": "a", "right_id": "b", "dimsim_distance": 1.0,
+                  "distance_status": "ok", "overlap_mask": "000", "no_zero_initial_diagnostic": True}],
+                ["a", "b"], np.asarray([[0.0, 0.0], [1.0, 0.0]], dtype=np.float64))
+
     def test_paired_delta_and_join_mismatch(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
             root = Path(temporary)

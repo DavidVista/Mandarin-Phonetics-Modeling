@@ -176,6 +176,25 @@ class NotebookTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 builder.build_notebooks(check=True)
 
+    def test_builder_only_prepare_does_not_touch_geometry_notebooks(self):
+        if not GENERATOR.is_file():
+            self.skipTest("workspace notebook generator is unavailable in this project snapshot")
+        spec = importlib.util.spec_from_file_location("evaluation_prepare_builder_test", GENERATOR)
+        builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+            root = Path(temporary)
+            builder.PREPARE_PATH = root / "prepare.ipynb"
+            builder.COMPOSITE_PATH = root / "composite.ipynb"
+            builder.STANDALONE_PATH = root / "standalone.ipynb"
+            builder.COMPOSITE_PATH.write_text("user geometry edits", encoding="utf-8")
+            builder.STANDALONE_PATH.write_text("user standalone edits", encoding="utf-8")
+            outputs = builder.build_notebooks(only_prepare=True)
+            self.assertEqual(outputs, [builder.PREPARE_PATH])
+            self.assertEqual(builder.COMPOSITE_PATH.read_text(encoding="utf-8"), "user geometry edits")
+            self.assertEqual(builder.STANDALONE_PATH.read_text(encoding="utf-8"), "user standalone edits")
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                builder.build_notebooks(only_prepare=True, only_geometry=True)
+
 
 if __name__ == "__main__":
     unittest.main()

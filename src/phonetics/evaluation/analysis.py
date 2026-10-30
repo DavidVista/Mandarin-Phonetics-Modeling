@@ -12,6 +12,7 @@ import numpy as np
 
 from .bundle import load_evaluation_bundle
 from .representations import validate_matrix
+from .cosine import stable_cosine
 
 LEVELS = ("contextual", "character_pinyin", "syllable")
 BIN_EDGES = tuple(range(0, 121, 10))
@@ -73,8 +74,9 @@ def cosine_rows(pair_rows: list[dict], object_ids: list[str], matrix: np.ndarray
             left, right = values[index[pair["left_id"]]], values[index[pair["right_id"]]]
         except KeyError as error:
             raise ValueError(f"pair references missing representation {error.args[0]}") from error
-        cosine = float(np.dot(left.astype(np.float64), right.astype(np.float64)) /
-                       (np.linalg.norm(left.astype(np.float64)) * np.linalg.norm(right.astype(np.float64))))
+        cosine = stable_cosine(left, right, left_id=pair["left_id"], right_id=pair["right_id"])
+        if not math.isfinite(cosine):
+            raise ValueError(f"cosine result is non-finite: {pair['left_id']}, {pair['right_id']}")
         cosine = min(1.0, max(-1.0, cosine))
         bin_status, label = distance_bin(pair.get("dimsim_distance"))
         metric_status = pair.get("distance_status", "missing_status")

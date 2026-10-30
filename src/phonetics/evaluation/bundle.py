@@ -218,8 +218,17 @@ def prepare_evaluation_bundle(
     syllable_pair_count: int | None = None, max_all_pairs: int = 1_000_000,
     distance_fn: DistanceFunction | None = None, metric_provenance: dict[str, Any] | None = None,
     code_provenance: dict[str, str] | None = None,
+    protocol_config: dict[str, Any] | None = None,
 ) -> Path:
     """Create an immutable evaluation bundle and return its path."""
+    if protocol_config is not None:
+        from .contextual_bundle import prepare_contextual_bundle
+        return prepare_contextual_bundle(
+            evaluation_id, experiment_path=experiment_path, output_root=output_root,
+            split=split, sentence_limit=sentence_limit, sentence_seed=sentence_seed,
+            distance_fn=distance_fn, metric_provenance=metric_provenance,
+            code_provenance=code_provenance, protocol_config=protocol_config,
+        )
     evaluation_id = _validate_evaluation_id(evaluation_id)
     numeric = {"contextual_pair_count": contextual_pair_count, "sentence_seed": sentence_seed,
                "sampling_seed": sampling_seed, "character_pair_count": character_pair_count,
@@ -356,6 +365,9 @@ def load_evaluation_bundle(path: str | Path) -> dict[str, Any]:
     """Load a bundle after verifying every recorded artifact checksum."""
     root = Path(path).resolve()
     manifest = _read_json(root / "manifest.json")
+    if manifest.get("schema_version") == 3:
+        from .contextual_bundle import load_contextual_bundle
+        return load_contextual_bundle(root, manifest)
     if manifest.get("schema_version") != BUNDLE_SCHEMA_VERSION:
         raise ValueError("unsupported evaluation bundle schema")
     if manifest.get("pinyin_contract") != PINYIN_CONTRACT_VERSION or manifest.get("parser_provenance") != PARSER_PROVENANCE:
