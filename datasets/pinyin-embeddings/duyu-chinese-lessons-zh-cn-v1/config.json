@@ -1,5 +1,5 @@
 {
-  "bundle_id": "duyu-chinese-lessons-zh-cn-v1",
+  "bundle_id": "chinese-sounds-v1",
   "cache_root": "/kaggle/working/acoustic-cache",
   "model": {
     "device": "cuda",
@@ -7,7 +7,7 @@
     "id": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
     "layer": -1,
     "mono": true,
-    "padding": "legacy_one_second",
+    "padding": "none",
     "pooling": "mean_all",
     "processor": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
     "revision": "99ccb2737be22b8bb50dcfcc39ad4d567fb90cfd",

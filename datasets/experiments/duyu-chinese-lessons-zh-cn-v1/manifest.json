@@ -1,58 +1,57 @@
 {
   "artifacts": {
-    "acoustic_targets.pt": "31164d2fef24cf91ec6e79ae28ad6613144a27814644964a94d610b1a64984c2",
-    "config.json": "6ccbd330d7c8edfbc04439bf17f702061a39a6bde6277558b9a54365bbdaf57e",
-    "initialization/seed-42.pt": "432103f3db09068150801c94b3bbf3e387e722503266cc12ca795de31b54e94b",
-    "samples.jsonl": "5d95d27573f20f2d8f127dd43ac4967c9ec6df23547dbca424559557879880a7",
-    "splits.json": "54a4f3897d1929880f3c8994ac72e8f4ab01c13081dac5a0171e0729b63814fa",
-    "vocab.json": "e49b1c48e1a4eddefd33bb3c239e9d32593d8c7ddccf10189a758e638c608517",
-    "wubi_mapping.pkl": "80d3228546097490632cfdc1b42666b706840e2d7f1f76f64712449c9cfe927e"
+    "acoustic_targets.npy": "3e6a6bd1ff18cddf2064188e29082499b0eb27c5b3f029ef6e403efb2c967aa1",
+    "config.json": "5b864d698bc61714e3b94986ddfb54a6357d81f493affd2c749d3f9c356fb8d9",
+    "ids/COPYING": "a3576901a61ae60873a68820af22ee9e767628febca77fa6bbe34ff969f2227d",
+    "ids/LGPL": "211689a1f7b8972c082edc883b06a9f506b8b678b254352e617d211cce919e49",
+    "ids/dictionary.jsonl": "744bb05d5b0742e9ee35c37791f94d56a173349b3367569e7ca11e510364d203",
+    "ids/mapping.json": "108a635fea455b57d0083b31205c32224925194af71f1b34ff3db2f10f4b0d2f",
+    "ids/vocabulary.json": "36a5ec5531a1348bc8e769cbd1e613830aa6a95a29a7d29a3b7d4f3cc792a04c",
+    "provenance/acoustic_manifest.json": "0280ba452aa1580b7d414a2aa15f05d878bd1be2bf11e56f93133d07495e3641",
+    "provenance/prepared_acoustic_targets.pkl": "97a068309d2652102e14bc070ea1474109dbb32901538f39c4fffdec61712218",
+    "provenance/prepared_corpus.jsonl": "b9f626df5e28616ecc564ba18472608c7c0b5553ff954805686013c259c8e7e4",
+    "provenance/prepared_manifest.json": "c562722d2a866f4f1904c746c86c5863a310a66ee3875d86fc36f254fd2d7c10",
+    "provenance/processed_config.json": "d5395c378f0e5d4d8c0f5248e9be0c4491d7b7db960640090e607b62d17be549",
+    "provenance/processed_manifest.json": "f3395a74ea91ef39e78d068e911194b084e033f5b1075be3dcc490e7abb7b74e",
+    "provenance/sound_inventory.jsonl": "f90172e72c6792d1f65eeab8fae8e164915a648fb7b4804e5842c0255987e368",
+    "samples.jsonl": "dee48c6765268ff6dd79f4e3a150b4b89155e1f3ef50dc3542a25a7268eeda4e",
+    "splits.json": "8cd97cab47e3916429fc3902a95e2d32ae8ea7513f34a9e511b02d0a834351e1",
+    "vocab.json": "2ba450c8460f62ec1fe169c10ed7182332ca4de7883863fcb169109fbdf837ea"
   },
-  "code": {
-    "data.py": "91cc7349c629a986731ef703ce0534682835ef6b2107b9419771d326c2e0131d",
-    "data_contract.py": "96e5dd2a0390836d8892badb1baea513b83fb496fb1e4f48dd24ae6bb5229b4d",
-    "model.py": "9f6bd2de95cec891c875280e518726ec1c9f6f0ec6080b55fe564a88170415af",
-    "pinyin.py": "35b58f1dda4a8de2e65df40c375bc1efe64095c9cc931d5e211c8ecc639a6e83",
-    "reproducibility.py": "ad47bd3899c536a7d4a8d151469b1d206b15a653bd00e6498eeddb90a37446f3"
-  },
+  "bundle_type": "experiment_dataset",
   "counts": {
-    "accepted": 100000,
-    "input_rows": 100000,
-    "rejected": {},
-    "seeds": [
-      42
-    ],
-    "splits": {
-      "test": 10000,
-      "train": 80000,
-      "validation": 10000
-    }
-  },
-  "environment": {
-    "numpy": "2.2.6",
-    "python": "3.11.2",
-    "torch": "2.6.0+cpu"
+    "acoustic_dim": 1024,
+    "acoustic_targets": 1188,
+    "positions": 559756,
+    "samples": 100000
   },
   "experiment_id": "duyu-chinese-lessons-zh-cn-v1",
-  "preparation_version": "2",
-  "prepared_dataset": {
-    "contract": "prepared-1",
-    "id": "duyu-chinese-lessons-zh-cn-v1",
-    "manifest_sha256": "df7a80149b3fc7f27dda4cea95521f616c6c6ed73a3a0afd545b1f9caf383076"
+  "ids_rules": "ids-prefix-1",
+  "parser_provenance": {
+    "api": "pypinyin.contrib.tone_convert",
+    "empty_final": "reject",
+    "input_alias": "u:",
+    "input_format": "lowercase-ascii-tone3",
+    "inventory_sha256": "6f17d446d572980f9a40a8a592878db04302c8edf4e3cff2c70ab2006d1be9f1",
+    "inventory_source": "pypinyin.constants.PINYIN_DICT",
+    "library": "pypinyin",
+    "missing_tone": "5",
+    "strict": true,
+    "umlaut_storage": "v",
+    "version": "0.55.0",
+    "vocabulary_sha256": "ed7f9a1786fc98fa8870f3cfbd3a5ba676d8fc2a8f53a142c2507d781d146a44"
   },
-  "schema_version": 1,
-  "sources": {
-    "acoustic": {
-      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\prepared\\duyu-chinese-lessons-zh-cn-v1\\embeddings\\pinyin_embeddings.pkl",
-      "sha256": "eca0b2c4e627bc5ab05535203f1821ba3ff9d7e682f71083e42866caabfb7565"
-    },
-    "corpus": {
-      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\prepared\\duyu-chinese-lessons-zh-cn-v1\\corpus\\train.csv",
-      "sha256": "0cb6f0e3e1c3a5df7e94a244363f6bf8812d8bec734088eb25eb5b96189c7db5"
-    },
-    "wubi": {
-      "path": "D:\\projects\\Mandarin-Phonetics-Modeling\\project\\datasets\\prepared\\duyu-chinese-lessons-zh-cn-v1\\wubi\\chinese_to_wubi.pkl",
-      "sha256": "80d3228546097490632cfdc1b42666b706840e2d7f1f76f64712449c9cfe927e"
-    }
-  }
+  "pinyin_contract": "pypinyin-tone3-1",
+  "prepared_dataset_id": "duyu-chinese-lessons-zh-cn-v1",
+  "prepared_manifest_sha256": "c562722d2a866f4f1904c746c86c5863a310a66ee3875d86fc36f254fd2d7c10",
+  "provenance": {
+    "provenance/acoustic_manifest.json": "0280ba452aa1580b7d414a2aa15f05d878bd1be2bf11e56f93133d07495e3641",
+    "provenance/prepared_acoustic_targets.pkl": "97a068309d2652102e14bc070ea1474109dbb32901538f39c4fffdec61712218",
+    "provenance/prepared_corpus.jsonl": "b9f626df5e28616ecc564ba18472608c7c0b5553ff954805686013c259c8e7e4",
+    "provenance/prepared_manifest.json": "c562722d2a866f4f1904c746c86c5863a310a66ee3875d86fc36f254fd2d7c10",
+    "provenance/processed_config.json": "d5395c378f0e5d4d8c0f5248e9be0c4491d7b7db960640090e607b62d17be549",
+    "provenance/processed_manifest.json": "f3395a74ea91ef39e78d068e911194b084e033f5b1075be3dcc490e7abb7b74e",
+    "provenance/sound_inventory.jsonl": "f90172e72c6792d1f65eeab8fae8e164915a648fb7b4804e5842c0255987e368"
+  },
+  "schema_version": 3
 }

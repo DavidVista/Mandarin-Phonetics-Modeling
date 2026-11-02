@@ -1,21 +1,21 @@
 {
   "artifacts": {
-    "config.json": "e52fd8d1109fc8d814ad3b90e7064538ddf8fcd0a0b7b2a9fa8e7c34dc95cbf7",
-    "pinyin_embeddings.pkl": "eca0b2c4e627bc5ab05535203f1821ba3ff9d7e682f71083e42866caabfb7565",
+    "config.json": "d05c53a4eecf1d20d954d1c05fa27f96f2342e7aa6babfb1d5922f80c6636406",
+    "pinyin_embeddings.pkl": "97a068309d2652102e14bc070ea1474109dbb32901538f39c4fffdec61712218",
     "reports/inference.json": "2553cc072fca54d0cf391504f1bb3a962df615f15a603e1c229a6907a683a91a",
     "sound_inventory.jsonl": "f90172e72c6792d1f65eeab8fae8e164915a648fb7b4804e5842c0255987e368"
   },
-  "bundle_id": "duyu-chinese-lessons-zh-cn-v1",
+  "bundle_id": "chinese-sounds-v1",
   "bundle_type": "acoustic_embeddings",
   "code": {
     "acoustic-validation": "98edfe53b1a76a4122cddc1f04ecf72eb5caffc03cf48cbd098f4cbf9668d2e2",
     "artifact-helpers": "55452cc148ac690fec4164535346014f2e08f4a75dec9485f89af731bc22ba59",
     "audio-model": "3b5a7071021cb9ba4fc9c76d5a32b07c34510655affa1b3362a058ee6ec626bb",
-    "bundle-creation": "7f92a9aeff8bc37df259469d252a65ac8d2718fc445f57fc1c807c2b1c224b85",
-    "bundle-validation": "d4324539c2a9eee5d2d98e6811f26c5c8234d1e09ff7136891f0158c742cc9fa",
+    "bundle-creation": "a94c32fce3317a6356735c15be99504d73327283047bcd7b66859b9c8dce69c8",
+    "bundle-validation": "1039d1064327be482818df0212ac1d01d476d910835d99a491664b29403fbce9",
     "embedding-cache": "d90e5a49ea1553147f8c958515ca39d764e50ba9c917475ca817485b903ce379",
     "model-config": "1f85757af42a7fef988391efe2eaafc832437b43ac8d6c2bc815a08c7291a6a7",
-    "pinyin-contract": "8b1cf6c1c116f61abfa1f6a42288d774363fc159d3701f464cc1934649f3bd0c",
+    "pinyin-contract": "068f53115ff99936d22177444a8b545b51195e188d0bd69230c930cd26976d67",
     "sound-inventory": "cf2f20796b9b7cf7b424f87531ca79251363d70bc8bd390815801256fc99a501"
   },
   "count": 1188,
@@ -42,13 +42,27 @@
     "id": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
     "layer": -1,
     "mono": true,
-    "padding": "legacy_one_second",
+    "padding": "none",
     "pooling": "mean_all",
     "processor": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
     "revision": "99ccb2737be22b8bb50dcfcc39ad4d567fb90cfd",
     "sample_rate": 16000
   },
-  "pinyin_contract": "legacy-2",
+  "parser_provenance": {
+    "api": "pypinyin.contrib.tone_convert",
+    "empty_final": "reject",
+    "input_alias": "u:",
+    "input_format": "lowercase-ascii-tone3",
+    "inventory_sha256": "6f17d446d572980f9a40a8a592878db04302c8edf4e3cff2c70ab2006d1be9f1",
+    "inventory_source": "pypinyin.constants.PINYIN_DICT",
+    "library": "pypinyin",
+    "missing_tone": "5",
+    "strict": true,
+    "umlaut_storage": "v",
+    "version": "0.55.0",
+    "vocabulary_sha256": "ed7f9a1786fc98fa8870f3cfbd3a5ba676d8fc2a8f53a142c2507d781d146a44"
+  },
+  "pinyin_contract": "pypinyin-tone3-1",
   "schema_version": 1,
   "source": {
     "path": "/kaggle/input/datasets/davidvista/lmpr-v1/source-data/sounds",

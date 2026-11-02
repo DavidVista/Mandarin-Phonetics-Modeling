@@ -1,199 +1,107 @@
+"""Current contextual notebooks build without retired notebook templates."""
 import ast
-import importlib.metadata
+import hashlib
 import importlib.util
 import json
-import sys
-import tempfile
-import unittest
-from unittest import mock
 from pathlib import Path
-
-from phonetics.objectives import combined_model_id
-
-try:
-    import numpy as np
-except ImportError as error:
-    raise unittest.SkipTest(f"scientific evaluation dependencies unavailable: {error}")
+import tempfile
+import types
+import sys
+import unittest
+from unittest.mock import patch
 
 PROJECT = Path(__file__).resolve().parents[1]
 WORKSPACE = PROJECT.parent
-PREPARE = PROJECT / "notebooks" / "Datasets" / "Evaluation Setup" / "prepare-evaluation.ipynb"
-COMPOSITE = PROJECT / "notebooks" / "Evaluation" / "geometry-analysis-composite.ipynb"
-STANDALONE = PROJECT / "notebooks" / "Evaluation" / "geometry-analysis.ipynb"
-GENERATOR = WORKSPACE / "meta" / "tools" / "build_evaluation_notebooks.py"
+PREPARE = PROJECT / "notebooks/Datasets/Evaluation Setup/prepare-evaluation.ipynb"
+COMPOSITE = PROJECT / "notebooks/Evaluation/contextual-evaluation-composite.ipynb"
+STANDALONE = PROJECT / "notebooks/Evaluation/contextual-evaluation.ipynb"
+GENERATOR = WORKSPACE / "meta/tools/build_evaluation_notebooks.py"
 
 
-def code(cell):
+def source(cell):
     return "".join(cell["source"])
 
 
-def execute_embedded(path):
-    notebook = json.loads(path.read_text(encoding="utf-8"))
-    namespace = {"__name__": "portable_evaluation_test"}
-    for cell in notebook["cells"]:
-        if cell["cell_type"] == "code" and (cell["id"].endswith("build") or "-module-" in cell["id"]):
-            exec(compile(code(cell), f"{path}:{cell['id']}", "exec"), namespace)
-    return notebook, namespace
-
-
 class NotebookTests(unittest.TestCase):
-    def test_checkpoint_paths_match_training_outputs_and_fail_before_execution(self):
-        for path, prefix in ((COMPOSITE, "composite"), (STANDALONE, "standalone")):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("evaluation_notebook_builder", GENERATOR)
+        cls.builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.builder)
+
+    def test_contextual_notebooks_are_current(self):
+        self.builder.build_notebooks(only_geometry=True, check=True)
+
+    def test_schema_and_no_retired_importers_or_plotting(self):
+        import nbformat
+        for path in (STANDALONE, COMPOSITE):
             notebook = json.loads(path.read_text(encoding="utf-8"))
-            config = code(next(cell for cell in notebook["cells"] if cell["id"] == prefix + "-config"))
-            namespace = {"find_project_root": lambda: PROJECT, "combined_model_id": combined_model_id}
-            actual_manifest = PROJECT / "datasets" / "experiments" / "duyu-chinese-lessons-zh-cn-v1" / "manifest.json"
-            manifest_bytes = actual_manifest.read_bytes()
-            real_read_bytes = Path.read_bytes
-            def read_bytes(path_value):
-                if path_value.name == "manifest.json":
-                    return manifest_bytes
-                return real_read_bytes(path_value)
-            with mock.patch.object(Path, "read_bytes", new=read_bytes):
-                exec(compile(config, "analysis-config", "exec"), namespace)
-            runs = namespace["RUNS"]
-            self.assertEqual(runs[0]["checkpoint_path"], namespace["RUNS_ROOT"] / "components/REPLACE_WITH_COMPONENTS_RUN_ID/seed-0/best.pt")
-            self.assertEqual(runs[1]["checkpoint_path"], namespace["RUNS_ROOT"] / "components-acoustic-lambda-1/REPLACE_WITH_COMBINED_RUN_ID/seed-0/best.pt")
-            self.assertNotIn('"models"', config)
-            run_source = code(next(cell for cell in notebook["cells"] if cell["id"] == prefix + "-run"))
-            namespace["run_evaluation"] = mock.Mock()
-            with mock.patch.object(Path, "is_file", return_value=False):
-                with self.assertRaisesRegex(FileNotFoundError, "Training checkpoints"):
-                    exec(compile(run_source, "analysis-run", "exec"), namespace)
-            namespace["run_evaluation"].assert_not_called()
+            nbformat.validate(nbformat.from_dict(notebook))
+            self.assertEqual(notebook['cells'][-1]['id'], 'analysis-output')
+            self.assertEqual(notebook['metadata']['evaluation_build']['scope'], 'numerical_evaluation')
+            for cell in notebook['cells']:
+                if cell['cell_type'] != 'code':
+                    continue
+                code = source(cell)
+                compile(code, cell['id'], 'exec')
+                self.assertEqual(cell['outputs'], [])
+                self.assertIsNone(cell['execution_count'])
+                for token in ('%%', '_publish_module', 'MetaPathFinder', 'render_evaluation', 'import matplotlib'):
+                    self.assertNotIn(token, code)
+            for relative, digest in notebook['metadata']['evaluation_build']['source_sha256'].items():
+                self.assertEqual(hashlib.sha256((PROJECT/'src/phonetics'/relative).read_bytes()).hexdigest(), digest)
 
-    def test_standalone_cells_execute_without_project_runtime_imports_and_match_composite(self):
+    def test_build_without_existing_notebooks_preserves_prepare(self):
+        before = PREPARE.read_bytes()
+        with tempfile.TemporaryDirectory(dir=PROJECT) as directory:
+            root = Path(directory)
+            with patch.multiple(self.builder, COMPOSITE_PATH=root/'composite.ipynb', STANDALONE_PATH=root/'standalone.ipynb'):
+                self.builder.build_notebooks(only_geometry=True)
+                self.builder.build_notebooks(only_geometry=True, check=True)
+                for path in (self.builder.COMPOSITE_PATH, self.builder.STANDALONE_PATH):
+                    self.assertTrue(path.is_file())
+                self.assertEqual(sorted(p.name for p in root.iterdir()), ['composite.ipynb', 'standalone.ipynb'])
+        self.assertEqual(before, PREPARE.read_bytes())
+
+    def test_build_preserves_each_notebooks_own_parameters(self):
+        with tempfile.TemporaryDirectory(dir=PROJECT) as directory:
+            root = Path(directory)
+            with patch.multiple(self.builder, COMPOSITE_PATH=root/'composite.ipynb', STANDALONE_PATH=root/'standalone.ipynb'):
+                for path, identifier, value in ((self.builder.COMPOSITE_PATH, 'analysis-parameters', 'composite'), (self.builder.STANDALONE_PATH, 'parameters', 'standalone')):
+                    path.write_text(json.dumps({'cells': [{'id': identifier, 'source': [f'USER_SENTINEL = "{value}"\n']}]}), encoding='utf-8')
+                self.builder.build_notebooks(only_geometry=True)
+                self.builder.build_notebooks(only_geometry=True, check=True)
+                for path, value in ((self.builder.COMPOSITE_PATH, 'composite'), (self.builder.STANDALONE_PATH, 'standalone')):
+                    notebook = json.loads(path.read_text(encoding='utf-8'))
+                    cell = next(c for c in notebook['cells'] if c['id'] in {'parameters', 'analysis-parameters'})
+                    ns = {}
+                    exec(source(cell), ns)
+                    self.assertEqual(ns['USER_SENTINEL'], value)
+
+    def test_standalone_definitions_without_torch_or_repository_imports(self):
+        notebook = json.loads(STANDALONE.read_text(encoding='utf-8'))
+        module = types.ModuleType('standalone_definitions_test')
+        sys.modules[module.__name__] = module
         try:
-            import torch  # noqa: F401
-        except ImportError:
-            self.skipTest("Torch is unavailable; standalone model-adapter execution is not runtime-verified")
-        notebook, standalone = execute_embedded(STANDALONE)
-        rendered = STANDALONE.read_text(encoding="utf-8")
-        self.assertNotIn("from phonetics", rendered)
-        self.assertNotIn("exec(", rendered)
-        self.assertNotIn("pip install", rendered)
-        self.assertNotIn("urlopen", rendered)
+            for cell in notebook['cells']:
+                if cell['cell_type'] != 'code' or cell['id'].startswith('analysis-'):
+                    continue
+                if cell['id'] in {'data', 'model', 'reproducibility', 'evaluation-encoders'}:
+                    continue
+                exec(compile(source(cell), cell['id'], 'exec'), module.__dict__)
+            self.assertEqual(module.stable_cosine([1e-300,0], [1e-300,0]), 1.0)
+            self.assertTrue(callable(module.persist_results))
+        finally:
+            sys.modules.pop(module.__name__, None)
 
-        composite_notebook = json.loads(COMPOSITE.read_text(encoding="utf-8"))
-        composite = {"__name__": "composite_evaluation_test"}
-        exec(compile(code(next(cell for cell in composite_notebook["cells"] if cell["id"] == "composite-build")), "composite-build", "exec"), composite)
-        setup = code(next(cell for cell in composite_notebook["cells"] if cell["id"] == "composite-imports"))
-        for name in list(sys.modules):
-            if name == "phonetics" or name.startswith("phonetics."):
-                del sys.modules[name]
-        exec(compile(setup, "composite-imports", "exec"), composite)
-
-        ids = ["a", "b", "c"]
-        portable_matrix = standalone["random_occurrence_baseline"](ids, dimension=8, seed=17)
-        composite_module = sys.modules["phonetics.evaluation.representations"]
-        canonical_matrix = composite_module.random_occurrence_baseline(ids, dimension=8, seed=17)
-        np.testing.assert_array_equal(portable_matrix, canonical_matrix)
-        pairs = [{"pair_id": "p", "left_id": "a", "right_id": "b", "dimsim_distance": 1.0,
-                  "distance_status": "ok", "overlap_mask": "000", "no_zero_initial_diagnostic": True}]
-        portable_rows = standalone["cosine_rows"](pairs, ids, portable_matrix)
-        canonical_analysis = sys.modules["phonetics.evaluation.analysis"]
-        self.assertEqual(portable_rows, canonical_analysis.cosine_rows(pairs, ids, canonical_matrix))
-        self.assertTrue(all(cell.get("outputs", []) == [] for cell in notebook["cells"] if cell["cell_type"] == "code"))
-
-    def test_preparation_embedded_cells_execute_and_use_explicit_metric(self):
-        notebook, namespace = execute_embedded(PREPARE)
-        self.assertIn("DimsimDistance", namespace)
-        self.assertIn("prepare_evaluation_bundle", namespace)
-        run_source = code(next(cell for cell in notebook["cells"] if cell["id"] == "prep-run"))
-        self.assertIn("metric = DimsimDistance()", run_source)
-        self.assertIn("metric_provenance=metric.provenance", run_source)
-        self.assertIn('code_provenance=BUILD_METADATA["source_sha256"]', run_source)
-
-    def test_dependency_setup_paths_and_storage_contract(self):
-        try:
-            importlib.metadata.version("scipy")
-        except importlib.metadata.PackageNotFoundError:
-            self.skipTest("SciPy distribution metadata is unavailable; dependency execution is not runtime-verified")
-        prepare = json.loads(PREPARE.read_text(encoding="utf-8"))
-        dependency_source = code(next(cell for cell in prepare["cells"] if cell["id"] == "prep-dependencies"))
-        for enabled in (False, True):
-            with self.subTest(install_dependencies=enabled):
-                tree = ast.parse(dependency_source)
-                assignments = [node for node in tree.body if isinstance(node, ast.Assign)
-                               and any(isinstance(target, ast.Name) and target.id == "INSTALL_DEPENDENCIES"
-                                       for target in node.targets)]
-                self.assertEqual(len(assignments), 1)
-                assignments[0].value = ast.Constant(value=enabled)
-                namespace = {}
-                with mock.patch("subprocess.check_call") as install:
-                    exec(compile(ast.fix_missing_locations(tree), "prep-dependencies", "exec"), namespace)
-                if enabled:
-                    install.assert_called_once_with(
-                        [sys.executable, "-m", "pip", "install", *namespace["DEPENDENCIES"]])
-                else:
-                    install.assert_not_called()
-        self.assertIn('"dimsim==0.2.2"', dependency_source)
-        self.assertIn('"pypinyin==0.55.0"', dependency_source)
-        self.assertNotIn('"torch', dependency_source)
-
-        config_source = code(next(cell for cell in prepare["cells"] if cell["id"] == "prep-config"))
-        namespace = {}; exec(compile(config_source, "prep-config", "exec"), namespace)
-        self.assertEqual(namespace["EXPERIMENT_PATH"], PROJECT / "datasets" / "experiments" / "1.0.0")
-        self.assertEqual(namespace["OUTPUT_ROOT"], PROJECT / "datasets" / "evaluations")
-        self.assertEqual(namespace["EVALUATION_ID"], "1.0.0")
-        custom = config_source.replace("CUSTOM_EXPERIMENT_PATH = None", 'CUSTOM_EXPERIMENT_PATH = Path("/custom/experiment")').replace(
-            "CUSTOM_OUTPUT_ROOT = None", 'CUSTOM_OUTPUT_ROOT = Path("/custom/output")')
-        custom_namespace = {}; exec(compile(custom, "prep-custom", "exec"), custom_namespace)
-        self.assertEqual(custom_namespace["EXPERIMENT_PATH"], Path("/custom/experiment"))
-        self.assertEqual(custom_namespace["OUTPUT_ROOT"], Path("/custom/output"))
-
-        requirements = (PROJECT / "requirements.txt").read_text(encoding="utf-8")
-        self.assertIn("dimsim==0.2.2", requirements); self.assertIn("pypinyin==0.55.0", requirements)
-        self.assertFalse((PROJECT / "requirements-evaluation.txt").exists())
-        active = [line for line in requirements.splitlines() if line and not line.lstrip().startswith("#")]
-        self.assertFalse(any(line.startswith("torch") for line in active))
-        ignore = (PROJECT / ".gitignore").read_text(encoding="utf-8")
-        for rule in ("datasets/evaluations/**", "!datasets/evaluations/**/manifest.json", "!datasets/evaluations/**/config.json",
-                     "!datasets/evaluations/**/coverage.json", "datasets/evaluation-runs/**"):
-            self.assertIn(rule, ignore)
-
-    def test_project_root_discovery_from_workspace_and_descendant(self):
-        composite = json.loads(COMPOSITE.read_text(encoding="utf-8"))
-        setup = code(next(cell for cell in composite["cells"] if cell["id"] == "composite-imports"))
-        function_source = setup[setup.index("def find_project_root"):setup.index("CODE_ROOT =")]
-        namespace = {"Path": Path}; exec(compile(function_source, "root-discovery", "exec"), namespace)
-        self.assertEqual(namespace["find_project_root"](WORKSPACE), PROJECT)
-        self.assertEqual(namespace["find_project_root"](PROJECT / "notebooks" / "Evaluation"), PROJECT)
-
-    def test_builder_check_detects_modified_temporary_output(self):
-        if not GENERATOR.is_file():
-            self.skipTest("workspace notebook generator is unavailable in this project snapshot")
-        spec = importlib.util.spec_from_file_location("evaluation_notebook_builder_test", GENERATOR)
-        builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
-            root = Path(temporary)
-            builder.PREPARE_PATH = root / "prepare.ipynb"
-            builder.COMPOSITE_PATH = root / "composite.ipynb"
-            builder.STANDALONE_PATH = root / "standalone.ipynb"
-            builder.build_notebooks()
-            builder.build_notebooks(check=True)
-            builder.STANDALONE_PATH.write_text(builder.STANDALONE_PATH.read_text(encoding="utf-8") + "edited", encoding="utf-8")
-            with self.assertRaises(SystemExit):
-                builder.build_notebooks(check=True)
-
-    def test_builder_only_prepare_does_not_touch_geometry_notebooks(self):
-        if not GENERATOR.is_file():
-            self.skipTest("workspace notebook generator is unavailable in this project snapshot")
-        spec = importlib.util.spec_from_file_location("evaluation_prepare_builder_test", GENERATOR)
-        builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
-            root = Path(temporary)
-            builder.PREPARE_PATH = root / "prepare.ipynb"
-            builder.COMPOSITE_PATH = root / "composite.ipynb"
-            builder.STANDALONE_PATH = root / "standalone.ipynb"
-            builder.COMPOSITE_PATH.write_text("user geometry edits", encoding="utf-8")
-            builder.STANDALONE_PATH.write_text("user standalone edits", encoding="utf-8")
-            outputs = builder.build_notebooks(only_prepare=True)
-            self.assertEqual(outputs, [builder.PREPARE_PATH])
-            self.assertEqual(builder.COMPOSITE_PATH.read_text(encoding="utf-8"), "user geometry edits")
-            self.assertEqual(builder.STANDALONE_PATH.read_text(encoding="utf-8"), "user standalone edits")
-            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
-                builder.build_notebooks(only_prepare=True, only_geometry=True)
+    def test_preparation_notebook_contract_is_preserved(self):
+            notebook = json.loads(PREPARE.read_text(encoding="utf-8"))
+            cells = {cell.get("id"): source(cell) for cell in notebook["cells"]}
+            self.assertIn("metric = DimsimDistance()", cells["prep-run"])
+            self.assertIn('code_provenance=BUILD_METADATA["source_sha256"]', cells["prep-run"])
+            self.assertIn('"dimsim==0.2.2"', cells["prep-dependencies"])
+            self.assertIn('"pypinyin==0.55.0"', cells["prep-dependencies"])
+            self.assertNotIn("torch", cells["prep-dependencies"].lower())
 
 
 if __name__ == "__main__":

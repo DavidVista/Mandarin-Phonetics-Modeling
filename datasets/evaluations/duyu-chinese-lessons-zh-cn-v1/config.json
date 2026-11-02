@@ -1,13 +1,92 @@
 {
-  "character_pair_count": 25000,
-  "contextual_pair_count": 25000,
   "evaluation_id": "duyu-chinese-lessons-zh-cn-v1",
-  "max_all_pairs": 1000000,
-  "pairing_policy": "nonzero_nonzero",
-  "sampling_seed": 42,
-  "schema_version": 2,
+  "population": {
+    "aggregates": false,
+    "syllable_identity": "canonical_toned_pinyin",
+    "unit": "contextual_occurrence",
+    "zero_initial_excluded_from_dimsim": true
+  },
+  "runtime_versions": {
+    "dimsim": "0.2.2",
+    "numpy": "2.2.6",
+    "pypinyin": "0.55.0"
+  },
+  "sampling": {
+    "anchor_q": {
+      "draws_per_edge": 1000,
+      "edge_order": [
+        "initial:000->100",
+        "initial:001->101",
+        "initial:010->110",
+        "initial:011->111",
+        "final:000->010",
+        "final:001->011",
+        "final:100->110",
+        "final:101->111",
+        "tone:000->001",
+        "tone:010->011",
+        "tone:100->101",
+        "tone:110->111"
+      ],
+      "rng": "numpy.random.PCG64",
+      "sampler_version": 1,
+      "seed": 20261026,
+      "triplet_schema_version": 1,
+      "with_replacement": true
+    },
+    "dimsim_balanced": {
+      "choice_order": [
+        "first_syllable",
+        "second_syllable",
+        "first_occurrence",
+        "second_occurrence"
+      ],
+      "count": 12000,
+      "pair_schema_version": 1,
+      "rng": "numpy.random.PCG64",
+      "sampler_version": 1,
+      "seed": 20261026,
+      "with_replacement": true
+    },
+    "dimsim_natural": {
+      "count": 12000,
+      "pair_schema_version": 1,
+      "rng": "random.Random",
+      "sampler_version": 1,
+      "seed": 42,
+      "without_replacement": true
+    }
+  },
+  "schema_version": 3,
+  "scoring": {
+    "anchor_q": {
+      "cosine": "stable_float64_scale_before_norm",
+      "tie_tolerance": 1e-12
+    },
+    "dimsim": {
+      "api": "dimsim.get_distance([left], [right], pinyin=True)",
+      "canonical_weights_modified": false,
+      "dependencies": {
+        "dimsim": "0.2.2",
+        "pypinyin": "0.55.0"
+      },
+      "metric_name": "dimsim",
+      "metric_version": "0.2.2",
+      "package_file_sha256": {
+        "__init__.py": "0639d51a755311cdb43f96bfde4f11f4e83d69f043643dc168cdef9e8b1e8bf8",
+        "core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "core/model.py": "491fe06c68be3558c979f4f345e16e16df7c84edd0ba7a632e1a8e0857a566e6",
+        "data/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "data/pinyin_to_simplified.pickle": "905a9e3e9d2fb6c6be1e36f21bd7fe7545468b1ef2de64c39b63a6b2c3749b83",
+        "data/pinyin_to_traditional.pickle": "d4ef54cc2cbf6b928f832b6ebc6b4cc83dfc75691ad3c939bf0313de72bcf73a",
+        "utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "utils/maps.py": "f75e2010975ed0499f5beadbac54e5d7874b6f5d74b0d2c496973b71dc64730a",
+        "utils/pinyin.py": "cc5ac54e237f685f8cb8f05e3e3b9977c65349fa6ed72f4f04ba943b0566daac",
+        "utils/utils.py": "dd0f67b3afc3aa800e024d945ca0e9e98082c1fcecbf827aec3964e530471234"
+      }
+    }
+  },
   "sentence_limit": null,
   "sentence_seed": 42,
-  "split": "test",
-  "syllable_pair_count": null
+  "split": "test"
 }

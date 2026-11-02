@@ -152,3 +152,79 @@ label = "Tone"
 color = "#d0d0d0"
 linestyle = "solid"
 marker = "^"
+
+[figures.anchor_q_transitions]
+status = "approved"
+kind = "dotplot"
+name = "Anchor-Q transitions"
+xlabel = "Transition"
+ylabel = "Anchor-Q"
+series = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+order = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+scale = "linear"
+
+[figures.transition_shares]
+status = "approved"
+kind = "stacked_bar"
+name = "Transition shares"
+xlabel = "Transition"
+ylabel = "Q share"
+series = ["initial", "final", "tone"]
+order = ["initial", "final", "tone"]
+scale = "linear"
+
+[figures.component_shares]
+status = "approved"
+kind = "stacked_bar"
+name = "Component shares"
+xlabel = "Model"
+ylabel = "Q share"
+series = ["initial", "final", "tone"]
+order = ["initial", "final", "tone"]
+scale = "linear"
+
+[figures.dimsim_geometry]
+status = "approved"
+kind = "line_histogram"
+name = "DIMSIM geometry"
+xlabel = "DIMSIM distance"
+ylabel = "Cosine similarity"
+series = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+order = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+scale = "linear"
+
+[figures.dimsim_correlation]
+status = "approved"
+kind = "dotplot"
+name = "DIMSIM correlation"
+xlabel = "Model"
+ylabel = "Spearman rho"
+series = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+order = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+scale = "linear"
+
+[semantics.syllable]
+label = "Syllable"
+color = "#171717"
+linestyle = "solid"
+marker = "o"
+[semantics.components]
+label = "Components"
+color = "#444444"
+linestyle = "dashed"
+marker = "s"
+[semantics.acoustic]
+label = "Acoustic"
+color = "#707070"
+linestyle = "dotted"
+marker = "^"
+[semantics."components-acoustic-lambda-1"]
+label = "Combined \u03bb1"
+color = "#999999"
+linestyle = "dashdot"
+marker = "D"
+[semantics."components-acoustic-lambda-10"]
+label = "Combined \u03bb10"
+color = "#c5c5c5"
+linestyle = "solid"
+marker = "v"

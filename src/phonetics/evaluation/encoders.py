@@ -37,10 +37,14 @@ def extract_bilstm(
     bundle_path: str | Path, *, experiment_path: str | Path, checkpoint_path: str | Path,
     output_dir: str | Path, device: str = "cpu", batch_size: int = 32, contextual_only: bool = False,
     expected_model_id: str | None = None, expected_seed: int | None = None,
+    source_sha256: str | None = None,
 ) -> Path:
     """Extract full-sentence BiLSTM outputs and save exact occurrence alignment."""
     if not isinstance(batch_size, int) or batch_size <= 0 or isinstance(batch_size, bool):
         raise ValueError("batch_size must be a positive integer")
+    if source_sha256 is not None and (not isinstance(source_sha256, str) or len(source_sha256) != 64
+                                      or any(c not in "0123456789abcdef" for c in source_sha256)):
+        raise ValueError("source_sha256 must be a lowercase SHA-256 digest")
     bundle = load_evaluation_bundle(bundle_path)
     experiment_root, checkpoint_file = Path(experiment_path).resolve(), Path(checkpoint_path).resolve()
     source_hashes = bundle["manifest"]["source_experiment"]["hashes"]
@@ -75,7 +79,8 @@ def extract_bilstm(
     occurrence_by_sample: dict[str, list[dict]] = {}
     for occurrence in bundle["occurrences"]:
         occurrence_by_sample.setdefault(occurrence["sample_id"], []).append(occurrence)
-    sentence_ids = [row["sample_id"] for row in bundle["sentences"]]
+    sentence_key = "sentence_id" if bundle["manifest"].get("schema_version") == 3 else "sample_id"
+    sentence_ids = [row[sentence_key] for row in bundle["sentences"]]
     if set(sentence_ids) != set(occurrence_by_sample) or len(sentence_ids) != len(set(sentence_ids)):
         raise ValueError("bundle sentences and occurrence samples disagree")
     extracted: dict[str, np.ndarray] = {}
@@ -120,7 +125,7 @@ def extract_bilstm(
         "evaluation_mode": model.training is False, "output_dtype": str(hidden.dtype),
         "environment": {"python": platform.python_version(), "numpy": np.__version__, "torch": torch.__version__,
                         "platform": platform.platform(), "device": str(device)},
-        "source_sha256": _sha256(Path(__file__).resolve()),
+        "source_sha256": source_sha256 or _sha256(Path(__file__).resolve()),
     }
     if contextual_only:
         return save_contextual_representations(output_dir, occurrence_ids=occurrence_ids,

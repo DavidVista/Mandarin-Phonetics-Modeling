@@ -48,7 +48,7 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
  for fid,f in r["figures"].items():
   _unknown(f,FIGURE_KEYS,f"figures.{fid}");req={"status","kind","name","xlabel","ylabel","series","order","scale"}
   if req-set(f):raise VisualizationError(f"Missing required registry keys for {fid}")
-  if f["status"] not in {"draft","approved"} or f["kind"] not in {"ecdf","histogram","bootstrap_histogram","distribution_triptych","stacked_bar"} or f["scale"] not in {"linear","log"}:raise VisualizationError(f"Invalid status/kind/scale for {fid}")
+  if f["status"] not in {"draft","approved"} or f["kind"] not in {"ecdf","histogram","bootstrap_histogram","distribution_triptych","stacked_bar","dotplot","line_histogram"} or f["scale"] not in {"linear","log"}:raise VisualizationError(f"Invalid status/kind/scale for {fid}")
   if not all(isinstance(f[k],str) and f[k].strip() for k in ("name","xlabel","ylabel")):raise VisualizationError(f"Invalid labels for {fid}")
   if f["series"]!=f["order"] or not f["series"] or len(set(f["series"]))!=len(f["series"]) or set(f["series"])-set(r["semantics"]):raise VisualizationError(f"Invalid series/order for {fid}")
   if "bin_rule" in f and f["bin_rule"]!="pooled_fd_sturges":raise VisualizationError(f"Invalid bin_rule for {fid}")
