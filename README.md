@@ -91,29 +91,27 @@ The findings above describe the historical research. Its former notebooks and ge
 | :-- | :-- | :-- |
 | `chinese-lessons.zip` | Source archive for local audio extraction | Git |
 | `source-data/` | Local DuYu export, sounds and sound manifests | Ignored |
-| `wubi/` | Character/Wubi dictionaries | Git |
 | `pinyin-embeddings/` | Complete base and zh-cn acoustic bundles | Git |
 | `processed-corpus/` | Filtered and sampled corpus with audit reports | Ignored |
-| `prepared/` | Validated corpus, embeddings and Wubi assembled together | Ignored |
+| `prepared/` | Validated corpus, IDS resources and acoustic targets | Ignored |
 | `experiments/<experiment_id>/` | Splits, vocabularies and model initialization | Generated; tracked config/manifest exceptions |
-| `runs/<experiment_id>/` | Training checkpoints, metrics and configuration | Ignored |
-| `evaluations/<evaluation_id>/` | Immutable DIMSIM evaluation bundle | Generated; tracked config/manifest/coverage exceptions |
-| `evaluation-runs/` | Representation analysis, metrics and comparisons | Ignored |
+| `evaluations/<evaluation_id>/` | Immutable contextual evaluation samples | Generated; tracked config/manifest/coverage exceptions |
+| `evaluation-runs/` | Historical analysis cache retained for reproducibility | Ignored |
 
-Relative paths `corpus/train.csv` and `embeddings/pinyin_embeddings.pkl` remain part of the prepared-bundle contract. They are internal to that bundle.
+Current prepared bundles contain `corpus.jsonl`, `ids/` and `acoustic/targets.pkl`, bound by a versioned manifest. Training runs live separately under `runs/`; analysis artifacts are saved under `outputs/`. Both are ignored by Git. The research summary above includes historical Wubi experiments; the current input pipeline uses IDS.
 
 ### Run order
 
 1. Export the pinned DuYu split in `prepare-corpus`. When the local export already exists, skip the export call.
 2. Unpack `chinese-lessons.zip` and build the sound manifest in `prepare-sounds`.
 3. Select an existing validated acoustic bundle, or run the portable/composite `prepare-pinyin-embeddings` notebook with an exact model revision.
-4. Run the local processing section of `prepare-corpus`: normalization, validation, exclusion of conflicting pronunciations, Wubi/audio coverage, deduplication and reproducible sampling. Current sample size is 100,000 rows with seed 42.
-5. Run `prepare-data` to assemble the processed corpus, Wubi and compatible embeddings without modifying their contents.
+4. Run the local processing section of `prepare-corpus`: normalization, validation, exclusion of conflicting pronunciations, IDS/audio coverage, deduplication and reproducible sampling. Record the sample size and seed in the configuration.
+5. Run `prepare-data` to assemble the processed corpus, IDS resources and compatible acoustic targets without modifying their contents.
 6. Run `prepare-experiment` against that prepared bundle to create the train/validation/test splits and initialization.
-7. Train the selected objective: `ce_only`, `combined` or `mse_only`. Keep the experiment ID and seed consistent across comparisons.
-8. Run `prepare-evaluation` for the exact experiment and split, then geometry analysis with matching checkpoints. The evaluation runner checks experiment/checkpoint provenance; old weights must not be substituted for a new corpus.
+7. Train the selected objective: `syllable`, `components`, `acoustic` or `components-acoustic-lambda-<weight>`. Keep the experiment and five training seeds consistent across comparisons.
+8. Run `prepare-evaluation` for the exact experiment and split, then `contextual-evaluation` with matching checkpoints. It saves numerical Q, DIMSIM and random-control artifacts. Build figures separately with `notebooks/Visualization/evaluation.ipynb`. Input and checkpoint provenance are validated.
 
-Training writes `datasets/runs/<experiment_id>/<condition>/seed-<seed>/best.pt`; the combined condition additionally uses `lambda-<value>/` before the seed directory. Geometry analysis checks that configured checkpoints exist before starting.
+Training writes `runs/<experiment_id>/<model_id>/<run_id>/seed-<seed>/best.pt`. Run manifests identify the exact five seeds and checkpoint hashes; evaluation does not choose the latest run implicitly.
 
 ## Notebooks
 
@@ -131,15 +129,18 @@ Training writes `datasets/runs/<experiment_id>/<condition>/seed-<seed>/best.pt`;
 
 Each objective has a portable notebook and a composite notebook importing the local SDK.
 
-| Objective | Portable | Composite |
+| Objective | Standalone | Composite |
 | :-- | :-- | :-- |
-| Pinyin prediction | [Pinyin Model](notebooks/Training/Pinyin%20Model/wubi-tokenizer-mandarin-encoder.ipynb) | [Composite](notebooks/Training/Pinyin%20Model/wubi-tokenizer-mandarin-encoder-composite.ipynb) |
-| Combined prediction and alignment | [Pinyin Aligned Model](notebooks/Training/Pinyin%20Aligned%20Model/phonetic-aware-representaions-learning.ipynb) | [Composite](notebooks/Training/Pinyin%20Aligned%20Model/phonetic-aware-representaions-learning-composite.ipynb) |
-| Acoustic alignment | [Aligned Model](notebooks/Training/Aligned%20Model/pure-phonetic-encoder.ipynb) | [Composite](notebooks/Training/Aligned%20Model/pure-phonetic-encoder-composite.ipynb) |
+| Syllable classification | [Syllable](notebooks/Training/syllable/syllable.ipynb) | [Composite](notebooks/Training/syllable/syllable-composite.ipynb) |
+| Component classification | [Components](notebooks/Training/components/components.ipynb) | [Composite](notebooks/Training/components/components-composite.ipynb) |
+| Combined classification and alignment | [Components + acoustic](notebooks/Training/components-acoustic/components-acoustic.ipynb) | [Composite](notebooks/Training/components-acoustic/components-acoustic-composite.ipynb) |
+| Acoustic alignment | [Acoustic](notebooks/Training/acoustic/acoustic.ipynb) | [Composite](notebooks/Training/acoustic/acoustic-composite.ipynb) |
 
-### Evaluation and utilities
+### Evaluation and reports
 
-- [geometry-analysis.ipynb](notebooks/Evaluation/geometry-analysis.ipynb): portable geometry evaluation.
-- [geometry-analysis-composite.ipynb](notebooks/Evaluation/geometry-analysis-composite.ipynb): geometry evaluation using the local SDK.
-- [dimsim-distribution-analysis.ipynb](notebooks/DIMSIM/dimsim-distribution-analysis.ipynb): DIMSIM distance distribution analysis.
-- [wubi-tokenizer.ipynb](notebooks/Tokenization/wubi-tokenizer.ipynb): Wubi dictionary construction and inspection.
+- [contextual-evaluation.ipynb](notebooks/Evaluation/contextual-evaluation.ipynb): standalone contextual extraction and numerical evaluation.
+- [contextual-evaluation-composite.ipynb](notebooks/Evaluation/contextual-evaluation-composite.ipynb): the same data pipeline using the local SDK.
+- [evaluation.ipynb](notebooks/Visualization/evaluation.ipynb): figures and tables from completed evaluation artifacts.
+- [dimsim-distribution-analysis.ipynb](notebooks/Report/dimsim-distribution-analysis.ipynb): DIMSIM distance distribution report.
+- [dimsim-parser-alignment.ipynb](notebooks/Report/dimsim-parser-alignment.ipynb): DIMSIM parser comparison report.
+- [wav2vec2-graduality-comparison.ipynb](notebooks/Report/wav2vec2-graduality-comparison.ipynb): Wav2Vec2 representation comparison report.
