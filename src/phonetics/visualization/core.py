@@ -68,7 +68,7 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
  return Protocol(s,r,sha256(sr).hexdigest(),sha256(rr).hexdigest(),sp,rp)
 def _integrity(p):
  if sha256(p.style_path.read_bytes()).hexdigest()!=p.style_hash or sha256(p.registry_path.read_bytes()).hexdigest()!=p.registry_hash:raise VisualizationError("Protocol files changed; reload")
- if tomllib.loads(p.style_path.read_text())!=p.style or tomllib.loads(p.registry_path.read_text())!=p.registry:raise VisualizationError("Protocol mappings were mutated; reload")
+ if tomllib.loads(p.style_path.read_text(encoding="utf-8"))!=p.style or tomllib.loads(p.registry_path.read_text(encoding="utf-8"))!=p.registry:raise VisualizationError("Protocol mappings were mutated; reload")
 def require_arial():
  from matplotlib import font_manager
  if not any(f.name=="Arial" for f in font_manager.fontManager.ttflist):raise VisualizationError("Arial is not installed; font fallback is prohibited")

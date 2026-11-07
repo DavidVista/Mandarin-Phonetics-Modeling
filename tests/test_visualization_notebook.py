@@ -86,7 +86,7 @@ class VisualizationNotebookTests(unittest.TestCase):
                 self.builder.build_notebook()
                 self.builder.build_notebook(check=True)
             built = json.loads(target.read_text(encoding="utf-8"))
-            self.assertEqual(source(next(c for c in built["cells"] if c["id"] == "parameters")), sentinel)
+            self.assertTrue(source(next(c for c in built["cells"] if c["id"] == "parameters")).startswith(sentinel))
         self.assertEqual(before, {path: sha(path) for path in siblings})
 
     def test_unique_run_selection_is_not_latest_selection(self):
@@ -116,6 +116,30 @@ class VisualizationNotebookTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Set FONT_FILES"):
                 exec(source(self.cells["fonts"]), dict(self.ns, FONT_FILES=[]))
 
+    def test_workflow_rejects_invalid_mode_and_existing_target_before_analysis(self):
+        with tempfile.TemporaryDirectory(dir=PROJECT) as directory:
+            root=Path(directory)
+            inputs=[]
+            for name in ('q','dimsim','random','bundle'):
+                path=root/name;path.mkdir();inputs.append(path)
+            config=dict(project_root=root,presentation_id='report',anchor_q_output=inputs[0],
+                dimsim_output=inputs[1],random_control_output=inputs[2],bundle_path=inputs[3],
+                bundle_manifest_sha256='a'*64,derived_run_ids={'interpretation':'analysis','presentation_data':'data'},
+                derived_mode='invalid',source_hashes={'source':'b'*64},source_digest='c'*64)
+            with self.assertRaisesRegex(ValueError,'derived_mode'):
+                self.ns['run_complete_evaluation_report'](**config)
+            config['derived_mode']='prepare'
+            config['derived_run_ids']={}
+            with self.assertRaisesRegex(ValueError,'explicit derived run IDs'):
+                self.ns['run_complete_evaluation_report'](**config)
+            config['derived_run_ids']={'interpretation':'analysis','presentation_data':'data'}
+            existing=root/'outputs/contextual-evaluation-report/report';existing.mkdir(parents=True)
+            (existing/'keep').write_text('unchanged')
+            with self.assertRaises(FileExistsError):
+                self.ns['run_complete_evaluation_report'](**config)
+            self.assertEqual((existing/'keep').read_text(),'unchanged')
+            self.assertFalse((root/'outputs/contextual-interpretation').exists())
+
     def test_actual_report_from_saved_outputs_without_vector_loading(self):
         import test_evaluation_data_persistence as fixtures
         suite = fixtures.DataPersistenceTests
@@ -131,13 +155,17 @@ class VisualizationNotebookTests(unittest.TestCase):
             ns["EVALUATION_RUN_IDS"] = None
             ns["OUTPUT_PROJECT_ROOT"] = suite.fixture.root / "visualization-output"
             ns["PRESENTATION_ID"] = "actual-export"
+            ns["BUNDLE_PATH"] = case.context["bundle_path"]
+            ns["BUNDLE_MANIFEST_SHA256"] = case.context["config"]["bundle_manifest_sha256"]
+            ns["DERIVED_MODE"] = "prepare"
+            ns["DERIVED_RUN_IDS"] = {"interpretation":"new-analysis","presentation_data":"new-data"}
             with patch("numpy.load", side_effect=AssertionError("Plotting must not load vector matrices")):
                 exec(source(self.cells["input-paths"]), ns)
                 exec(source(self.cells["save-report"]), ns)
             report = ns["REPORT_PATH"]
             for suffix in ("png", "eps", "metadata.json"):
                 files = list((report / "figures").glob(f"*.{suffix}"))
-                self.assertEqual(len(files), 5)
+                self.assertEqual(len(files), 6)
                 self.assertTrue(all(path.stat().st_size > 0 for path in files))
             manifest = json.loads((report / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["status"], "complete")
@@ -146,8 +174,22 @@ class VisualizationNotebookTests(unittest.TestCase):
                 self.assertEqual(sha(report / row["path"]), row["sha256"])
             self.assertEqual(before, {path: sha(path) for path in before})
             self.assertEqual(ns["plt"].get_fignums(), [])
+            self.assertTrue((report/'tables/coefficients.md').exists())
+            self.assertTrue((report/'data/interpretation_summary.json').exists())
             with self.assertRaises(FileExistsError):
                 exec(source(self.cells["save-report"]), ns)
+            derived_root = ns["OUTPUT_PROJECT_ROOT"] / 'outputs'
+            numerical_roots = [derived_root/'contextual-interpretation/new-analysis', derived_root/'contextual-interpretation-data/new-data']
+            hashes = {path:sha(path) for root in numerical_roots for path in root.rglob('*') if path.is_file()}
+            ns["DERIVED_MODE"] = 'reuse'
+            ns["PRESENTATION_ID"] = 'rerender'
+            def forbid_fit(*args, **kwargs):
+                raise AssertionError('Reuse must not fit or load raw Q scores')
+            with patch.dict(ns, {'build_interpretation':forbid_fit, 'load_saved_q_batch':forbid_fit,
+                                 'build_interpretation_presentation_data':forbid_fit}):
+                exec(source(self.cells['save-report']), ns)
+            self.assertEqual(hashes,{path:sha(path) for path in hashes})
+            self.assertEqual(len(list((ns['REPORT_PATH']/'figures').glob('*.png'))),6)
             altered = suite.fixture.root / "changed/contextual-anchor-q" / saved["numerical"]["contextual-anchor-q"].name
             import shutil
             shutil.copytree(saved["numerical"]["contextual-anchor-q"], altered)

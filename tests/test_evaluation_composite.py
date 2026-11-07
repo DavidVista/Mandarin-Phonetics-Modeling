@@ -48,7 +48,7 @@ class EvaluationCompositeTests(unittest.TestCase):
         self.assertNotIn("resource_sha256", build)
         self.assertFalse(any(path.startswith("visualization/") or path.endswith("evaluation_tables.py")
                              for path in build["source_sha256"]))
-        self.assertEqual(self.notebook["cells"][-1]["id"], "analysis-output")
+        self.assertEqual(self.notebook["cells"][-1]["id"], "analysis-interpretation")
 
     def test_composite_only_generation_preserves_other_notebooks_and_data_settings(self):
         sentinel = '''from pathlib import Path
@@ -121,7 +121,7 @@ print("Runtime import: PASS")
                 return value
             return Mock(side_effect=run)
         ns = {
-            "CONFIG": {}, "BUILD_METADATA": {},
+            "CONFIG": {}, "BUILD_METADATA": {}, "EVALUATION_STAGE": "scores",
             "preflight_evaluation": callback("preflight", context),
             "extract_or_reuse": callback("representations", representations),
             "score_anchor_q": callback("q", q), "score_dimsim": callback("dimsim", d),
@@ -146,7 +146,7 @@ print("Runtime import: PASS")
         for mode in ("extract", "reuse"):
             with patch.object(importlib.metadata, "version", side_effect=versions.__getitem__) as version, \
                     patch("subprocess.check_call") as install, contextlib.redirect_stdout(io.StringIO()):
-                exec(code, {"INSTALL_DEPENDENCIES": False, "EXTRACTION_MODE": mode})
+                exec(code, {"INSTALL_DEPENDENCIES": False, "EXTRACTION_MODE": mode, "EVALUATION_STAGE": "scores"})
             install.assert_not_called()
             self.assertNotIn("matplotlib", [call.args[0] for call in version.call_args_list])
             self.assertEqual("torch" in [call.args[0] for call in version.call_args_list], mode == "extract")

@@ -157,8 +157,8 @@ marker = "^"
 status = "approved"
 kind = "dotplot"
 name = "Anchor-Q transitions"
-xlabel = "Transition"
-ylabel = "Anchor-Q"
+xlabel = "Q"
+ylabel = "Transition"
 series = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
 order = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
 scale = "linear"
@@ -228,3 +228,75 @@ label = "Combined \u03bb10"
 color = "#c5c5c5"
 linestyle = "solid"
 marker = "v"
+
+[figures.residual_qq]
+status = "approved"
+kind = "dotplot"
+name = "Residual Q\u2013Q"
+xlabel = "Normal quantile"
+ylabel = "Standardized residual"
+series = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10", "dimsim"]
+order = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10", "dimsim"]
+columns = 2
+scale = "linear"
+
+[semantics.dimsim]
+label = "DIMSIM"
+color = "#171717"
+linestyle = "solid"
+marker = "o"
+
+[figures.training_objectives]
+status = "approved"
+kind = "line_histogram"
+name = "Training objectives"
+xlabel = "Epoch"
+ylabel = "Objective"
+series = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+order = ["syllable", "components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+columns = 3
+scale = "linear"
+
+[figures.validation_accuracy]
+status = "approved"
+kind = "line_histogram"
+name = "Validation accuracy"
+xlabel = "Epoch"
+ylabel = "Accuracy"
+series = ["syllable", "components", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+order = ["syllable", "components", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+columns = 2
+scale = "linear"
+
+[figures.validation_loss_components]
+status = "approved"
+kind = "line_histogram"
+name = "Validation loss components"
+xlabel = "Epoch"
+ylabel = "Loss"
+series = ["components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+order = ["components", "acoustic", "components-acoustic-lambda-1", "components-acoustic-lambda-10"]
+columns = 2
+scale = "linear"
+
+[figures.component_accuracy]
+status = "approved"
+kind = "line_histogram"
+name = "Component accuracy"
+xlabel = "Epoch"
+ylabel = "Accuracy"
+series = ["initial", "final", "tone"]
+order = ["initial", "final", "tone"]
+columns = 2
+scale = "linear"
+
+[figures.invalid_if_predictions]
+status = "approved"
+kind = "line_histogram"
+name = "Invalid initial\u2013final combinations"
+xlabel = "Epoch"
+ylabel = "Invalid predictions (%)"
+series = ["components"]
+order = ["components"]
+columns = 1
+scale = "linear"

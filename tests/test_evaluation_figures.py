@@ -137,16 +137,24 @@ class EvaluationFigureProtocolTests(unittest.TestCase):
         try:
             self.assertEqual(len(figs),5)
             self.assertEqual(len(figs[3].axes),20)
-            for ax in figs[3].axes[10:]: self.assertEqual(list(ax.get_yticks()),[0,100])
+            markers=[line for line in figs[3].axes[0].lines if line.get_marker()=='o' and len(line.get_xdata())==1]
+            self.assertTrue(any(line.get_markerfacecolor()=='#171717' for line in markers))
+            self.assertTrue(any(line.get_markerfacecolor()=='white' for line in markers))
+            for ax in figs[3].axes[10:]:
+                self.assertGreater(len(ax.get_yticks()),2)
+                self.assertEqual(list(ax.get_yticks()),list(figs[3].axes[10].get_yticks()))
             host=figs[3].axes[2];segments=[tuple(line.get_xdata()) for line in host.lines if len(line.get_xdata())==2]
             self.assertFalse(any(min(x)<=4 and max(x)>=7 for x in segments))
-            self.assertTrue(any(tuple(x)==(3,3.5) for x in segments));self.assertTrue(any(tuple(x)==(3.5,4) for x in segments))
-            self.assertEqual(host.get_ylim(),(-1.0,1.0))
+            self.assertTrue(any(tuple(x)==(3,4) for x in segments))
+            self.assertFalse(any(3.5 in x for x in segments))
+            self.assertGreater(host.get_ylim()[0],-1.)
+            self.assertGreater(host.get_ylim()[1],.85)
+            self.assertTrue(all(ax.get_ylim()==host.get_ylim() for ax in figs[3].axes[:10]))
             self.assertEqual([figs[3].axes[10].patches[0].get_height(),figs[3].axes[10].patches[13].get_height()],[100,100])
             self.assertEqual([figs[3].axes[11].patches[0].get_height(),figs[3].axes[11].patches[13].get_height()],[100,90])
             self.assertEqual(figs[3].axes[0].get_ylabel(),"Cosine similarity")
             self.assertEqual(figs[3].axes[1].get_ylabel(),"")
-            self.assertTrue(any(line.get_marker()=="D" and np.isclose(line.get_xdata()[0],3.5) for line in host.lines))
+            self.assertFalse(any(line.get_marker()=="D" for line in host.lines))
             self.assertFalse(any(line.get_marker()=="D" for line in figs[3].axes[0].lines))
             partial=[(type(a).__name__,a.get_alpha()) for f in figs for a in f.findobj() if hasattr(a,"get_alpha") and (not hasattr(a,"get_visible") or a.get_visible()) and a.get_alpha() is not None and 0<a.get_alpha()<1]
             self.assertEqual(partial,[])

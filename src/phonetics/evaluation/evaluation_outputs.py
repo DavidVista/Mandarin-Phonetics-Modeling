@@ -208,6 +208,26 @@ def write_evaluation_outputs(project_root: str | Path, contract: dict, *, run_id
     return results
 
 
+def load_evaluation_summary(root: str | Path) -> dict:
+    """Verify every artifact hash but load only the small report views."""
+    root = Path(root).resolve(strict=True)
+    analysis = root.parent.name
+    if analysis not in {'contextual-anchor-q', 'contextual-dimsim'}:
+        raise ValueError('unknown evaluation output analysis')
+    name = 'anchor_q' if analysis == 'contextual-anchor-q' else 'dimsim'
+    expected = {'config.json', f'data/{name}_batch.json', f'data/{name}_report.json',
+                'tables/tables.json', 'figures/plot_data.json', 'diagnostics/summary.json'}
+    manifest = _verify_inventory(root, analysis, root.name, expected)
+    _pins(manifest.get('inputs', []), manifest.get('scientific_input_pins', {}))
+    report = _finite_json(root / f'data/{name}_report.json')
+    tables = _finite_json(root / 'tables/tables.json')
+    plot = _finite_json(root / 'figures/plot_data.json')
+    if tables != report.get('tables') or plot != report.get('plot_data'):
+        raise ValueError('stored report views disagree')
+    return {'root': root, 'manifest': manifest, 'report': report, 'tables': tables,
+            'plot_data': plot, 'config': _finite_json(root / 'config.json')}
+
+
 def load_evaluation_outputs(root: str | Path) -> dict:
     """Load a complete numerical run after checking exact inventory and hashes."""
     root = Path(root).resolve(strict=True)

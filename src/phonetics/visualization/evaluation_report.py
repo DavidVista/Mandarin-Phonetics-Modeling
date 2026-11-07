@@ -7,17 +7,18 @@ import tempfile
 from pathlib import Path
 
 from ..evaluation.evaluation_outputs import (
-    _evaluation_run, _write, load_evaluation_outputs, load_random_control_summary,
+    _evaluation_run, _write, load_evaluation_summary, load_random_control_summary,
 )
 from ..evaluation.evaluation_tables import render_evaluation_tables
 from ..research.artifacts import ensure_output_outside_inputs, file_sha256, safe_run_id
 from . import apply_style, load_protocol
-from .evaluation import FIGURE_STEMS, _check_paired_outputs, _guard_not_in_immutable_run, render_evaluation
+from .evaluation import FIGURE_STEMS, _check_paired_outputs, _guard_not_in_immutable_run, render_loaded_evaluation
+from .interpretation_report import load_interpretation_presentation_data
 
 
 def write_evaluation_report(project_root, run_id, *, anchor_q_output, dimsim_output,
                             random_control_output, source_hashes, source_digest,
-                            resolved_config=None, protocol=None):
+                            resolved_config=None, protocol=None, interpretation_data_output=None):
     """Save tables and PNG/EPS figures without checkpoints, extraction or scoring."""
     run_id = safe_run_id(run_id)
     if not isinstance(source_digest, str) or re.fullmatch(r"[0-9a-f]{64}", source_digest) is None:
@@ -36,9 +37,22 @@ def write_evaluation_report(project_root, run_id, *, anchor_q_output, dimsim_out
     if resolved_config is not None and not isinstance(resolved_config, dict):
         raise ValueError("resolved_config must be a mapping")
 
-    aq, ds = load_evaluation_outputs(inputs[0]), load_evaluation_outputs(inputs[1])
+    aq, ds = load_evaluation_summary(inputs[0]), load_evaluation_summary(inputs[1])
     _check_paired_outputs(aq, ds)
     random = load_random_control_summary(inputs[2])
+    prepared = None
+    if interpretation_data_output is not None:
+        interpretation_data_output = Path(interpretation_data_output).resolve(strict=True)
+        prepared, prepared_manifest = load_interpretation_presentation_data(interpretation_data_output)
+        pins = aq['manifest']['scientific_input_pins']
+        expected_provenance = {(r['model_id'],r['seed']): {k:r[k] for k in
+            ('run_id','run_manifest_sha256','checkpoint_sha256')} for r in pins['model_seed_provenance']}
+        actual_provenance = {(m,r['seed']): {k:r[k] for k in
+            ('run_id','run_manifest_sha256','checkpoint_sha256')} for m, rows in prepared['provenance'].items() for r in rows}
+        if (prepared['bundle_manifest_sha256'] != pins['bundle_manifest_sha256']
+                or actual_provenance != expected_provenance):
+            raise ValueError('interpretation and evaluation use different inputs')
+        inputs.append(interpretation_data_output)
     bundle_hash = aq["manifest"]["scientific_input_pins"]["bundle_manifest_sha256"]
     if random["manifest"]["scientific_input_pins"]["bundle_manifest_sha256"] != bundle_hash:
         raise ValueError("random control and learned models use different evaluation bundles")
@@ -55,6 +69,7 @@ def write_evaluation_report(project_root, run_id, *, anchor_q_output, dimsim_out
         "registry_sha256": p.registry_hash,
         "formats": list(p.style["export"]["formats"]),
         "png_dpi": p.style["export"]["dpi"],
+        "interpretation_data_output": str(interpretation_data_output) if prepared is not None else None,
     }
     pins = {
         "evaluation_bundle_manifest_sha256": bundle_hash,
@@ -67,9 +82,16 @@ def write_evaluation_report(project_root, run_id, *, anchor_q_output, dimsim_out
     with tempfile.TemporaryDirectory(prefix="evaluation-tables-") as directory:
         stage = Path(directory)
         table_paths = render_evaluation_tables(aq["tables"], ds["tables"], stage / "tables")
+        if prepared is not None:
+            for name, body in prepared['tables'].items():
+                path = stage / 'tables' / name
+                with path.open('x',encoding='utf-8',newline='\n') as stream: stream.write(body)
+                table_paths.append(path)
+        stems = FIGURE_STEMS + (('residual-qq',) if prepared is not None else ())
         expected = {"config.json", "data/random_control_summary.json", "diagnostics/summary.json"}
+        if prepared is not None: expected.add('data/interpretation_summary.json')
         expected.update(f"tables/{path.name}" for path in table_paths)
-        expected.update(f"figures/{stem}.{suffix}" for stem in FIGURE_STEMS
+        expected.update(f"figures/{stem}.{suffix}" for stem in stems
                         for suffix in ("png", "eps", "metadata.json"))
         with _evaluation_run(
             project_root, "contextual-evaluation-report", run_id,
@@ -80,9 +102,13 @@ def write_evaluation_report(project_root, run_id, *, anchor_q_output, dimsim_out
             for path in table_paths:
                 shutil.copyfile(path, root / "tables" / path.name)
             _write(root / "data/random_control_summary.json", random["report"])
-            render_evaluation(inputs[0], inputs[1], root / "figures", source_digest, protocol=p)
+            if prepared is not None:
+                _write(root/'data/interpretation_summary.json',
+                       {k:prepared[k] for k in ('q_groups','regression_summary','regression_per_seed','top_pairs')})
+            render_loaded_evaluation(aq,ds,root / "figures",source_digest,protocol=p,
+                                     residual_qq=prepared['residual_qq'] if prepared is not None else None)
             _write(root / "diagnostics/summary.json", {
-                "scope": "presentation", "figure_count": len(FIGURE_STEMS),
+                "scope": "presentation", "figure_count": len(stems),
                 "table_count": len(table_paths), "evaluation_bundle_manifest_sha256": bundle_hash,
             })
     return target
