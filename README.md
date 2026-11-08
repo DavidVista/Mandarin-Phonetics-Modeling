@@ -150,9 +150,14 @@ Standalone preparation and training notebooks contain readable `%%writefile` sou
 
 ### Evaluation and reports
 
-- [contextual-evaluation.ipynb](notebooks/Evaluation/contextual-evaluation.ipynb): standalone contextual extraction and numerical evaluation.
-- [contextual-evaluation-composite.ipynb](notebooks/Evaluation/contextual-evaluation-composite.ipynb): the same data pipeline using the local SDK.
+Historical evaluation notebooks and their generators are archived with the previous IDS runs. Their migration to the character/seed-specific experiment contract is separate from preparation and training.
 - [evaluation.ipynb](notebooks/Visualization/evaluation.ipynb): figures and tables from completed evaluation artifacts.
 - [dimsim-distribution-analysis.ipynb](notebooks/Report/dimsim-distribution-analysis.ipynb): DIMSIM distance distribution report.
 - [dimsim-parser-alignment.ipynb](notebooks/Report/dimsim-parser-alignment.ipynb): DIMSIM parser comparison report.
 - [wav2vec2-graduality-comparison.ipynb](notebooks/Report/wav2vec2-graduality-comparison.ipynb): Wav2Vec2 representation comparison report.
+
+## Historical artifact archive
+
+Previous IDS datasets, training runs, evaluation outputs, retired source files and evaluation notebook generators are stored outside the repositories under `../archive/2026-11-08/`, preserving their original `project/` and `meta/` paths. `archive-manifest.json` records each moved file's size and SHA256. Snapshots of partially edited shared files are stored separately in `snapshots/`.
+
+Current `char-*` datasets, acoustic embeddings and source inputs remain in place. Archived bundle contents and manifests were moved unchanged. The archival operation does not rewrite Git history or relocate active input paths.

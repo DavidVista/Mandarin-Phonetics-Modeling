@@ -1,4 +1,4 @@
-"""Deterministic flat ZIP packing and fail-before-write extraction."""
+"""Safe flat sound archive extraction with checksum validation."""
 
 from __future__ import annotations
 
@@ -17,23 +17,6 @@ WINDOWS_FORBIDDEN=set('<>:"/\\|?*')
 WINDOWS_DEVICES={"con","prn","aux","nul",*(f"com{i}" for i in range(1,10)),*(f"lpt{i}" for i in range(1,10))}
 
 
-def pack_sounds(source_dir,archive_path):
-    source=Path(source_dir).resolve();target=Path(archive_path).resolve()
-    if target.exists(): raise FileExistsError(target)
-    files=sorted((p for p in source.iterdir() if p.is_file() and p.suffix.lower() in ALLOWED),key=lambda p:p.name)
-    if not files: raise ValueError("sound source is empty")
-    _validate_names([p.name for p in files])
-    target.parent.mkdir(parents=True,exist_ok=True);fd,temp_name=tempfile.mkstemp(prefix=f".{target.name}.",dir=target.parent);os.close(fd);temp=Path(temp_name)
-    try:
-        with zipfile.ZipFile(temp,"w",compression=zipfile.ZIP_STORED) as archive:
-            for path in files:
-                info=zipfile.ZipInfo(path.name,date_time=(1980,1,1,0,0,0));info.compress_type=zipfile.ZIP_STORED;info.external_attr=(0o100644<<16)
-                archive.writestr(info,path.read_bytes())
-        os.rename(temp,target)
-        return {"path":str(target),"sha256":sha256_file(target),"files":len(files),"bytes":sum(p.stat().st_size for p in files),
-                "inventory":{p.name:sha256_file(p) for p in files}}
-    except Exception:
-        temp.unlink(missing_ok=True);raise
 
 
 def unpack_sounds(archive_path,destination,*,expected_sha256):

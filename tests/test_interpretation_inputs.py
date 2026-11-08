@@ -123,19 +123,6 @@ class SavedInterpretationTests(unittest.TestCase):
                 with self.assertRaises(ValueError): run_saved_interpretation(**config)
                 self.assertFalse((Path(folder)/'outputs/contextual-interpretation/interpretation').exists())
 
-    def test_composite_interpretation_skips_scoring(self):
-        notebook = json.loads((PROJECT/'notebooks/Evaluation/contextual-evaluation-composite.ipynb').read_text(encoding='utf-8'))
-        with tempfile.TemporaryDirectory() as folder:
-            config = saved_fixture(Path(folder))
-            config.pop('source_hashes')
-            ns = {'EVALUATION_STAGE': 'interpretation', 'INTERPRETATION_CONFIG': config,
-                  'BUILD_METADATA': {'source_sha256': {'source': 'e'*64}}}
-            for cell in notebook['cells']:
-                if cell.get('id') in {'analysis-preflight', 'analysis-representations', 'analysis-q',
-                    'analysis-dimsim', 'analysis-random', 'analysis-output', 'analysis-interpretation'}:
-                    exec(''.join(cell['source']), ns)
-            self.assertTrue(ns['INTERPRETATION_PATH'].exists())
-            self.assertNotIn('PREFLIGHT', ns)
 
 
 if __name__ == '__main__': unittest.main()

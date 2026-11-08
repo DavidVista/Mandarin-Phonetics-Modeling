@@ -326,30 +326,6 @@ class ContextualBundleTests(unittest.TestCase):
             diagnostic = json.loads(str(caught.exception).split("diagnostics=", 1)[1])
             self.assertEqual(len(diagnostic["missing_edges"]), 12)
 
-    def test_portable_preparation_functions_execute_on_fixture(self):
-        notebook_path = ROOT / "notebooks" / "Datasets" / "Evaluation Setup" / "prepare-evaluation.ipynb"
-        notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
-        code = lambda cell: "".join(cell["source"])
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
-            root = Path(tmp); exp = self.make_experiment(root, "portable-exp")
-            namespace = {"__name__": "portable_preparation_fixture"}
-            for cell in notebook["cells"]:
-                if cell["cell_type"] == "code" and (cell["id"].endswith("build") or "-module-" in cell["id"] or cell["id"] == "prep-pinyin"):
-                    exec(compile(code(cell), f"portable:{cell['id']}", "exec"), namespace)
-            config = code(next(c for c in notebook["cells"] if c["id"] == "prep-config"))
-            exec(compile(config, "portable:prep-config", "exec"), namespace)
-            namespace.update({"EXPERIMENT_PATH": exp, "OUTPUT_ROOT": root / "portable-out", "EVALUATION_ID": "portable",
-                              "DIMSIM_NATURAL_PAIR_COUNT": 20, "DIMSIM_BALANCED_DRAW_COUNT": 40,
-                              "ANCHOR_Q_DRAWS_PER_EDGE": 2})
-            class SyntheticMetric:
-                provenance = {"metric_name": "synthetic"}
-                def __call__(self, left, right): return 0.0 if left == right else 5.0
-            namespace["DimsimDistance"] = SyntheticMetric
-            run = code(next(c for c in notebook["cells"] if c["id"] == "prep-run"))
-            exec(compile(run, "portable:prep-run", "exec"), namespace)
-            loaded = namespace["load_evaluation_bundle"](namespace["bundle_path"])
-            self.assertEqual(len(loaded["triplets"]), 24)
-            self.assertNotIn("groups", loaded)
 
 
 if __name__ == "__main__": unittest.main()

@@ -75,8 +75,8 @@ class VisualizationNotebookTests(unittest.TestCase):
                     self.assertNotEqual(node.func.attr, "show")
 
     def test_builder_preserves_parameters_and_other_notebooks(self):
-        siblings = [PROJECT / "notebooks/Evaluation" / name for name in
-                    ("contextual-evaluation-composite.ipynb", "contextual-evaluation.ipynb")]
+        siblings = [PROJECT / "notebooks" / name for name in
+                    ("Visualization/training.ipynb", "Report/dimsim-distribution-analysis.ipynb")]
         before = {path: sha(path) for path in siblings}
         sentinel = 'from pathlib import Path\nEVALUATION_OUTPUT_ROOT = Path("/custom/artifacts")\nPRESENTATION_ID = "keep-this-id"\n'
         with tempfile.TemporaryDirectory(dir=PROJECT) as directory:

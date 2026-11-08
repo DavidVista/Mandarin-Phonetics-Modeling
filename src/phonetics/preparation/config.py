@@ -1,47 +1,5 @@
-﻿"""Strict configuration parsing for prepared datasets."""
-
-from __future__ import annotations
-
+"""Acoustic model configuration validation."""
 from copy import deepcopy
-from pathlib import Path
-
-SCHEMA_VERSION = 1
-
-
-def validate_config(value: dict) -> dict:
-    if not isinstance(value, dict):
-        raise TypeError("config must be a dict")
-    raw_audio_mode = {"dataset_id", "output_root", "cache_root", "corpus", "sounds", "ids", "model", "sampling"}
-    precomputed = {"dataset_id", "output_root", "corpus", "ids", "sampling", "acoustic_bundle"}
-    if set(value) not in (raw_audio_mode, precomputed):
-        raise ValueError("config must use exactly one acoustic mode")
-    config = deepcopy(value)
-    dataset_id = config["dataset_id"]
-    if not isinstance(dataset_id, str) or not dataset_id or Path(dataset_id).name != dataset_id or dataset_id in {".", ".."}:
-        raise ValueError("dataset_id must be one safe path component")
-    for section in set(config) & {"corpus", "sounds", "ids", "model", "sampling", "acoustic_bundle"}:
-        if not isinstance(config[section], dict):
-            raise ValueError(f"{section} must be an object")
-    _keys(config["corpus"], {"path", "tone_convention"}, {"sha256", "source_id"}, "corpus")
-    _keys(config["ids"], {"path", "sha256", "snapshot_commit", "license", "attribution"}, set(), "ids")
-    _keys(config["sampling"], {"size", "strategy", "seed"}, set(), "sampling")
-    if config["corpus"]["tone_convention"] not in {"explicit", "neutral_unmarked"}:
-        raise ValueError("tone_convention is required and must be explicit or neutral_unmarked")
-    if set(value) == raw_audio_mode:
-        _keys(config["sounds"], {"path", "tone_convention"}, {"sha256", "manifest"}, "sounds")
-        if config["sounds"]["tone_convention"] not in {"explicit", "neutral_unmarked"}: raise ValueError("invalid sounds tone convention")
-        validate_model_config(config["model"])
-    else:
-        _keys(config["acoustic_bundle"], {"path", "manifest_sha256"}, set(), "acoustic_bundle")
-        if not all(isinstance(config["acoustic_bundle"][k],str) and config["acoustic_bundle"][k] for k in ("path","manifest_sha256")):
-            raise ValueError("acoustic bundle path and manifest_sha256 are required")
-    sampling = config["sampling"]
-    if sampling["strategy"] != "uniform" or not isinstance(sampling["seed"], int) or isinstance(sampling["seed"], bool):
-        raise ValueError("sampling requires strategy=uniform and an integer seed")
-    size = sampling["size"]
-    if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size <= 0):
-        raise ValueError("sampling size must be null or a positive integer")
-    return config
 
 
 def validate_model_config(model):

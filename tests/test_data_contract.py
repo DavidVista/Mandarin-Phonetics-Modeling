@@ -27,25 +27,11 @@ class DataContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pinyin.canonical_labels(["de"], tone_convention="explicit")
 
-    def test_filter_order_and_zero_initial(self):
-        mapping = {"爱": {}, "妈": {}}
-        self.assertIsNone(contract.pair_reason("爱", ["ai4"], mapping, {"ai4": 1}))
-        cases = [("", [], "nonempty"), ("A", ["ma1"], "characters"),
-                 ("妈", ["ma1", "ma1"], "alignment"), ("妈", ["bad9"], "pinyin"),
-                 ("爸", ["ba1"], "ids"), ("妈", ["ma1"], "acoustic")]
-        for text, labels, expected in cases:
-            self.assertEqual(contract.pair_reason(text, labels, mapping, {"ai4": 1}), expected)
 
     def test_stable_id_matches_fixed_serialization(self):
         self.assertEqual(contract.sample_id("妈", ["ma1"]),
                          "64066df4ebfea74f4bdac84a0e4b7504436b848387fc92c916883f543539b960")
 
-    def test_ids_grammar_rejects_missing_and_extra_operands(self):
-        ids = importlib.import_module("phonetics.ids")
-        self.assertEqual(ids.parse_expression("⿰女马"), ("⿰", "女", "马"))
-        for expression in ("", "⿰女", "⿰女马木", "⿰？"):
-            with self.assertRaises(ValueError):
-                ids.parse_expression(expression)
 
     def test_acoustic_vectors_and_inventory_are_strict(self):
         try:

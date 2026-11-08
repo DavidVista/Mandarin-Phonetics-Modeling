@@ -9,7 +9,7 @@ from .bundles import seal_bundle, staging_directory, validate_bundle
 from .pinyin import PARSER_PROVENANCE, canonical_label, validate_canonical_label
 from .source_preparation.archive import unpack_sounds
 from .source_preparation.download import ARCHIVE_NAME, validate_source_bundle
-from .source_preparation.sound_manifest import CHINESE_LESSONS_ALIASES
+from .source_preparation.aliases import CHINESE_LESSONS_ALIASES
 
 
 def inspect_audio(path):
