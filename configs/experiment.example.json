@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "paths": {
+    "source": "../datasets/source-data/chinese-lessons-v1",
+    "export": "../datasets/source-data/duyu-v1",
+    "inventory": "../datasets/source-data/inventory-v1",
+    "corpus": "../datasets/processed-corpus/char-v1",
+    "acoustic": "../datasets/pinyin-embeddings/char-zh-cn-v1",
+    "prepared": "../datasets/prepared/char-v1",
+    "experiments": "../datasets/experiments",
+    "cache": "../datasets/source-data/acoustic-cache",
+    "runs": "../runs"
+  },
+  "corpus": {
+    "revision": "9961d7d05910be7006f2dcfae21f4fc5ce4d560a",
+    "split": "train",
+    "columns": {
+      "text": "我们试试看！",
+      "pinyin": "wo3 men shi4 shi4 kan4 ！"
+    },
+    "tone_convention": "neutral_unmarked"
+  },
+  "model": {
+    "id": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "processor": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "revision": "99ccb2737be22b8bb50dcfcc39ad4d567fb90cfd",
+    "device": "cpu",
+    "dtype": "float32",
+    "layer": -1,
+    "sample_rate": 16000,
+    "mono": true,
+    "padding": "none",
+    "pooling": "mean_all"
+  },
+  "acoustic": {
+    "existing_bundle": "../datasets/pinyin-embeddings/duyu-chinese-lessons-zh-cn-v1",
+    "manifest_sha256": "0280ba452aa1580b7d414a2aa15f05d878bd1be2bf11e56f93133d07495e3641"
+  },
+  "experiment_id": "char-zh-cn-v1",
+  "experiment": {
+    "schema_version": 4,
+    "sample_size": 100000,
+    "seed_count": 5,
+    "test_seed": 0,
+    "test_fraction": 0.1,
+    "validation_fraction": 0.1,
+    "architecture": {
+      "embedding_dim": 64,
+      "sentence_bilstm_hidden_per_direction": 64,
+      "sentence_bilstm_layers": 1,
+      "context_dim": 128,
+      "classification_hidden_dim": 64,
+      "classification_dropout": 0.5,
+      "acoustic_dim": 1024
+    },
+    "training": {
+      "optimizer": "Adam",
+      "learning_rate": 0.001,
+      "weight_decay": 0.0,
+      "batch_size": 32,
+      "epochs": 20,
+      "scheduler": null,
+      "early_stopping": false,
+      "gradient_clipping": null,
+      "cosine_epsilon": 1e-08
+    },
+    "model_ids": [
+      "syllable",
+      "components",
+      "acoustic",
+      "components-acoustic-lambda-1",
+      "components-acoustic-lambda-10"
+    ]
+  }
+}

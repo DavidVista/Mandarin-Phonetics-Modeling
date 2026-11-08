@@ -1,4 +1,4 @@
-"""Torch dataset and collation for portable schema-3 experiment bundles."""
+"""Torch dataset and collation for seed-specific character experiment bundles."""
 from __future__ import annotations
 
 import torch
@@ -24,9 +24,7 @@ def collate_experiment(samples):
         raise ValueError("cannot collate an empty batch")
     batch_size = len(samples)
     max_sentence = max(sample["sentence_length"] for sample in samples)
-    max_component = max(max(sample["component_lengths"]) for sample in samples)
-    ids_sequences = torch.zeros((batch_size, max_sentence, max_component), dtype=torch.long)
-    component_lengths = torch.zeros((batch_size, max_sentence), dtype=torch.long)
+    token_ids = torch.zeros((batch_size, max_sentence), dtype=torch.long)
     component_labels = torch.full((batch_size, max_sentence, 3), -100, dtype=torch.long)
     syllable_ids = torch.full((batch_size, max_sentence), -100, dtype=torch.long)
     acoustic_ids = torch.full((batch_size, max_sentence), -1, dtype=torch.long)
@@ -34,17 +32,16 @@ def collate_experiment(samples):
     for row_index, sample in enumerate(samples):
         n = sample["sentence_length"]
         sentence_lengths[row_index] = n
-        for position, (sequence, length) in enumerate(zip(sample["ids_sequences"], sample["component_lengths"])):
-            if length != len(sequence) or length <= 0:
-                raise ValueError("sample contains invalid IDS component length")
-            ids_sequences[row_index, position, :length] = torch.as_tensor(sequence, dtype=torch.long)
-            component_lengths[row_index, position] = length
+        sequence = sample["token_ids"]
+        if len(sequence) != n or any(type(token) is not int or token <= 0 for token in sequence):
+            raise ValueError("invalid character token sequence")
+        token_ids[row_index, :n] = torch.as_tensor(sequence, dtype=torch.long)
         component_labels[row_index, :n] = torch.as_tensor(sample["component_labels"], dtype=torch.long)
         syllable_ids[row_index, :n] = torch.as_tensor(sample["syllable_ids"], dtype=torch.long)
         acoustic_ids[row_index, :n] = torch.as_tensor(sample["acoustic_ids"], dtype=torch.long)
-    char_mask = component_lengths > 0
+    char_mask = token_ids > 0
     return {
-        "ids_sequences": ids_sequences, "component_lengths": component_lengths,
+        "token_ids": token_ids,
         "sentence_lengths": sentence_lengths, "char_mask": char_mask,
         "component_labels": component_labels, "syllable_ids": syllable_ids,
         "acoustic_ids": acoustic_ids,
@@ -56,8 +53,8 @@ def collate_experiment(samples):
 
 def create_loaders(experiment: dict, seed: int, batch_size: int | None = None, num_workers: int = 0):
     manifest = experiment.get("manifest", {})
-    if manifest.get("bundle_type") != "experiment_dataset" or manifest.get("schema_version") != 3:
-        raise ValueError("training loaders require a validated schema-3 experiment dataset")
+    if manifest.get("bundle_type") != "character_experiment" or experiment.get("seed") != seed:
+        raise ValueError("training loaders require a validated seed-specific character experiment")
     if type(seed) is not int or seed < 0:
         raise ValueError("loader seed must be a nonnegative integer")
     batch = batch_size or experiment["config"].get("training", {}).get("batch_size", 32)

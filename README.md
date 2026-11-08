@@ -79,62 +79,74 @@ We find that optimizing an encoder only for pinyin prediction does not naturally
 
 These structural changes are reflected behaviorally in the homophone probing benchmark. As alignment strengthens, decoders become increasingly likely to recover the original lexical item rather than copying the perturbed homophone, indicating that hidden states progressively collapse character-specific information into shared phonetic representations. The same qualitative trend is reproduced with BERT encoders, despite their substantially different inductive bias, demonstrating that the effect arises from the alignment objective rather than the encoder architecture. Overall, the study shows that explicit continuous supervision can reshape neural representations from discrete symbolic categories toward graded similarity spaces, providing a practical framework for both learning and interpreting structured latent representations beyond Mandarin phonetics.
 
-## Data & Local Setup
+## Data and local setup
 
-The current workflow uses the supplied DuYu/Pinyin-Hanzi annotations and Chinese Lessons audio. Composite notebooks find the project root automatically and import the shared SDK from `src`. Portable notebooks contain the required implementation and use explicit input/output paths.
+The current character-level pipeline uses pinned DuYu/Pinyin-Hanzi annotations and Chinese Lessons audio. The research findings above describe historical experiments. Historical evaluation notebooks retain their original protocol; character-experiment evaluation is a separate migration.
 
-The findings above describe the historical research. Its former notebooks and generated data are retained in Git history; the current notebooks prepare reproducible experiments and DIMSIM evaluations.
+Use Python 3.12. Install the project from the committed lock without ML dependencies:
 
-### `datasets/` layout
+```sh
+uv sync --frozen --extra sources --extra audio --extra test
+uv run --frozen --no-sync phonetics --help
+```
 
-| Folder | Contents | Storage |
-| :-- | :-- | :-- |
-| `chinese-lessons.zip` | Source archive for local audio extraction | Git |
-| `source-data/` | Local DuYu export, sounds and sound manifests | Ignored |
-| `pinyin-embeddings/` | Complete base and zh-cn acoustic bundles | Git |
-| `processed-corpus/` | Filtered and sampled corpus with audit reports | Ignored |
-| `prepared/` | Validated corpus, IDS resources and acoustic targets | Ignored |
-| `experiments/<experiment_id>/` | Splits, vocabularies and model initialization | Generated; tracked config/manifest exceptions |
-| `evaluations/<evaluation_id>/` | Immutable contextual evaluation samples | Generated; tracked config/manifest/coverage exceptions |
-| `evaluation-runs/` | Historical analysis cache retained for reproducibility | Ignored |
+The base runtime pins NumPy 2.1.3 and pypinyin 0.55.0. Optional `training` and `inference` dependencies pin Torch 2.11.0. Select the appropriate CPU/CUDA build explicitly for the intended device. Preparation does not install or import Torch automatically. The historical research environment remains documented in `requirements.txt`; it is not the installation specification for this pipeline.
 
-Current prepared bundles contain `corpus.jsonl`, `ids/` and `acoustic/targets.pkl`, bound by a versioned manifest. Training runs live separately under `runs/`; analysis artifacts are saved under `outputs/`. Both are ignored by Git. The research summary above includes historical Wubi experiments; the current input pipeline uses IDS.
+Copy `configs/experiment.example.json` to a configuration file in the same directory and review paths, exact source/model revisions and acoustic manifest hash. Paths resolve relative to that configuration file, independently of the working directory. Moving the config elsewhere requires adjusting relative paths.
 
-### Run order
+```sh
+phonetics download-sounds --output datasets/source-data/chinese-lessons-v1
+phonetics export-corpus --config configs/experiment.json
+phonetics prepare-inventory --config configs/experiment.json
+phonetics prepare-corpus --config configs/experiment.json
+phonetics prepare-embeddings --config configs/experiment.json
+phonetics prepare-data --config configs/experiment.json
+phonetics prepare-experiment --config configs/experiment.json
+```
 
-1. Export the pinned DuYu split in `prepare-corpus`. When the local export already exists, skip the export call.
-2. Unpack `chinese-lessons.zip` and build the sound manifest in `prepare-sounds`.
-3. Select an existing validated acoustic bundle, or run the portable/composite `prepare-pinyin-embeddings` notebook with an exact model revision.
-4. Run the local processing section of `prepare-corpus`: normalization, validation, exclusion of conflicting pronunciations, IDS/audio coverage, deduplication and reproducible sampling. Record the sample size and seed in the configuration.
-5. Run `prepare-data` to assemble the processed corpus, IDS resources and compatible acoustic targets without modifying their contents.
-6. Run `prepare-experiment` against that prepared bundle to create the train/validation/test splits and initialization.
-7. Train the selected objective: `syllable`, `components`, `acoustic` or `components-acoustic-lambda-<weight>`. Keep the experiment and five training seeds consistent across comparisons.
-8. Run `prepare-evaluation` for the exact experiment and split, then `contextual-evaluation` with matching checkpoints. It saves numerical Q, DIMSIM and random-control artifacts. Build figures separately with `notebooks/Visualization/evaluation.ipynb`. Input and checkpoint provenance are validated.
+Alternatively, `phonetics prepare --config configs/experiment.json` runs the complete preparation sequence and passes artifact identities between stages. The example imports the existing pinned zh-cn acoustic bundle without inference. To compute new targets, set both acoustic input fields to null and supply `--allow-inference`. Review model revision and device first.
 
-Training writes `runs/<experiment_id>/<model_id>/<run_id>/seed-<seed>/best.pt`. Run manifests identify the exact five seeds and checkpoint hashes; evaluation does not choose the latest run implicitly.
+The source stage downloads the official Mandarin Sounds ZIP from [Chinese Lessons](https://www.chinese-lessons.com/download.htm), verifies its SHA256, and stores the archive and attribution/license provenance in an ignored local source directory. Audio is not distributed with the current source tree. The download page specifies CC BY-NC-ND 3.0 US; retain attribution and observe the source's conditions.
+
+The decoded sound inventory is independent of acoustic embeddings. Corpus processing applies normalization, alignment, pronunciation-conflict exclusion, deduplication and sound coverage, with no IDS dependency or sampling. Prepared data assembly checks inventory/target compatibility without removing more sentences.
+
+Each seed samples an explicit N sentences for train plus validation. The example uses N=100000: 90000 train, 10000 validation per seed, and one additional common test of 10000. Test sentences are removed before seed sampling. Each seed builds its own train-only character vocabulary (PAD=0, UNK=1); all objectives of that seed share splits, vocabulary and initial encoder weights. The input encoder is a 64-dimensional character embedding followed by the sentence BiLSTM. Existing outputs are reused only after content and configuration validation; changed inputs require a new output ID.
+
+Training is separate and requires explicit input provenance and device:
+
+```sh
+phonetics train --experiment datasets/experiments/char-zh-cn-v1 --manifest-sha256 EXACT_SHA256 --model syllable --device cpu --output runs --allow-training
+```
+
+Training writes `runs/<experiment_id>/<model_id>/<run_id>/seed-<seed>/{best,last}.pt`. Manifests bind actual seeds, per-seed splits/vocabularies, common test, code, runtime and checkpoints. Data splits and vocabularies are deterministic; GPU results are not promised to be bitwise identical across systems.
+
+| Directory | Contents |
+| :-- | :-- |
+| `datasets/source-data/` | Downloaded source bundles, DuYu exports, decoded inventory and cache; ignored |
+| `datasets/processed-corpus/` | Complete eligible character corpus and rejection reports; ignored |
+| `datasets/pinyin-embeddings/` | Existing acoustic references and newly generated targets |
+| `datasets/prepared/` | Validated corpus and acoustic targets; ignored |
+| `datasets/experiments/` | Shared corpus/test and per-seed splits, vocabularies and diagnostics |
+| `runs/` | Separate immutable training runs; ignored |
 
 ## Notebooks
 
-### Data preparation
+Standalone preparation and training notebooks contain readable `%%writefile` source cells and verify the resulting SDK snapshot before importing it. They do not need a project checkout. Configuration and execution guards appear at the end; dependency installation and inference/training are never automatic. Local execution uses the CLI instead of composite notebooks.
 
-- [prepare-corpus.ipynb](notebooks/Datasets/Data%20Preparation/prepare-corpus.ipynb): pinned DuYu export and local corpus processing.
-- [prepare-sounds.ipynb](notebooks/Datasets/Data%20Preparation/prepare-sounds.ipynb): archive extraction and audited sound manifest.
-- [prepare-pinyin-embeddings.ipynb](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings.ipynb): portable acoustic inference; [Kaggle inference](https://www.kaggle.com/code/davidvista/wav2vec2-embeddings-v1).
-- [prepare-pinyin-embeddings-composite.ipynb](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings-composite.ipynb): acoustic inference using the local SDK.
-- [prepare-data.ipynb](notebooks/Datasets/Data%20Preparation/prepare-data.ipynb): strict artifact assembly.
-- [prepare-experiment.ipynb](notebooks/Datasets/Experiment%20Setup/prepare-experiment.ipynb): experiment splits and initialization.
-- [prepare-evaluation.ipynb](notebooks/Datasets/Evaluation%20Setup/prepare-evaluation.ipynb): pinned DIMSIM evaluation inputs.
+### Preparation
+
+- [Sound sources](notebooks/Datasets/Data%20Preparation/prepare-sounds.ipynb)
+- [Character corpus](notebooks/Datasets/Data%20Preparation/prepare-corpus.ipynb)
+- [Acoustic targets](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings.ipynb)
+- [Prepared data](notebooks/Datasets/Data%20Preparation/prepare-data.ipynb)
+- [Experiment](notebooks/Datasets/Experiment%20Setup/prepare-experiment.ipynb)
 
 ### Training
 
-Each objective has a portable notebook and a composite notebook importing the local SDK.
-
-| Objective | Standalone | Composite |
-| :-- | :-- | :-- |
-| Syllable classification | [Syllable](notebooks/Training/syllable/syllable.ipynb) | [Composite](notebooks/Training/syllable/syllable-composite.ipynb) |
-| Component classification | [Components](notebooks/Training/components/components.ipynb) | [Composite](notebooks/Training/components/components-composite.ipynb) |
-| Combined classification and alignment | [Components + acoustic](notebooks/Training/components-acoustic/components-acoustic.ipynb) | [Composite](notebooks/Training/components-acoustic/components-acoustic-composite.ipynb) |
-| Acoustic alignment | [Acoustic](notebooks/Training/acoustic/acoustic.ipynb) | [Composite](notebooks/Training/acoustic/acoustic-composite.ipynb) |
+- [Syllable](notebooks/Training/syllable/syllable.ipynb)
+- [Components](notebooks/Training/components/components.ipynb)
+- [Acoustic](notebooks/Training/acoustic/acoustic.ipynb)
+- [Components and acoustic](notebooks/Training/components-acoustic/components-acoustic.ipynb); select lambda 1 or 10 explicitly.
 
 ### Evaluation and reports
 

@@ -240,3 +240,8 @@ datasets/prepared/
 
 # Generated research outputs.
 /outputs/
+
+# Downloaded audio is obtained from its original source, not redistributed.
+/datasets/chinese-lessons.zip
+# Existing tracked reference bundles remain tracked; new targets are local.
+/datasets/pinyin-embeddings/*/

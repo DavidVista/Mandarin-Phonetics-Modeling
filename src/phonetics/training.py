@@ -1,4 +1,4 @@
-"""Sequential five-seed training runs for the selected objective."""
+"""Sequential seed-specific character training runs for the selected objective."""
 from __future__ import annotations
 
 import hashlib
@@ -20,14 +20,14 @@ import torch
 
 from .artifacts import sha256_file, write_json
 from .data import create_loaders
-from .experiment import load_experiment
+from .experiment import load_experiment, select_seed
 from .metrics import batch_objective, finalize_epoch
 from .model import build_encoder, shared_encoder_sha256
 from .objectives import canonical_model_id, parse_model_id
 from .reproducibility import rng_snapshot, seed_everything
 
 CODE_FILES = ("training.py", "model.py", "data.py", "metrics.py", "reproducibility.py", "experiment.py",
-              "training_data.py", "objectives.py", "pinyin.py", "ids.py", "artifacts.py", "data_contract.py")
+              "training_data.py", "objectives.py", "pinyin.py", "artifacts.py", "data_contract.py", "bundles.py", "acoustic.py", "corpus.py", "sound_inventory.py")
 
 
 class TrainingStepFailure(FloatingPointError):
@@ -163,7 +163,7 @@ def _write_run_manifest(run_dir, manifest):
 
 def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: str | None = None,
                      run_id: str | None = None, expected_manifest_sha256: str | None = None):
-    """Train the selected model over the five fixed seeds, sequentially, without resume."""
+    """Train the selected model over configured seeds, sequentially, without resume."""
     model_id = canonical_model_id(model_id)
     _, lambda_cosine = parse_model_id(model_id)
     experiment = load_experiment(experiment_path)
@@ -173,12 +173,14 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
         if actual_manifest_sha256 != expected_manifest_sha256:
             raise ValueError("experiment manifest does not match the explicitly selected input pin")
     config = experiment["config"]
-    seeds = config["training_seeds"]
+    if model_id not in config["model_ids"]:
+        raise ValueError("selected model_id is not configured in the experiment")
+    seeds = experiment["manifest"]["identity"]["training_seeds"]
     requested_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     target_device = torch.device(requested_device)
     if target_device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError(f"selected device {requested_device!r} requires CUDA")
-    experiment_id = experiment["manifest"]["experiment_id"]
+    experiment_id = experiment["manifest"]["identity"]["experiment_id"]
     run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8]
     if not isinstance(run_id, str) or not run_id or Path(run_id).name != run_id or "/" in run_id or "\\" in run_id:
         raise ValueError("run_id must be a safe path component")
@@ -194,7 +196,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
         "experiment_id": experiment_id, "model_id": model_id, "lambda_cosine": lambda_cosine, "device": str(target_device), "seeds": seeds,
         "selection": "minimum per-seed validation objective; strict improvement keeps earliest tie",
         "experiment_hashes": {name: sha256_file(experiment_root / name) for name in
-                               ("manifest.json", "config.json", "vocab.json", "samples.jsonl", "splits.json", "acoustic_targets.npy")},
+                               ("manifest.json", "config.json", "labels.json", "corpus.jsonl", "splits.json", "targets.npy")},
         "config": config, "code_sha256": {name: sha256_file(Path(__file__).with_name(name)) for name in CODE_FILES},
         "runtime": {"python": platform.python_version(), "torch": torch.__version__, "numpy": np.__version__,
                     "cuda_available": torch.cuda.is_available(), "cuda_version": torch.version.cuda},
@@ -217,19 +219,23 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
             def log_event(event):
                 with event_path.open("a", encoding="utf-8", newline="\n") as handle:
                     handle.write(json.dumps(event, sort_keys=True, allow_nan=False) + "\n")
+            seed_input = select_seed(experiment, seed)
+            seed_inputs = json.loads((experiment_root / "seeds" / str(seed) / "input_hashes.json").read_text(encoding="utf-8"))
             seed_everything(seed)
-            model = build_encoder(config, experiment["vocab"], model_id=model_id, seed=seed).to(target_device)
+            model = build_encoder(config, seed_input["vocab"], model_id=model_id, seed=seed).to(target_device)
             initial_state = {key: value.detach().cpu().clone() for key, value in model.encoder.state_dict().items()}
             shared_hash = _state_hash(initial_state)
-            torch.save({"state_dict": initial_state, "seed": seed, "sha256": shared_hash}, seed_dir / "shared_encoder.pt")
-            loaders = create_loaders(experiment, seed, batch_size=32, num_workers=0)
+            torch.save({"state_dict": initial_state, "seed": seed, "sha256": shared_hash,
+                        "seed_input_hashes": seed_inputs, "experiment_hashes": manifest["experiment_hashes"]},
+                       seed_dir / "shared_encoder.pt")
+            loaders = create_loaders(seed_input, seed, batch_size=config["training"]["batch_size"], num_workers=0)
             acoustic = torch.as_tensor(experiment["acoustic_targets"], dtype=torch.float32, device=target_device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0)
+            optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["learning_rate"], weight_decay=0.0)
             best = math.inf
             best_epoch = None
             best_validation = None
             epoch_history = []
-            for epoch_num in range(1, 21):
+            for epoch_num in range(1, config["training"]["epochs"] + 1):
                 train_metrics, global_step = _epoch(model, loaders["train"], acoustic, model_id, target_device,
                                                     optimizer=optimizer, event_writer=log_event,
                                                     epoch_number=epoch_num, step_start=global_step)
@@ -246,9 +252,13 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
                                 "shared_encoder_sha256": shared_hash,
                                 "experiment_hashes": manifest["experiment_hashes"],
                                 "config_sha256": sha256_file(experiment_root / "config.json"),
-                                "vocab_sha256": sha256_file(experiment_root / "vocab.json")}, seed_dir / "best.pt")
+                                "vocab_sha256": sha256_file(experiment_root / "seeds" / str(seed) / "vocabulary.json"),
+                                "seed_input_hashes": seed_inputs}, seed_dir / "best.pt")
                 torch.save({"state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(),
-                            "seed": seed, "epoch": epoch_num, "rng_state": rng_snapshot(loaders["train"].generator)},
+                            "seed": seed, "epoch": epoch_num, "rng_state": rng_snapshot(loaders["train"].generator),
+                            "model_id": model_id, "seed_input_hashes": seed_inputs,
+                            "experiment_hashes": manifest["experiment_hashes"],
+                            "shared_encoder_sha256": shared_hash},
                            seed_dir / "last.pt")
                 write_json(seed_dir / "history.json", {"epochs": epoch_history})
                 log_event({"event": "epoch", "epoch": epoch_num, "train": train_metrics, "validation": validation_metrics,
@@ -262,7 +272,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
             result = {"seed": seed, "status": "complete", "best_epoch": best_epoch,
                       "best_validation_objective": best, "best_validation_metrics": best_validation,
                       "test_metrics": test_metrics, "gradient_norm": grad_summary,
-                      "shared_encoder_sha256": shared_hash}
+                      "shared_encoder_sha256": shared_hash, "seed_input_hashes": seed_inputs}
             seed_results.append(result)
             statuses[str(seed)] = "complete"
             write_json(seed_dir / "summary.json", result)
