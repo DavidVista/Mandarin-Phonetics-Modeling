@@ -79,85 +79,68 @@ We find that optimizing an encoder only for pinyin prediction does not naturally
 
 These structural changes are reflected behaviorally in the homophone probing benchmark. As alignment strengthens, decoders become increasingly likely to recover the original lexical item rather than copying the perturbed homophone, indicating that hidden states progressively collapse character-specific information into shared phonetic representations. The same qualitative trend is reproduced with BERT encoders, despite their substantially different inductive bias, demonstrating that the effect arises from the alignment objective rather than the encoder architecture. Overall, the study shows that explicit continuous supervision can reshape neural representations from discrete symbolic categories toward graded similarity spaces, providing a practical framework for both learning and interpreting structured latent representations beyond Mandarin phonetics.
 
-## Data and local setup
+## Local setup and pipeline
 
-The current character-level pipeline uses pinned DuYu/Pinyin-Hanzi annotations and Chinese Lessons audio. The research findings above describe historical experiments. Historical evaluation notebooks retain their original protocol; character-experiment evaluation is a separate migration.
-
-Use Python 3.12. Install the project from the committed lock without ML dependencies:
+Use Python 3.12 and uv. Create the environment before activating it. The CPU preparation and analysis environment excludes Torch:
 
 ```sh
-uv sync --frozen --extra sources --extra audio --extra test
-uv run --frozen --no-sync phonetics --help
+uv sync --frozen --extra sources --extra audio --extra analysis --extra test
 ```
 
-The base runtime pins NumPy 2.1.3 and pypinyin 0.55.0. Optional `training` and `inference` dependencies pin Torch 2.11.0. Select the appropriate CPU/CUDA build explicitly for the intended device. Preparation does not install or import Torch automatically. The historical research environment remains documented in `requirements.txt`; it is not the installation specification for this pipeline.
+Activate on Windows PowerShell:
 
-Copy `configs/experiment.example.json` to a configuration file in the same directory and review paths, exact source/model revisions and acoustic manifest hash. Paths resolve relative to that configuration file, independently of the working directory. Moving the config elsewhere requires adjusting relative paths.
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Activate on Linux/macOS:
 
 ```sh
-phonetics download-sounds --output datasets/source-data/chinese-lessons-v1
-phonetics export-corpus --config configs/experiment.json
-phonetics prepare-inventory --config configs/experiment.json
-phonetics prepare-corpus --config configs/experiment.json
-phonetics prepare-embeddings --config configs/experiment.json
-phonetics prepare-data --config configs/experiment.json
-phonetics prepare-experiment --config configs/experiment.json
+source .venv/bin/activate
 ```
 
-Alternatively, `phonetics prepare --config configs/experiment.json` runs the complete preparation sequence and passes artifact identities between stages. The example imports the existing pinned zh-cn acoustic bundle without inference. To compute new targets, set both acoustic input fields to null and supply `--allow-inference`. Review model revision and device first.
-
-The source stage downloads the official Mandarin Sounds ZIP from [Chinese Lessons](https://www.chinese-lessons.com/download.htm), verifies its SHA256, and stores the archive and attribution/license provenance in an ignored local source directory. Audio is not distributed with the current source tree. The download page specifies CC BY-NC-ND 3.0 US; retain attribution and observe the source's conditions.
-
-The decoded sound inventory is independent of acoustic embeddings. Corpus processing applies normalization, alignment, pronunciation-conflict exclusion, deduplication and sound coverage, with no IDS dependency or sampling. Prepared data assembly checks inventory/target compatibility without removing more sentences.
-
-Each seed samples an explicit N sentences for train plus validation. The example uses N=100000: 90000 train, 10000 validation per seed, and one additional common test of 10000. Test sentences are removed before seed sampling. Each seed builds its own train-only character vocabulary (PAD=0, UNK=1); all objectives of that seed share splits, vocabulary and initial encoder weights. The input encoder is a 64-dimensional character embedding followed by the sentence BiLSTM. Existing outputs are reused only after content and configuration validation; changed inputs require a new output ID.
-
-Training is separate and requires explicit input provenance and device:
+Copy `configs/experiment.example.json` to `configs/experiment.json`, review it once, then run:
 
 ```sh
-phonetics train --experiment datasets/experiments/char-zh-cn-v1 --manifest-sha256 EXACT_SHA256 --model syllable --device cpu --output runs --allow-training
+phonetics run --config configs/experiment.json --through experiment
+phonetics run --config configs/experiment.json
 ```
 
-Training writes `runs/<experiment_id>/<model_id>/<run_id>/seed-<seed>/{best,last}.pt`. Manifests bind actual seeds, per-seed splits/vocabularies, common test, code, runtime and checkpoints. Data splits and vocabularies are deterministic; GPU results are not promised to be bitwise identical across systems.
+The first command stops after experiment preparation. The second continues through the configured training and report stages. Paths resolve relative to the config file. Source and model revisions, encoder and head parameters, training settings, devices, execution modes and analysis jobs are defined in one config. Acoustic targets can be imported from a selected bundle or computed from the configured model. Input hashes are computed automatically and recorded in bundles, jobs and run state; an explicit expected acoustic manifest hash can also be supplied.
 
-| Directory | Contents |
-| :-- | :-- |
-| `datasets/source-data/` | Downloaded source bundles, DuYu exports, decoded inventory and cache; ignored |
-| `datasets/processed-corpus/` | Complete eligible character corpus and rejection reports; ignored |
-| `datasets/pinyin-embeddings/` | Existing acoustic references and newly generated targets |
-| `datasets/prepared/` | Validated corpus and acoustic targets; ignored |
-| `datasets/experiments/` | Shared corpus/test and per-seed splits, vocabularies and diagnostics |
-| `runs/` | Separate immutable training runs; ignored |
+Preparation order: download sounds → decode inventory → export and clean corpus → import or infer acoustic targets → assemble prepared data → assemble experiment. Each stage also has an individual CLI command. Computing acoustic targets locally requires the `inference` dependency extra and `--allow-inference`; local training requires `training` and `--allow-training`. Install the Torch 2.11.0 CPU/CUDA build for the selected environment separately. Torch is loaded for model execution.
 
-## Notebooks
+Each seed samples 100000 train+validation sentences by default: 90000 train and 10000 validation, with one additional shared 10000-sentence test. Five seeds build independent train-only character vocabularies. Test sentences are removed before seed sampling. The default encoder uses 64-dimensional character embeddings and a bidirectional sentence LSTM with 64 units per direction. Data splits and vocabularies are deterministic; GPU outputs need not match bitwise between systems.
 
-Standalone preparation and training notebooks contain readable `%%writefile` source cells and verify the resulting SDK snapshot before importing it. They do not need a project checkout. Configuration and execution guards appear at the end; dependency installation and inference/training are never automatic. Local execution uses the CLI instead of composite notebooks.
+The source stage downloads the pinned official Chinese Lessons archive and records attribution and license provenance. Stage results are reused after validation of their inputs, parameters and content. Changed inputs or parameters require distinct output IDs.
 
-### Preparation
+### Notebook handoff and resumption
 
-- [Sound sources](notebooks/Datasets/Data%20Preparation/prepare-sounds.ipynb)
-- [Character corpus](notebooks/Datasets/Data%20Preparation/prepare-corpus.ipynb)
-- [Acoustic targets](notebooks/Datasets/Data%20Preparation/prepare-pinyin-embeddings.ipynb)
-- [Prepared data](notebooks/Datasets/Data%20Preparation/prepare-data.ipynb)
-- [Experiment](notebooks/Datasets/Experiment%20Setup/prepare-experiment.ipynb)
+`execution.acoustic`, `execution.training` and `execution.visualization` choose `local` or `notebook`. Analysis reports run locally. Acoustic execution mode controls computation of new targets; selecting an acoustic input bundle uses the import path. Training device and run ID are explicit.
 
-### Training
+At a notebook stage, `run` prints `status: waiting` and the notebook and job paths. Training generation validates the experiment once for all objectives and creates small reference jobs. Upload the original experiment bundle as a dataset and attach it to the training notebooks; their job manifests and SDK are embedded. Acoustic and visualization jobs use accompanying input packages. Acoustic notebooks are generated after inventory preparation; training notebooks after experiment preparation. Running the final cell executes the configured stage. ML notebooks require Torch 2.11.0, installed separately with the CPU/CUDA build appropriate to the selected device.
 
-- [Syllable](notebooks/Training/syllable/syllable.ipynb)
-- [Components](notebooks/Training/components/components.ipynb)
-- [Acoustic](notebooks/Training/acoustic/acoustic.ipynb)
-- [Components and acoustic](notebooks/Training/components-acoustic/components-acoustic.ipynb); select lambda 1 or 10 explicitly.
+Download the resulting ZIP, extract it, then continue:
 
-### Evaluation and reports
+```sh
+phonetics import-result --config configs/experiment.json --result path/to/extracted-result
+phonetics run --config configs/experiment.json
+```
 
-Historical evaluation notebooks and their generators are archived with the previous IDS runs. Their migration to the character/seed-specific experiment contract is separate from preparation and training.
-- [evaluation.ipynb](notebooks/Visualization/evaluation.ipynb): figures and tables from completed evaluation artifacts.
-- [dimsim-distribution-analysis.ipynb](notebooks/Report/dimsim-distribution-analysis.ipynb): DIMSIM distance distribution report.
-- [dimsim-parser-alignment.ipynb](notebooks/Report/dimsim-parser-alignment.ipynb): DIMSIM parser comparison report.
-- [wav2vec2-graduality-comparison.ipynb](notebooks/Report/wav2vec2-graduality-comparison.ipynb): Wav2Vec2 representation comparison report.
+The CLI checks the pending job identity, source snapshot, input pins, result inventory, parameters and completed seeds before publication. Checkpoint bytes are authenticated by hashes; result import does not deserialize them. Each objective has a separate notebook job; resume advances to the next configured objective.
 
-## Historical artifact archive
+Generate optional notebooks separately with the same generator:
 
-Previous IDS datasets, training runs, evaluation outputs, retired source files and evaluation notebook generators are stored outside the repositories under `../archive/2026-11-08/`, preserving their original `project/` and `meta/` paths. `archive-manifest.json` records each moved file's size and SHA256. Snapshots of partially edited shared files are stored separately in `snapshots/`.
+```sh
+phonetics generate-notebooks --config configs/experiment.json --stage training
+```
 
-Current `char-*` datasets, acoustic embeddings and source inputs remain in place. Archived bundle contents and manifests were moved unchanged. The archival operation does not rewrite Git history or relocate active input paths.
+Stages are `acoustic`, `training`, `visualization` or `ready` (all whose inputs are available). Generated notebooks, execution jobs and run state are written to the configured paths. The default `generated/` directory is ignored by Git.
+
+See [configuration and workflow examples](docs/pipeline.md) for report and visualization parameters, state handling and input contracts. Report workflows consume evaluation bundles, numerical evaluation outputs and training logs according to their declared schemas. Input schemas and manifest pins are validated before report publication. Visualizations use the shared style protocol.
+
+## Artifacts and reproducibility
+
+Data bundles record their configuration, input identities and artifact hashes. Experiment bundles bind the shared test set, per-seed training and validation splits, character vocabularies and acoustic targets. Training manifests bind the experiment, objective, seeds, source code, runtime, logs and checkpoints. Report outputs retain their input pins and scientific provenance.
+
+Storage locations and output identifiers are selected through the configuration. Published bundles and runs are immutable; new scientific inputs or parameters receive new output identifiers. Generated data and execution outputs are stored separately from versioned source code.

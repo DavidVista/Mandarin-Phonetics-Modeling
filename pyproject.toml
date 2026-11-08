@@ -14,6 +14,7 @@ audio = ["soundfile==0.14.0"]
 sources = ["datasets>=3,<5"]
 training = ["torch==2.11.0"]
 inference = ["torch==2.11.0", "transformers>=4.48,<5", "librosa>=0.10,<1", "soundfile==0.14.0"]
+analysis = ["dimsim==0.2.2", "matplotlib==3.10.8", "pandas==3.1.1", "scipy==1.18.1"]
 test = ["nbformat>=5.10,<6"]
 
 [project.scripts]
@@ -22,3 +23,6 @@ phonetics = "phonetics.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["phonetics*"]
+
+[tool.setuptools.package-data]
+"phonetics.visualization" = ["*.toml"]

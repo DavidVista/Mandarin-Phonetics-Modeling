@@ -245,3 +245,6 @@ datasets/prepared/
 /datasets/chinese-lessons.zip
 # Existing tracked reference bundles remain tracked; new targets are local.
 /datasets/pinyin-embeddings/*/
+
+# Generated notebooks, portable execution jobs and pipeline state.
+/generated/

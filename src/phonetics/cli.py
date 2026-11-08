@@ -13,6 +13,24 @@ def main(argv=None):
     download = commands.add_parser("download-sounds", help="Download and verify the official Mandarin archive")
     download.add_argument("--output", required=True, help="Source bundle directory; existing content must match the source pin")
     download.add_argument("--timeout", type=float, default=60, help="Network read timeout in seconds")
+    run = commands.add_parser('run', help='Run or resume the configured pipeline; stop at notebook handoffs')
+    run.add_argument('--config', required=True)
+    run.add_argument('--through', choices=('experiment', 'training', 'analysis', 'visualization'), default='visualization')
+    run.add_argument('--allow-inference', action='store_true')
+    run.add_argument('--allow-training', action='store_true')
+    generate = commands.add_parser('generate-notebooks', help='Generate notebooks and portable input jobs from one config')
+    generate.add_argument('--config', required=True)
+    generate.add_argument('--stage', choices=('ready', 'acoustic', 'training', 'visualization'), default='ready')
+    receive = commands.add_parser('import-result', help='Verify and import the pending notebook result')
+    receive.add_argument('--config', required=True)
+    receive.add_argument('--result', required=True, help='Extracted result directory containing receipt.json and manifest.json')
+    workflow = commands.add_parser('workflow', help='Run one configured report or visualization locally')
+    workflow.add_argument('--config', required=True)
+    workflow.add_argument('--id', required=True)
+    execute = commands.add_parser('execute-job', help='Execute a portable job using its exact SDK')
+    execute.add_argument('--job', required=True)
+    execute.add_argument('--output', required=True)
+    execute.add_argument('--allow-execution', action='store_true')
     for stage in ("export-corpus", "prepare-inventory", "prepare-corpus", "prepare-embeddings",
                   "prepare-data", "prepare-experiment", "prepare"):
         command = commands.add_parser(stage, help=f"Run the {stage} stage using a pinned configuration")
@@ -28,7 +46,30 @@ def main(argv=None):
     train.add_argument("--allow-training", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.command == "download-sounds":
+        if args.command in ('run', 'generate-notebooks', 'import-result', 'workflow'):
+            from .pipeline import load_config
+            config = load_config(args.config)
+            if args.command == 'run':
+                from .execution import run_pipeline
+                result = run_pipeline(config, through=args.through, allow_inference=args.allow_inference,
+                                      allow_training=args.allow_training)
+            elif args.command == 'generate-notebooks':
+                from .notebooks import generate_notebooks
+                result = {'jobs': generate_notebooks(config, stage=args.stage)}
+            elif args.command == 'import-result':
+                from .execution import import_result
+                result = {'path': str(import_result(config, args.result)), 'status': 'imported'}
+            else:
+                from .workflows import run_workflow
+                jobs = [w for group in ('analysis', 'visualization') for w in config[group] if w['id'] == args.id]
+                if len(jobs) != 1:
+                    raise ValueError('select exactly one configured workflow ID')
+                result = {'path': str(run_workflow(jobs[0], config['paths']['reports']))}
+            print(json.dumps(result, sort_keys=True))
+        elif args.command == 'execute-job':
+            from .execution import execute_job
+            print(json.dumps({'path': str(execute_job(args.job, args.output, allow_execution=args.allow_execution))}))
+        elif args.command == "download-sounds":
             from .source_preparation.download import download_sounds, CHINESE_LESSONS_URL, CHINESE_LESSONS_SHA256
             path = download_sounds(args.output, timeout=args.timeout)
             print(json.dumps({"path": str(path), "url": CHINESE_LESSONS_URL,

@@ -11,10 +11,15 @@ def load_config(path):
     path = Path(path).absolute()
     value = json.loads(path.read_text(encoding="utf-8"))
     required = {"schema_version", "paths", "corpus", "model", "acoustic", "experiment_id", "experiment"}
-    if not isinstance(value, dict) or set(value) != required or type(value["schema_version"]) is not int or value["schema_version"] != 1:
+    version = value.get('schema_version') if isinstance(value, dict) else None
+    if version == 2:
+        required |= {'execution', 'analysis', 'visualization', 'notebooks'}
+    if not isinstance(value, dict) or set(value) != required or type(version) is not int or version not in (1, 2):
         raise ValueError("invalid pipeline configuration schema")
     paths = value["paths"]
     names = {"source", "export", "inventory", "corpus", "acoustic", "prepared", "experiments", "cache", "runs"}
+    if version == 2:
+        names |= {'state', 'generated', 'reports'}
     if not isinstance(paths, dict) or set(paths) != names:
         raise ValueError("pipeline paths must explicitly select all stage destinations")
     def resolve(raw):
@@ -28,12 +33,19 @@ def load_config(path):
     acoustic = value["acoustic"]
     if not isinstance(acoustic, dict) or set(acoustic) != {"existing_bundle", "manifest_sha256"}:
         raise ValueError("acoustic config requires existing_bundle and manifest_sha256, or both null")
-    if (acoustic["existing_bundle"] is None) != (acoustic["manifest_sha256"] is None):
+    if version == 1 and (acoustic["existing_bundle"] is None) != (acoustic["manifest_sha256"] is None):
         raise ValueError("acoustic bundle and manifest pin must be selected together")
     if acoustic["existing_bundle"] is not None:
         acoustic["existing_bundle"] = resolve(acoustic["existing_bundle"])
+    elif acoustic['manifest_sha256'] is not None:
+        raise ValueError('manifest pin requires an existing acoustic bundle')
     if not isinstance(value["experiment"], dict) or "sample_size" not in value["experiment"]:
         raise ValueError("explicit experiment.sample_size is required")
+    if version == 2:
+        from .execution import validate_execution_config
+        validate_execution_config(value, resolve)
+    from .experiment import _validate_config
+    _validate_config(value['experiment'], value['experiment']['architecture']['acoustic_dim'])
     return value
 
 
@@ -76,7 +88,9 @@ def run_stage(config, stage, *, allow_inference=False):
         return prepare_character_corpus(export / "corpus.csv", paths["inventory"], paths["corpus"],
                                         expected_sha256=sha256_file(export / "corpus.csv"))
     if stage == "prepare-embeddings":
-        spec = config["acoustic"]
+        spec = dict(config["acoustic"])
+        if spec['existing_bundle'] is not None and spec['manifest_sha256'] is None:
+            spec['manifest_sha256'] = sha256_file(Path(spec['existing_bundle']) / 'manifest.json')
         if spec["existing_bundle"] is None and not allow_inference:
             raise PermissionError("real acoustic inference requires --allow-inference")
         from .acoustic import prepare_acoustic_targets

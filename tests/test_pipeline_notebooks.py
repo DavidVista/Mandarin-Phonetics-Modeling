@@ -1,66 +1,110 @@
-"""Portable source closure, guards and build freshness without ML execution."""
+"""Generated SDK snapshots and exact input pins without ML execution."""
 import ast
-import hashlib
-import importlib.util
-import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 import unittest
 
 PROJECT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("pipeline_builder", PROJECT.parent / "meta/tools/build_pipeline_notebooks.py")
-BUILDER = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(BUILDER)
+sys.path.insert(0, str(PROJECT / 'src'))
+from phonetics.execution import create_job, validate_job
+from phonetics.pipeline import load_config
+import test_character_experiment as fixtures
 
 
 class PipelineNotebookTests(unittest.TestCase):
-    def test_current_notebooks_are_fresh_valid_and_parse(self):
+    def setUp(self):
+        self.fixture = fixtures.CharacterExperimentTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.root = self.fixture.root
+        self.experiment = self.fixture.build()
+        self.config = load_config(PROJECT / 'configs/experiment.example.json')
+        self.config['experiment'] = self.fixture.config
+        self.config['experiment_id'] = self.experiment.name
+        self.config['paths']['generated'] = str(self.root / 'generated')
+
+    def test_schema_pins_order_and_isolated_sdk_import(self):
         import nbformat
-        paths = BUILDER.build(check=True)
-        self.assertEqual(len(paths), 9)
-        for path in paths:
-            notebook = nbformat.read(path, as_version=4)
-            nbformat.validate(notebook)
-            for cell in notebook.cells:
-                if cell.cell_type != "code":
-                    continue
-                source = cell.source
-                if source.startswith("%%writefile"):
-                    source = source.split("\n", 1)[1]
-                ast.parse(source)
-            config = next(c.source for c in notebook.cells if c.id == "configuration")
-            self.assertIn("RUN_TRAINING = False" if "Training" in path.parts else "RUN_PREPARATION = False", config)
+        job = create_job(self.config, 'training', self.experiment, model_id='syllable')
+        notebook = nbformat.read(job['notebook'], as_version=4)
+        nbformat.validate(notebook)
+        cells = {c.id: c.source for c in notebook.cells}
+        self.assertLess(list(cells).index('dependencies'), list(cells).index('sdk'))
+        for cell in notebook.cells:
+            if cell.cell_type == 'code':
+                ast.parse(cell.source)
+                self.assertNotIn('%%writefile', cell.source)
+                self.assertNotIn('RUN_TRAINING', cell.source)
+        self.assertIn(validate_job(job['path'])['input_manifest_sha256'], cells['configuration'])
+        self.assertIn('allow_execution=True', cells['run'])
+        script = cells['sdk'] + '\n' + cells['configuration'] + '\nfrom phonetics.cli import main\nmain(["--help"])\nassert "torch" not in sys.modules\n'
+        # A script file avoids Windows command-line length limits.
+        path = self.root / 'bootstrap.py'
+        path.write_text(script, encoding='utf-8')
+        result = subprocess.run([sys.executable, '-S', str(path)], cwd=self.root,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('generate-notebooks', result.stdout)
 
-    def test_snapshot_is_exact_and_importable_without_checkout_or_dependencies(self):
-        notebook = BUILDER.notebook("Fixture", "prepare-data")
-        with tempfile.TemporaryDirectory(dir=PROJECT / "tests") as temporary:
-            root = Path(temporary)
-            count = 0
-            for cell in notebook["cells"]:
-                source = "".join(cell["source"])
-                if not source.startswith("%%writefile"):
-                    continue
-                first, body = source.split("\n", 1)
-                relative = first.split("/phonetics/", 1)[1].rstrip('"')
-                path = root / "phonetics" / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(body, encoding="utf-8")
-                expected = notebook["metadata"]["source_sha256"][relative]
-                self.assertEqual(hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest(), expected)
-                count += 1
-            self.assertEqual(count, len(BUILDER.MODULES))
-            # -S removes site packages, including any installed project/ML SDK.
-            code = "import sys; from phonetics.cli import main; main(['--help'])"
-            result = subprocess.run([sys.executable, "-S", "-c", code], cwd=root,
-                                    capture_output=True, text=True, check=True)
-            self.assertIn("prepare-experiment", result.stdout)
+    def test_tampering_and_deterministic_regeneration(self):
+        job = create_job(self.config, 'training', self.experiment, model_id='syllable')
+        before = Path(job['notebook']).read_bytes()
+        self.assertEqual(job, create_job(self.config, 'training', self.experiment, model_id='syllable'))
+        self.assertEqual(before, Path(job['notebook']).read_bytes())
+        (Path(job['path']) / 'job.json').write_text('{}', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'checksum'):
+            validate_job(job['path'])
 
-    def test_scoped_composites_removed(self):
-        self.assertFalse(list((PROJECT / "notebooks/Training").rglob("*-composite.ipynb")))
-        self.assertFalse((PROJECT / "notebooks/Datasets/Data Preparation/prepare-pinyin-embeddings-composite.ipynb").exists())
+    def test_generation_preserves_input(self):
+        before = {p: p.read_bytes() for p in self.experiment.rglob('*') if p.is_file()}
+        create_job(self.config, 'training', self.experiment, model_id='components')
+        self.assertEqual(before, {p: p.read_bytes() for p in before})
+        self.assertNotIn('torch', sys.modules)
 
+    def test_all_objectives_validate_once_without_copying_data(self):
+        from unittest.mock import patch
+        from phonetics.notebooks import generate_notebooks
+        from phonetics.experiment import validate_experiment
+        self.config['paths']['experiments'] = str(self.experiment.parent)
+        with patch('phonetics.experiment.validate_experiment', wraps=validate_experiment) as check, patch('phonetics.execution.shutil.copytree', side_effect=AssertionError('must not copy experiment')):
+            jobs = generate_notebooks(self.config, stage='training')
+        self.assertEqual(check.call_count, 1)
+        self.assertEqual(len(jobs), len(self.config['experiment']['model_ids']))
+        for job in jobs:
+            self.assertFalse((Path(job['path']) / 'input').exists())
+            self.assertFalse((Path(job['path']) / 'sdk').exists())
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_relocated_experiment_uses_current_path_and_preserves_old_job(self):
+        import json, shutil
+        first = create_job(self.config,'training',self.experiment,model_id='syllable')
+        old_files = {p:p.read_bytes() for p in Path(first['path']).rglob('*') if p.is_file()}
+        moved = self.root/'relocated'/self.experiment.name
+        shutil.copytree(self.experiment,moved)
+        shutil.rmtree(self.experiment)
+        second = create_job(self.config,'training',moved,model_id='syllable')
+        self.assertNotEqual(first['job_id'],second['job_id'])
+        self.assertEqual(old_files,{p:p.read_bytes() for p in old_files})
+        notebook = json.loads(Path(second['notebook']).read_text(encoding='utf-8'))
+        cells = {c['id']:''.join(c['source']) for c in notebook['cells']}
+        script = cells['sdk']+'\n'+cells['configuration']+f'\nassert INPUT_PATH == Path({str(moved.resolve())!r})\nassert "torch" not in sys.modules\n'
+        path = self.root/'relocation.py';path.write_text(script,encoding='utf-8')
+        result = subprocess.run([sys.executable,'-S',str(path)],cwd=self.root,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        attached = self.root/'attached'/'experiment'
+        shutil.copytree(moved,attached)
+        (moved/'manifest.json').write_text('{}',encoding='utf-8')
+        mapping = f'\nREAL_PATH = Path\ndef mapped_path(value):\n    return REAL_PATH({str(attached.parent)!r}) if str(value) == "/kaggle/input" else REAL_PATH(value)\nmapped_path.cwd = REAL_PATH.cwd\nPath = mapped_path\n'
+        script = cells['sdk']+mapping+cells['configuration']+f'\nassert INPUT_PATH == REAL_PATH({str(attached.resolve())!r})\nassert "torch" not in sys.modules\n'
+        path.write_text(script,encoding='utf-8')
+        result = subprocess.run([sys.executable,'-S',str(path)],cwd=self.root,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_changed_config_and_nested_output_are_rejected(self):
+        self.config['experiment']['training']['epochs'] += 1
+        with self.assertRaisesRegex(ValueError, 'differs from the configured experiment'):
+            create_job(self.config, 'training', self.experiment, model_id='syllable')
+        self.config['experiment']['training']['epochs'] -= 1
+        self.config['paths']['generated'] = str(self.experiment/'generated')
+        with self.assertRaisesRegex(ValueError, 'outside its input tree'):
+            create_job(self.config, 'training', self.experiment, model_id='syllable')

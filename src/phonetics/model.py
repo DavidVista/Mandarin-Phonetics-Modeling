@@ -7,16 +7,19 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 from .objectives import canonical_model_id, parse_model_id
+from .architecture import normalize_architecture
 
 
 class SharedEncoder(nn.Module):
     """Embed characters and encode complete variable-length sentences."""
     context_dim = 128
 
-    def __init__(self, char_vocab_size: int):
+    def __init__(self, char_vocab_size: int, parameters: dict):
         super().__init__()
-        self.embedding = nn.Embedding(char_vocab_size, 64, padding_idx=0)
-        self.sentence = nn.LSTM(64, 64, num_layers=1, bidirectional=True, batch_first=True)
+        self.context_dim = 2 * parameters['hidden_per_direction']
+        self.embedding = nn.Embedding(char_vocab_size, parameters['embedding_dim'], padding_idx=0)
+        self.sentence = nn.LSTM(parameters['embedding_dim'], parameters['hidden_per_direction'],
+                                num_layers=parameters['layers'], bidirectional=True, batch_first=True)
 
     def encode(self, batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
         token_ids = batch["token_ids"]
@@ -41,30 +44,32 @@ class SharedEncoder(nn.Module):
 
 
 class ClassifierHead(nn.Module):
-    def __init__(self, output_dim: int):
+    def __init__(self, output_dim: int, context_dim: int, parameters: dict):
         super().__init__()
-        self.layers = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Dropout(0.5), nn.Linear(64, output_dim))
+        hidden = parameters['classification_hidden_dim']
+        self.layers = nn.Sequential(nn.Linear(context_dim, hidden), nn.ReLU(),
+                                    nn.Dropout(parameters['classification_dropout']), nn.Linear(hidden, output_dim))
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         return self.layers(hidden)
 
 
 class TrainingModel(nn.Module):
-    def __init__(self, encoder: SharedEncoder, model_id: str, vocab: dict, acoustic_dim: int):
+    def __init__(self, encoder: SharedEncoder, model_id: str, vocab: dict, acoustic_dim: int, heads: dict):
         super().__init__()
         model_id = canonical_model_id(model_id)
         family, weight = parse_model_id(model_id)
         self.encoder = encoder
         self.model_id = model_id
         self.lambda_cosine = weight
-        self.context_dim = 128
+        self.context_dim = encoder.context_dim
         labels = vocab["labels"]
         self.component_heads = nn.ModuleDict()
         if family in {"components", "components-acoustic"}:
             for name in ("initials", "finals", "tones"):
-                self.component_heads[name] = ClassifierHead(len(labels[name]))
-        self.syllable_head = ClassifierHead(len(vocab["syllables"])) if family == "syllable" else None
-        self.acoustic_head = nn.Linear(128, int(acoustic_dim)) if family in {"acoustic", "components-acoustic"} else None
+                self.component_heads[name] = ClassifierHead(len(labels[name]), self.context_dim, heads)
+        self.syllable_head = ClassifierHead(len(vocab["syllables"]), self.context_dim, heads) if family == "syllable" else None
+        self.acoustic_head = nn.Linear(self.context_dim, int(acoustic_dim)) if family in {"acoustic", "components-acoustic"} else None
 
     def encode(self, batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
         return self.encoder.encode(batch)
@@ -84,21 +89,20 @@ class TrainingModel(nn.Module):
 def _construct_with_streams(config: dict, vocab: dict, model_id: str, seed: int) -> TrainingModel:
     """Initialize shared weights and heads from independent seed streams."""
     model_id = canonical_model_id(model_id)
+    architecture = normalize_architecture(config['architecture'])
     devices = []
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(int(seed))
-        encoder = SharedEncoder(len(vocab["characters"]["tokens"]))
+        encoder = SharedEncoder(len(vocab["characters"]["tokens"]), architecture['encoder'])
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(int(seed) + 1_000_003)
-        model = TrainingModel(encoder, model_id, vocab, int(config["architecture"]["acoustic_dim"]))
+        model = TrainingModel(encoder, model_id, vocab, architecture['acoustic_dim'], architecture['heads'])
     return model
 
 
 def build_encoder(config: dict, vocab: dict, model_id: str | None = None, seed: int = 0) -> TrainingModel:
     """Build a full model; the returned `.encode(batch)` is the shared export API."""
-    architecture = config.get("architecture", {})
-    if architecture.get("embedding_dim") != 64 or architecture.get("context_dim") != 128 or architecture.get("acoustic_dim", 0) <= 0:
-        raise ValueError("experiment architecture violates encoder dimension contract")
+    normalize_architecture(config.get("architecture", {}))
     selected = model_id or config.get("model_id")
     if selected is None:
         raise ValueError("model_id is required to construct objective heads")

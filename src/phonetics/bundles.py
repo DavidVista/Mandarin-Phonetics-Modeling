@@ -49,7 +49,7 @@ def validate_bundle(path, kind, *, identity=None):
 def seal_bundle(root, kind, identity):
     root = Path(root)
     artifacts = {p.relative_to(root).as_posix(): sha256_file(p)
-                 for p in sorted(root.rglob("*")) if p.is_file() and p.name != "manifest.json"}
+                 for p in sorted(root.rglob("*")) if p.is_file() and p != root / "manifest.json"}
     write_json(root / "manifest.json", {"schema_version": 1, "bundle_type": kind,
                "identity": identity, "identity_sha256": content_hash(identity), "artifacts": artifacts})
     validate_bundle(root, kind, identity=identity)

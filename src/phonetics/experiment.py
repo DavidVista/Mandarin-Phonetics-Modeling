@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import random
 import shutil
+import math
 
 import numpy as np
 
@@ -15,19 +16,18 @@ from .bundles import content_hash, seal_bundle, staging_directory, validate_bund
 from .data_contract import sample_id, is_han
 from .objectives import canonical_model_id
 from .pinyin import INITIALS, FINALS, TONES, decompose, validate_canonical_label
+from .architecture import default_architecture, normalize_architecture
 
 SCHEMA_VERSION = 4
 DEFAULT_MODEL_IDS = ['syllable', 'components', 'acoustic', 'components-acoustic-lambda-1', 'components-acoustic-lambda-10']
 _TRAIN = {'optimizer': 'Adam', 'learning_rate': 0.001, 'weight_decay': 0.0, 'batch_size': 32,
           'epochs': 20, 'scheduler': None, 'early_stopping': False, 'gradient_clipping': None, 'cosine_epsilon': 1e-8}
-_ARCH = {'embedding_dim': 64, 'sentence_bilstm_hidden_per_direction': 64, 'sentence_bilstm_layers': 1,
-         'context_dim': 128, 'classification_hidden_dim': 64, 'classification_dropout': 0.5}
 
 
 def default_experiment_config(acoustic_dim=1024):
     return {'schema_version': SCHEMA_VERSION, 'sample_size': 100_000, 'seed_count': 5,
             'test_seed': 0, 'test_fraction': 0.1, 'validation_fraction': 0.1,
-            'architecture': {**_ARCH, 'acoustic_dim': acoustic_dim},
+            'architecture': default_architecture(acoustic_dim),
             'training': copy.deepcopy(_TRAIN), 'model_ids': list(DEFAULT_MODEL_IDS)}
 
 
@@ -39,9 +39,25 @@ def _validate_config(value, acoustic_dim):
     for key in ('sample_size', 'seed_count'):
         if type(cfg[key]) is not int or cfg[key] <= 0:
             raise ValueError(f'{key} must be a positive integer')
-    for key in ('schema_version', 'test_seed', 'test_fraction', 'validation_fraction', 'architecture', 'training'):
+    for key in ('schema_version', 'test_seed', 'test_fraction', 'validation_fraction'):
         if content_hash(cfg[key]) != content_hash(expected[key]):
             raise ValueError(f'{key} conflicts with the experiment protocol')
+    architecture = normalize_architecture(cfg['architecture'])
+    if architecture['acoustic_dim'] != acoustic_dim:
+        raise ValueError('architecture acoustic_dim disagrees with acoustic targets')
+    training = cfg['training']
+    if not isinstance(training, dict) or set(training) != set(_TRAIN):
+        raise ValueError('invalid training parameters')
+    for key, default in _TRAIN.items():
+        value = training[key]
+        if key in ('epochs', 'batch_size'):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f'{key} must be a positive integer')
+        elif key == 'learning_rate':
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                raise ValueError('learning_rate must be finite and positive')
+        elif content_hash(value) != content_hash(default):
+            raise ValueError(f'training.{key} conflicts with the experiment protocol')
     ids = cfg['model_ids']
     if not isinstance(ids, list) or not ids or [canonical_model_id(x) for x in ids] != ids or len(set(ids)) != len(ids):
         raise ValueError('model_ids must be unique canonical identifiers')

@@ -28,9 +28,5 @@ class DimsimParserAlignmentResearchTests(unittest.TestCase):
         self.assertEqual((config.seed,config.bootstrap_replicates,config.confidence,config.atol,config.rtol),(42,1000,.95,1e-12,1e-10))
         with self.assertRaisesRegex(ValueError,"required"):run_dimsim_parser_alignment(DimsimParserAlignmentConfig(Path("."),"run",Path("input"),""))
 
-    def test_notebook_is_thin_explicit_and_has_no_graphical_outputs_or_plotting(self):
-        path=Path(__file__).parents[1]/"notebooks/Report/dimsim-parser-alignment.ipynb"; notebook=json.loads(path.read_text(encoding="utf-8")); source="".join("".join(c.get("source",[])) for c in notebook["cells"])
-        self.assertLessEqual(len(notebook["cells"]),4);self.assertTrue(all(output.get("output_type") == "stream" for c in notebook["cells"] if c["cell_type"] == "code" for output in c.get("outputs", [])));self.assertIn("evaluation_manifest_sha256",source);self.assertIn("run_dimsim_parser_alignment",source)
-        for excluded in ("display(","read_csv","matplotlib","seaborn","plt."):self.assertNotIn(excluded,source)
 
 if __name__=="__main__":unittest.main()

@@ -22,8 +22,6 @@ from test_training_summary import make_training_fixture
 from phonetics.evaluation.training_summary import load_training_runs
 from phonetics.visualization import load_protocol,apply_style
 from phonetics.visualization.training import build_training_figures
-TARGET=PROJECT/'notebooks/Visualization/training.ipynb'
-BUILDER=PROJECT.parent/'meta/tools/build_training_visualization_notebook.py'
 
 
 def source(cell):return ''.join(cell['source'])
@@ -56,65 +54,27 @@ class TrainingVisualizationTests(unittest.TestCase):
             finally:
                 for f in figs:plt.close(f)
 
-    def test_notebook_plain_schema_and_builder_freshness(self):
-        nb=json.loads(TARGET.read_text(encoding='utf-8'));nbformat.validate(nbformat.from_dict(nb))
-        spec=importlib.util.spec_from_file_location('training_viz_builder_test',BUILDER)
-        b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b);b.build_notebook(check=True)
-        for cell in nb['cells']:
-            if cell['cell_type']!='code':continue
-            compile(source(cell),cell['id'],'exec')
-            self.assertEqual(cell['outputs'],[])
-            for node in ast.walk(ast.parse(source(cell))):
-                if isinstance(node,ast.ImportFrom):
-                    self.assertEqual(node.level,0)
-                    self.assertFalse((node.module or '').startswith(('phonetics','torch')))
-                if isinstance(node,ast.Call) and isinstance(node.func,ast.Name):self.assertNotIn(node.func.id,{'exec','eval','display'})
 
-    def test_builder_preserves_parameters(self):
-        spec=importlib.util.spec_from_file_location('training_preserve_builder',BUILDER)
-        b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b)
-        with tempfile.TemporaryDirectory() as folder:
-            path=Path(folder)/'training.ipynb'
-            text='from pathlib import Path\nPRESENTATION_ID = "keep"\nTRAINING_ROOT = Path("/custom/logs")\n'
-            path.write_text(json.dumps({'cells':[{'id':'parameters','source':text.splitlines(keepends=True)}]}))
-            with patch.object(b,'TARGET',path):
-                b.build_notebook();b.build_notebook(check=True)
-            notebook=json.loads(path.read_text(encoding='utf-8'))
-            self.assertEqual(source(next(c for c in notebook['cells'] if c['id']=='parameters')),text)
 
-    def test_actual_standalone_prepare_reuse_and_no_weights(self):
-        nb=json.loads(TARGET.read_text(encoding='utf-8'))
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);runs=make_training_fixture(root)
+
+
+
+    def test_sdk_prepare_reuse_and_no_weights(self):
+        from phonetics.visualization.training import run_training_visualization
+        with tempfile.TemporaryDirectory(dir=PROJECT) as folder:
+            root=Path(folder); runs=make_training_fixture(root)
             before={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*') if p.is_file()}
-            module=types.ModuleType('training_notebook_under_test');sys.modules[module.__name__]=module
-            ns=module.__dict__
-            try:
-                for cell in nb['cells']:
-                    if cell['cell_type']!='code':continue
-                    if cell['id']=='parameters':
-                        exec(source(cell),ns)
-                        ns.update(TRAINING_RUNS=runs,OUTPUT_PROJECT_ROOT=root,SUMMARY_RUN_ID='summary',PRESENTATION_ID='report',MODE='prepare')
-                        continue
-                    with patch('numpy.load',side_effect=AssertionError('no weights or vectors')):
-                        exec(source(cell),ns)
-                report=ns['REPORT_PATH']
-                for suffix in ('png','eps','metadata.json'):
-                    self.assertEqual(len(list((report/'figures').glob('*.'+suffix))),5)
-                manifest=json.loads((report/'manifest.json').read_text())
-                self.assertEqual(manifest['status'],'complete')
-                self.assertEqual(before,{p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in before})
-                self.assertTrue((report/'tables/selected-checkpoints.md').exists())
-                with self.assertRaises(FileExistsError):exec(source(nb['cells'][-1]),ns)
-                ns.update(MODE='reuse',PRESENTATION_ID='rerender')
-                def forbidden(*args,**kwargs):raise AssertionError('reuse must not read training logs')
-                with patch.dict(ns,{'load_training_runs':forbidden}):exec(source(nb['cells'][-1]),ns)
-                self.assertEqual(len(list((ns['REPORT_PATH']/'figures').glob('*.eps'))),5)
-                self.assertEqual(ns['plt'].get_fignums(),[])
-            finally:
-                for name in ('_style_resources','_plot_cache'):
-                    if name in ns:ns[name].cleanup()
-                sys.modules.pop(module.__name__,None)
-
+            kwargs=dict(training_runs=runs,summary_run_id='summary',source_hashes={'test':'a'*64},source_digest='b'*64)
+            with patch('numpy.load',side_effect=AssertionError('no weights or vectors')):
+                report=run_training_visualization(root,'report',mode='prepare',**kwargs)
+            self.assertEqual(len(list((report/'figures').glob('*.png'))),5)
+            self.assertEqual(len(list((report/'figures').glob('*.eps'))),5)
+            self.assertTrue((report/'tables/selected-checkpoints.md').exists())
+            self.assertEqual(before,{p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in before})
+            with self.assertRaises(FileExistsError):run_training_visualization(root,'report',mode='prepare',**kwargs)
+            with patch('phonetics.visualization.training.load_training_runs',side_effect=AssertionError('no reanalysis')):
+                second=run_training_visualization(root,'rerender',mode='reuse',**kwargs)
+            self.assertEqual(len(list((second/'figures').glob('*.png'))),5)
+            self.assertEqual(plt.get_fignums(),[])
 
 if __name__=='__main__':unittest.main()

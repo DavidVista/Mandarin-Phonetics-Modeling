@@ -27,7 +27,7 @@ from .objectives import canonical_model_id, parse_model_id
 from .reproducibility import rng_snapshot, seed_everything
 
 CODE_FILES = ("training.py", "model.py", "data.py", "metrics.py", "reproducibility.py", "experiment.py",
-              "training_data.py", "objectives.py", "pinyin.py", "artifacts.py", "data_contract.py", "bundles.py", "acoustic.py", "corpus.py", "sound_inventory.py")
+              "training_data.py", "objectives.py", "pinyin.py", "artifacts.py", "data_contract.py", "bundles.py", "acoustic.py", "corpus.py", "sound_inventory.py", "architecture.py")
 
 
 class TrainingStepFailure(FloatingPointError):

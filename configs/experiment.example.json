@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "paths": {
     "source": "../datasets/source-data/chinese-lessons-v1",
     "export": "../datasets/source-data/duyu-v1",
@@ -9,7 +9,10 @@
     "prepared": "../datasets/prepared/char-v1",
     "experiments": "../datasets/experiments",
     "cache": "../datasets/source-data/acoustic-cache",
-    "runs": "../runs"
+    "runs": "../runs",
+    "state": "../generated/state/char-zh-cn-v2.json",
+    "generated": "../generated",
+    "reports": "../outputs"
   },
   "corpus": {
     "revision": "9961d7d05910be7006f2dcfae21f4fc5ce4d560a",
@@ -34,7 +37,7 @@
   },
   "acoustic": {
     "existing_bundle": "../datasets/pinyin-embeddings/duyu-chinese-lessons-zh-cn-v1",
-    "manifest_sha256": "0280ba452aa1580b7d414a2aa15f05d878bd1be2bf11e56f93133d07495e3641"
+    "manifest_sha256": null
   },
   "experiment_id": "char-zh-cn-v1",
   "experiment": {
@@ -45,12 +48,16 @@
     "test_fraction": 0.1,
     "validation_fraction": 0.1,
     "architecture": {
-      "embedding_dim": 64,
-      "sentence_bilstm_hidden_per_direction": 64,
-      "sentence_bilstm_layers": 1,
-      "context_dim": 128,
-      "classification_hidden_dim": 64,
-      "classification_dropout": 0.5,
+      "encoder": {
+        "type": "char_bilstm",
+        "embedding_dim": 64,
+        "hidden_per_direction": 64,
+        "layers": 1
+      },
+      "heads": {
+        "classification_hidden_dim": 64,
+        "classification_dropout": 0.5
+      },
       "acoustic_dim": 1024
     },
     "training": {
@@ -71,5 +78,17 @@
       "components-acoustic-lambda-1",
       "components-acoustic-lambda-10"
     ]
+  },
+  "execution": {
+    "acoustic": "local",
+    "training": "notebook",
+    "visualization": "local",
+    "training_device": "cuda",
+    "run_id": "run-1"
+  },
+  "analysis": [],
+  "visualization": [],
+  "notebooks": {
+    "install_dependencies": true
   }
 }

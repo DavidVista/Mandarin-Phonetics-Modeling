@@ -26,6 +26,11 @@ def write_json_new(path,value):
 def git_sha(root):
     try:return subprocess.run(["git","rev-parse","HEAD"],cwd=root,text=True,capture_output=True,check=True).stdout.strip()
     except Exception:return None
+
+def source_name(path,project_root):
+    path=Path(path).resolve()
+    try:return path.relative_to(Path(project_root).resolve()).as_posix()
+    except ValueError:return 'sdk/'+path.relative_to(Path(__file__).resolve().parents[2]).as_posix()
 def _expected_paths(values):
     if not values:raise ValueError("expected_files must be a non-empty collection")
     result=set()
@@ -51,7 +56,7 @@ def research_run(project_root,analysis,run_id,input_roots,config,source_paths,ex
             p=Path(p).resolve();identity=p if p.is_file() else p/"manifest.json"
             if not identity.is_file():raise FileNotFoundError(f"Input identity file is missing: {identity}")
             inputs.append({"path":str(p),"identity_path":str(identity),"sha256":file_sha256(identity)})
-        write_json_new(root/"config.json",config);manifest.update({"git_sha":git_sha(project_root),"python":platform.python_version(),"dependencies":dependencies,"source_hashes":{str(Path(p).resolve().relative_to(Path(project_root).resolve())):file_sha256(p) for p in source_paths},"inputs":inputs})
+        write_json_new(root/"config.json",config);manifest.update({"git_sha":git_sha(project_root),"python":platform.python_version(),"dependencies":dependencies,"source_hashes":{source_name(p,project_root):file_sha256(p) for p in source_paths},"inputs":inputs})
         yield root,manifest
         actual={p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and p.name!="manifest.json"}
         missing=expected-actual;unexpected=actual-expected

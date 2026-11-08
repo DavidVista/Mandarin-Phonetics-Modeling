@@ -36,11 +36,6 @@ class DimsimDistributionResearchTests(unittest.TestCase):
         columns=fixture_columns(); columns["hardcode_applied"][0]=True
         with self.assertRaisesRegex(ValueError,"hardcodeMap"): retained_distribution_data(columns)
 
-    def test_notebook_is_thin_and_excludes_removed_analysis(self):
-        path=Path(__file__).parents[1]/"notebooks/Report/dimsim-distribution-analysis.ipynb"; notebook=json.loads(path.read_text(encoding="utf-8-sig")); source="".join("".join(c.get("source",[])) for c in notebook["cells"])
-        self.assertLessEqual(len(notebook["cells"]),4); self.assertTrue(all(output.get("output_type") == "stream" for c in notebook["cells"] if c["cell_type"] == "code" for output in c.get("outputs", [])))
-        self.assertIn("run_dimsim_distribution",source); self.assertIn("EXPECTED_EVALUATION_MANIFEST_SHA256",source)
-        for excluded in ("phonetic_matches","summarize_population","KDE","clustering","historical","cache","CACHE","plt.","sns."): self.assertNotIn(excluded,source)
 
     def test_direct_bundle_computation_has_no_hardcoded_population_or_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
