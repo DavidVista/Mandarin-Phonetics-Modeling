@@ -40,8 +40,6 @@ for requirement in REQUIREMENTS:
 '''
     bootstrap = '''import hashlib, json, sys, tempfile
 from pathlib import Path
-if sys.version_info[:2] != (3, 12):
-    raise RuntimeError("Python 3.12 is required")
 if "numpy" in sys.modules and sys.modules["numpy"].__version__ != "2.1.3":
     raise RuntimeError("Restart the kernel after installing NumPy 2.1.3")
 if any(name == "phonetics" or name.startswith("phonetics.") for name in sys.modules):
@@ -124,11 +122,11 @@ print("Result:", result, "Download:", archive)
     title = f'{stage.capitalize()} — {job["parameters"].get("model_id", job_id[:12])}'
     document = {'nbformat': 4, 'nbformat_minor': 5,
                 'metadata': {'kernelspec': {'display_name': 'Python 3', 'language': 'python', 'name': 'python3'},
-                             'language_info': {'name': 'python', 'version': '3.12'}, 'job_id': job_id,
+                             'language_info': {'name': 'python'}, 'job_id': job_id,
                              'source_sha256': job['sources']},
                 'cells': [_cell('markdown', f'# {title}\n\n' + ('Attach the original experiment bundle as an input dataset. The job manifest is embedded; no copied input package is needed. ' if job.get('external_input') else 'Attach the accompanying job directory as an input dataset. ')
                                + 'Run cells in order. The final cell executes the configured stage. '
-                               'Use Python 3.12. Torch is not installed by this notebook; ML stages require Torch 2.11.0.\n', 'overview'),
+                               'ML stages require Torch 2.11.0.\n', 'overview'),
                           _cell('code', install, 'dependencies'), _cell('code', bootstrap, 'sdk'),
                           _cell('code', select, 'configuration'), _cell('code', execute, 'run')]}
     target = job_path.parent.parent / 'notebooks' / f'{stage}-{job_id[:16]}.ipynb'
