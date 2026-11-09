@@ -10,11 +10,13 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from phonetics.artifacts import sha256_file, write_json, write_jsonl
 from phonetics.bundles import seal_bundle
 from phonetics.data_contract import sample_id
-from phonetics.experiment import (default_experiment_config, prepare_experiment, load_experiment,
+from phonetics.experiment import (default_experiment_config, prepare_experiment, load_common_test, load_experiment,
                                   select_seed, validate_experiment, make_splits)
 
 
 class CharacterExperimentTests(unittest.TestCase):
+    fixture_labels = ("ma1",)
+
     def setUp(self):
         import numpy as np
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
@@ -23,17 +25,18 @@ class CharacterExperimentTests(unittest.TestCase):
         self.prepared = self.root / "prepared"
         self.prepared.mkdir()
         rows = []
+        labels = list(self.fixture_labels)
         for i in range(35):
-            text = chr(0x4e00 + i)
-            rows.append({"text": text, "labels": ["ma1"], "sample_id": sample_id(text, ["ma1"]),
-                         "source_ids": [str(i)], "sentence_length": 1, "positions": [0]})
+            text = chr(0x4e00 + i) * len(labels)
+            rows.append({"text": text, "labels": labels, "sample_id": sample_id(text, labels),
+                         "source_ids": [str(i)], "sentence_length": len(labels), "positions": list(range(len(labels)))})
         rows.sort(key=lambda r: r["sample_id"])
         write_jsonl(self.prepared / "corpus.jsonl", rows)
-        write_jsonl(self.prepared / "inventory.jsonl", [{"label": "ma1", "sha256": "a" * 64}])
+        write_jsonl(self.prepared / "inventory.jsonl", [{"label": label, "sha256": "a" * 64} for label in sorted(labels)])
         write_jsonl(self.prepared / "rejections.jsonl", [])
         write_json(self.prepared / "statistics.json", {"input": 35, "selected": 35, "duplicates": 0, "rejected": 0})
-        write_json(self.prepared / "labels.json", ["ma1"])
-        np.save(self.prepared / "targets.npy", np.array([[1., 2.]], dtype=np.float32), allow_pickle=False)
+        write_json(self.prepared / "labels.json", sorted(labels))
+        np.save(self.prepared / "targets.npy", np.tile(np.array([[1., 2.]], dtype=np.float32), (len(labels), 1)), allow_pickle=False)
         write_json(self.prepared / "inference.json", {"fixture": True})
         from phonetics.bundles import content_hash
         for name, kind, artifacts in (
@@ -50,6 +53,26 @@ class CharacterExperimentTests(unittest.TestCase):
 
     def build(self, name='experiment'):
         return prepare_experiment(name, prepared_root=self.prepared, output_root=self.root, config=self.config)
+
+    def test_common_test_rejects_artifacts_changed_after_validation(self):
+        root = self.build()
+        pin = sha256_file(root / "manifest.json")
+        for name, artifact in (("splits.json", "splits"), ("corpus.jsonl", "corpus")):
+            with self.subTest(artifact=artifact):
+                path = root / name
+                original = path.read_bytes()
+
+                def validate_then_change(source):
+                    manifest = validate_experiment(source)
+                    path.write_bytes(original.replace(b"\n", b" \n", 1))
+                    return manifest
+
+                try:
+                    with patch("phonetics.experiment.validate_experiment", side_effect=validate_then_change):
+                        with self.assertRaisesRegex(ValueError, f"experiment {artifact} checksum mismatch"):
+                            load_common_test(root, expected_manifest_sha256=pin)
+                finally:
+                    path.write_bytes(original)
 
     def test_split_sizes_disjointness_and_independent_seeds(self):
         loaded = load_experiment(self.build())

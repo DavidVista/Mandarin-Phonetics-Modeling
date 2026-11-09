@@ -300,3 +300,42 @@ series = ["components"]
 order = ["components"]
 columns = 1
 scale = "linear"
+
+[figures.reference_dimsim_distances]
+status = "approved"
+kind = "distance_map"
+name = "DIMSIM distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["dimsim"]
+order = ["dimsim"]
+scale = "linear"
+colorbar_label = "DIMSIM distance"
+color_scale_group = "dimsim"
+colormap = "Greys"
+
+[figures.reference_base_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Base cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["base"]
+order = ["base"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "wav2vec2"
+colormap = "Greys"
+
+[figures.reference_zh_cn_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Zh-cn cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["zh_cn"]
+order = ["zh_cn"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "wav2vec2"
+colormap = "Greys"

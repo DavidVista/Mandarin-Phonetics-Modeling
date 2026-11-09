@@ -24,7 +24,11 @@ class DimsimDistributionLifecycleTests(unittest.TestCase):
                 import phonetics.research.dimsim_distribution as research
                 root=Path(__import__('sys').argv[1]); evaluation=root/'evaluation'; evaluation.mkdir(); digest=write_bundle(evaluation)
                 config=DimsimDistributionConfig(root,'tiny',evaluation,digest); output=run_dimsim_distribution(config)
-                manifest=json.loads((output/'manifest.json').read_text()); assert manifest['status']=='complete' and len(manifest['artifacts'])==16 and len(manifest['inputs'])==1
+                manifest=json.loads((output/'manifest.json').read_text()); assert manifest['status']=='complete' and len(manifest['artifacts'])==17 and len(manifest['inputs'])==1
+                summary=json.loads((output/'tables/descriptive_summary.json').read_text())
+                assert summary['distribution']['count']==3 and summary['tone_only']['examples']==[]
+                assert sum(row['count'] for row in summary['bins'].values())==3
+                assert len(summary['clustering'])==9 and 'tails' in summary and 'kde' in summary
                 assert 'cache' not in json.dumps(manifest).lower()
                 try: run_dimsim_distribution(config)
                 except FileExistsError: pass

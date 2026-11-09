@@ -12,7 +12,7 @@ from .bundles import content_hash, seal_bundle, staging_directory, validate_bund
 
 PREPARATION = ('download-sounds', 'prepare-inventory', 'prepare-corpus',
                'prepare-embeddings', 'prepare-data', 'prepare-experiment')
-WORKFLOWS = {'dimsim-distribution', 'dimsim-parser-alignment', 'wav2vec2-graduality',
+WORKFLOWS = {'dimsim-distribution', 'dimsim-parser-alignment', 'reference-geometry',
              'training-visualization', 'evaluation-visualization'}
 
 

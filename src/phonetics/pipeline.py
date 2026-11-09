@@ -14,7 +14,9 @@ def load_config(path):
     version = value.get('schema_version') if isinstance(value, dict) else None
     if version == 2:
         required |= {'execution', 'analysis', 'visualization', 'notebooks'}
-    if not isinstance(value, dict) or set(value) != required or type(version) is not int or version not in (1, 2):
+    optional = {"evaluation"} if version == 2 else set()
+    if (not isinstance(value, dict) or not required <= set(value) <= required | optional
+            or type(version) is not int or version not in (1, 2)):
         raise ValueError("invalid pipeline configuration schema")
     paths = value["paths"]
     names = {"source", "export", "inventory", "corpus", "acoustic", "prepared", "experiments", "cache", "runs"}
@@ -44,6 +46,9 @@ def load_config(path):
     if version == 2:
         from .execution import validate_execution_config
         validate_execution_config(value, resolve)
+    if "evaluation" in value:
+        from .evaluation.geometry_bundle import resolve_evaluation_config
+        value["evaluation"] = resolve_evaluation_config(value["evaluation"], resolve)
     from .experiment import _validate_config
     _validate_config(value['experiment'], value['experiment']['architecture']['acoustic_dim'])
     return value
@@ -74,6 +79,11 @@ def export_corpus(config):
 
 def run_stage(config, stage, *, allow_inference=False):
     paths = config["paths"]
+    if stage == "prepare-evaluation":
+        from .evaluation.geometry_bundle import prepare_geometry_bundle
+        if "evaluation" not in config:
+            raise ValueError("prepare-evaluation requires the evaluation config section")
+        return prepare_geometry_bundle(config["evaluation"])
     if stage == "export-corpus":
         return export_corpus(config)
     if stage == "download-sounds":

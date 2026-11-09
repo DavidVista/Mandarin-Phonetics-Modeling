@@ -49,16 +49,20 @@ def model_identifier(value):
    if isinstance(value.get(key),str):return value[key]
  return None
 def load_embedding_bundle(name,root,expected_manifest_sha256,expected_model,expected_extraction=EXTRACTION):
- root=Path(root).resolve();mp=root/"manifest.json";actual=sha256_file(mp)
+ root=Path(root).resolve();mp=root/"manifest.json";manifest_bytes=mp.read_bytes();actual=hashlib.sha256(manifest_bytes).hexdigest()
  if actual!=expected_manifest_sha256:raise ValueError(f"Unexpected {name} manifest SHA-256: {actual}")
- manifest=read_json(mp)
+ manifest=json.loads(manifest_bytes)
  if manifest.get("bundle_type")!="acoustic_embeddings" or manifest.get("schema_version")!=1:raise ValueError(f"Unsupported embedding manifest contract for {name}")
  verified=verified_artifacts(root,manifest)
  for relative in EMBEDDING_FILES:
   if relative not in verified or not contained(root,relative).is_file():raise ValueError(f"Required verified embedding artifact is missing: {relative}")
- config=read_json(root/"config.json");inference=read_json(root/"reports/inference.json");inventory=read_jsonl(root/"sound_inventory.jsonl");labels=[x.get("label") for x in inventory]
+ def read_pinned(relative):
+  payload=contained(root,relative).read_bytes()
+  if hashlib.sha256(payload).hexdigest()!=verified[relative]:raise ValueError(f"Embedding artifact changed while reading: {relative}")
+  return payload
+ config=json.loads(read_pinned("config.json"));inference=json.loads(read_pinned("reports/inference.json"));inventory=[json.loads(line) for line in read_pinned("sound_inventory.jsonl").splitlines() if line.strip()];labels=[x.get("label") for x in inventory]
  if any(not isinstance(x,str) or not x for x in labels) or len(labels)!=len(set(labels)):raise ValueError(f"Invalid or duplicate inventory labels for {name}")
- inventory_hash=sha256_file(root/"sound_inventory.jsonl")
+ inventory_hash=verified["sound_inventory.jsonl"]
  if manifest.get("inventory_sha256")!=inventory_hash:raise ValueError(f"inventory_sha256 mismatch for {name}")
  if inference.get("errors",0)!=0:raise ValueError(f"Inference report contains errors for {name}")
  mm=manifest.get("model");cm=config.get("model")
@@ -67,7 +71,7 @@ def load_embedding_bundle(name,root,expected_manifest_sha256,expected_model,expe
  if not isinstance(mm,dict) or not isinstance(cm,dict):raise ValueError(f"Model configuration must be an object for {name}")
  for field,want in expected_extraction.items():
   if cm.get(field,mm.get(field))!=want:raise ValueError(f"Unexpected extraction setting {name}/{field}")
- with (root/"pinyin_embeddings.pkl").open("rb") as f:raw=pickle.load(f)
+ raw=pickle.loads(read_pinned("pinyin_embeddings.pkl"))
  if not isinstance(raw,dict) or set(raw)!=set(labels):raise ValueError(f"Embedding labels do not exactly match inventory for {name}")
  vectors={};dims=set()
  for label in labels:

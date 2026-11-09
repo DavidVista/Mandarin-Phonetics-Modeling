@@ -12,14 +12,14 @@ from .bundles import content_hash, seal_bundle, staging_directory, validate_bund
 PATH_FIELDS = {
     'dimsim-distribution': {'evaluation_root'},
     'dimsim-parser-alignment': {'evaluation_root'},
-    'wav2vec2-graduality': {'base_root', 'zh_cn_root', 'evaluation_root'},
+    'reference-geometry': {'base_root', 'zh_cn_root', 'evaluation_root'},
     'training-visualization': set(),
     'evaluation-visualization': {'anchor_q_output', 'dimsim_output', 'random_control_output', 'bundle_path'},
 }
 PARAMETERS = {
     'dimsim-distribution': set(),
     'dimsim-parser-alignment': {'seed', 'bootstrap_replicates', 'confidence', 'atol', 'rtol'},
-    'wav2vec2-graduality': {'bootstrap_repeats', 'bootstrap_seed'},
+    'reference-geometry': {'tolerance'},
     'training-visualization': {'training_runs', 'summary_run_id', 'mode'},
     'evaluation-visualization': {'derived_run_ids', 'derived_mode'},
 }
@@ -106,8 +106,6 @@ def workflow_pins(workflow):
         manifest = _verify_files(path)
         if manifest.get('bundle_type') == 'character_experiment':
             raise ValueError('existing research workflows do not accept character experiment bundles; character evaluation is separate')
-        if name.startswith('training:') and manifest.get('config', {}).get('schema_version') == 4:
-            raise ValueError('existing training visualization expects historical shared-population logs; character training analysis needs a separate adapter')
         pins[name] = sha256_file(Path(path) / 'manifest.json')
     return pins
 
@@ -134,17 +132,15 @@ def _dispatch(workflow, project_root):
     from .execution import sdk_hashes
     name = workflow['workflow']
     params = copy.deepcopy(workflow['parameters'])
-    if name in ('dimsim-distribution', 'dimsim-parser-alignment', 'wav2vec2-graduality'):
+    if name in ('dimsim-distribution', 'dimsim-parser-alignment'):
         for key in PATH_FIELDS[name]:
             params[key] = Path(params[key])
             pin_name = key.removesuffix('_root') + '_manifest_sha256'
             params[pin_name] = sha256_file(params[key] / 'manifest.json')
         if name == 'dimsim-distribution':
             from .research.dimsim_distribution import DimsimDistributionConfig as Config, run_dimsim_distribution as run
-        elif name == 'dimsim-parser-alignment':
-            from .research.dimsim_parser_alignment import DimsimParserAlignmentConfig as Config, run_dimsim_parser_alignment as run
         else:
-            from .research.wav2vec2_graduality import GradualityConfig as Config, run_graduality as run
+            from .research.dimsim_parser_alignment import DimsimParserAlignmentConfig as Config, run_dimsim_parser_alignment as run
         return run(Config(project_root=Path(project_root), run_id=workflow['id'], **params))
     sources = sdk_hashes()
     params.update(source_hashes=sources, source_digest=content_hash(sources))
@@ -175,7 +171,11 @@ def run_workflow(workflow, output_root):
         return target
     with staging_directory(target) as temporary:
         # Existing APIs write several related immutable outputs under outputs/.
-        _dispatch(workflow, temporary)
+        if workflow['workflow'] == 'reference-geometry':
+            from .research.reference_geometry import run_reference_geometry
+            run_reference_geometry(temporary, workflow['parameters'], pins)
+        else:
+            _dispatch(workflow, temporary)
         seal_bundle(temporary, 'workflow_result', identity)
     return target
 

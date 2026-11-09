@@ -10,9 +10,10 @@
 | `acoustic` | Existing reference directory or null; optional expected manifest SHA256 (null computes and records it automatically) |
 | `experiment_id` | Immutable experiment directory name |
 | `experiment` | Sentence count, number of seeds, fixed split protocol, encoder, heads, training settings and selected objectives |
+| `evaluation` | Optional pinned character experiment, output root and ID, excluded tone-labelled Pinyin forms and their source audit |
 | `execution` | Local/notebook mode by eligible stage, explicit training device and run ID |
 | `notebooks` | Whether the first code cell installs supplementary dependencies |
-| `analysis` | Existing local research workflows; empty by default |
+| `analysis` | Local research workflows, including the example reference geometry report |
 | `visualization` | Existing local or notebook visualization workflows; empty by default |
 
 The current encoder is `experiment.architecture.encoder.type: char_bilstm`. Its embedding dimension, hidden units per direction and number of layers are validated positive integers. Context dimension is derived as twice the hidden dimension. Head settings specify classification hidden dimension and dropout. Acoustic output dimension must match the actual targets. Unknown encoder types, including `bert`, fail before execution. A future BERT adapter must implement character alignment and its own validated config; selecting a name alone cannot supply that implementation.
@@ -43,6 +44,22 @@ Import verifies outer and nested inventories, the pending job, original input ma
 
 `paths.state` is generated progress, separate from the editable config. Config/source changes reject stale state; select a new state path and run ID, and new output IDs for stages whose scientific inputs changed. Repeated runs revalidate upstream inputs and completed outputs. State is written atomically. There is no concurrent-writer scheduler; run only one CLI writer for a config/state file.
 
+## Syllable geometry evaluation bundle
+
+```sh
+phonetics prepare-evaluation --config configs/experiment.json
+```
+
+This standalone stage uses the pinned experiment's common test split. It keeps
+whole test sentences and records positions only for readings with a strict
+nonempty initial that are outside `excluded_pinyin`. The bundle contains the
+observed and eligible inventories, exclusions, and every unique unordered
+eligible syllable pair with its DIMSIM distance. The manifest binds the
+experiment, test IDs, filter, source audit, optional confirming audit
+(`exclusion_confirmation`), and artifact hashes. Identical
+inputs can reuse a verified bundle. Use a new evaluation ID when changing the
+input or exclusions.
+
 ## Reports
 
 Add a job to `analysis`. Paths select explicit existing artifact directories; their manifest hashes are computed and recorded automatically. The workflows keep their existing input contracts and numerical methods. They do not create new character-level evaluation data.
@@ -54,6 +71,11 @@ Add a job to `analysis`. Paths select explicit existing artifact directories; th
   "parameters": {"evaluation_root": "../datasets/evaluations/selected-evaluation"}
 }
 ```
+
+The DIMSIM distribution job requires an evaluation bundle with a complete
+nonzero-initial syllable-pair table. It publishes the retained figures and
+tables, plus `tables/descriptive_summary.json` with quantiles, overlap masks,
+peak and tail diagnostics, segment-pair reweighting and clustering.
 
 Other available analysis jobs:
 
@@ -71,16 +93,28 @@ Other available analysis jobs:
 
 ```json
 {
-  "id": "graduality-1",
-  "workflow": "wav2vec2-graduality",
+  "id": "reference-geometry-1",
+  "workflow": "reference-geometry",
   "parameters": {
     "base_root": "../datasets/pinyin-embeddings/selected-base",
     "zh_cn_root": "../datasets/pinyin-embeddings/selected-zh-cn",
-    "evaluation_root": "../datasets/evaluations/selected-evaluation",
-    "bootstrap_repeats": 1000, "bootstrap_seed": 20261024
+    "evaluation_root": "../datasets/evaluations/selected-geometry-evaluation",
+    "tolerance": 1e-12
   }
 }
 ```
+
+The reference geometry workflow uses the common inventory, records missing
+labels, verifies matching source audio for both checkpoints and writes one
+self-contained HTML page, numeric matrices, map aggregates, CSV tables, and
+three distance maps in PNG/EPS with figure metadata under the report ID.
+The static maps share component order, and both cosine maps share color limits.
+The page synchronizes the heatmaps and
+their zoom, and uses saved aggregates for filter-dependent tables and anchor
+histograms. The neighborhood view includes top-10 overlap, Spearman and
+near-versus-far comparisons. The wav2vec2 comparison is exploratory.
+The historical graduality protocol remains available through its research
+module and archived results.
 
 Run one report independently of training:
 
@@ -88,9 +122,21 @@ Run one report independently of training:
 phonetics workflow --config configs/experiment.json --id distribution-1
 ```
 
+The parser audit can also use the unique observed readings from the common
+test split of a character experiment. Supply its exact manifest SHA256:
+
+```sh
+python -m phonetics.research.dimsim_parser_alignment --project-root . --run-id parser-test-1 --experiment-root datasets/experiments/char-zh-cn-v1 --experiment-manifest-sha256 <sha256>
+```
+
+The audit scores both parsers on the selected inventory and publishes
+`tables/exclusion-diagnostics.csv` with the mean absolute distance change and
+partner coverage for each eligible syllable. The historical threshold flag
+requires full partner coverage. Use a new run ID for each audit.
+
 ## Visualization
 
-Add jobs to `visualization`. Both workflows are available locally through `workflow` and in optional generated notebooks. They render existing numerical results and preserve the approved style; the required Arial font must be installed. Scientific evaluation for character experiments is separate. In particular, the current training plot loader expects historical shared-population logs and explicitly rejects independent character experiment logs.
+Add jobs to `visualization`. Both workflows are available locally through `workflow` and in optional generated notebooks. They render existing numerical results and preserve the approved style; the required Arial font must be installed. The training report supports historical shared-population logs and character experiment logs. It verifies matched training, validation and vocabulary hashes within each seed across models, and a common test hash across seeds. The character report includes paired test differences for shared metrics and reports sample SD across seeds.
 
 ```json
 {
@@ -124,7 +170,7 @@ Add jobs to `visualization`. Both workflows are available locally through `workf
 }
 ```
 
-Config-driven workflows publish a verified wrapper under `paths.reports/<id>/`, preserving the original scientific outputs under its `outputs/` tree. Exact matching wrappers can be reused after validation. Separate SDK APIs retain explicit reuse of prepared summaries; the config adapter currently creates complete report outputs with `prepare` mode. Notebook exports carry the same wrapper and original scientific manifests.
+Config-driven workflows publish a verified wrapper under `paths.reports/<id>/`. Reference geometry writes its report directly there. Legacy adapters preserve their original scientific outputs under its `outputs/` tree. Exact matching wrappers can be reused after validation. Separate SDK APIs retain explicit reuse of prepared summaries; the config adapter currently creates complete report outputs with `prepare` mode. Notebook exports carry the same wrapper and original scientific manifests.
 
 ## Generated artifacts and validation boundaries
 

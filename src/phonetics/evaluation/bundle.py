@@ -178,11 +178,10 @@ def _build_groups(occurrences: list[dict]) -> tuple[list[dict], dict[str, dict]]
     return groups, {row["group_id"]: row for row in groups}
 
 
-def _pair_rows(
+def _iter_pair_rows(
     ids: list[str], metadata: dict[str, dict], *, sample_count: int | None, seed: int,
     max_all_pairs: int, distance_fn: DistanceFunction | None,
-) -> list[dict]:
-    rows = []
+):
     for left_id, right_id in make_pair_plan(ids, sample_count=sample_count, seed=seed, max_all_pairs=max_all_pairs):
         left, right = metadata[left_id], metadata[right_id]
         status, distance = "not_computed", None
@@ -199,7 +198,7 @@ def _pair_rows(
         equal_final = left["final"] == right["final"]
         equal_tone = left["tone"] == right["tone"]
         pair_id = hashlib.sha256(json.dumps([left_id, right_id], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
-        rows.append({
+        yield {
             "pair_id": pair_id, "left_id": left_id, "right_id": right_id,
             "left_pinyin": left["pinyin"], "right_pinyin": right["pinyin"],
             "dimsim_distance": distance, "distance_status": status,
@@ -207,8 +206,12 @@ def _pair_rows(
             "overlap_mask": f"{int(equal_initial)}{int(equal_final)}{int(equal_tone)}",
             "left_zero_initial": left["initial"] == "", "right_zero_initial": right["initial"] == "",
             "no_zero_initial_diagnostic": left["initial"] != "" and right["initial"] != "",
-        })
-    return rows
+        }
+
+
+def _pair_rows(ids, metadata, *, sample_count, seed, max_all_pairs, distance_fn):
+    return list(_iter_pair_rows(ids, metadata, sample_count=sample_count, seed=seed,
+                                max_all_pairs=max_all_pairs, distance_fn=distance_fn))
 
 
 def prepare_evaluation_bundle(

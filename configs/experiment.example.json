@@ -86,8 +86,50 @@
     "training_device": "cuda",
     "run_id": "run-1"
   },
-  "analysis": [],
-  "visualization": [],
+  "evaluation": {
+    "id": "char-zh-cn-geometry-v1",
+    "experiment_root": "../datasets/experiments/char-zh-cn-v1",
+    "experiment_manifest_sha256": "10a8dffe5c0492fe8bd43731d00ac35a4ecf1b151aa8c5f9ca84f10980ce18af",
+    "output_root": "../datasets/evaluations",
+    "excluded_pinyin": ["gu1", "gu3", "gu4", "qu1", "qu2", "qu3", "qu4", "jun1", "jun4", "qun2", "xun1", "xun2", "xun4"],
+    "exclusion_source": {
+      "run_id": "duyu-chinese-lessons-zh-cn-v1",
+      "manifest_sha256": "05fcbc862b29b29d66ad62067cfbe1f409dba416a5e0ff2b9019d0bf132b9d1a"
+    },
+    "exclusion_confirmation": {
+      "run_id": "parser-char-test-01",
+      "manifest_sha256": "5dedd9d50df8868575c45b1138edb5648c352033c98559078515e9d1ddf9aa77"
+    }
+  },
+  "analysis": [
+    {
+      "id": "char-zh-cn-reference-geometry-v3",
+      "workflow": "reference-geometry",
+      "parameters": {
+        "evaluation_root": "../datasets/evaluations/char-zh-cn-geometry-v1",
+        "base_root": "../datasets/pinyin-embeddings/duyu-chinese-lessons-base-v1",
+        "zh_cn_root": "../datasets/pinyin-embeddings/duyu-chinese-lessons-zh-cn-v1",
+        "tolerance": 1e-12
+      }
+    }
+  ],
+  "visualization": [
+    {
+      "id": "char-zh-cn-training-report-v1",
+      "workflow": "training-visualization",
+      "parameters": {
+        "training_runs": {
+          "syllable": "../runs/char-zh-cn-v1/syllable/run-1",
+          "components": "../runs/char-zh-cn-v1/components/run-1",
+          "acoustic": "../runs/char-zh-cn-v1/acoustic/run-1",
+          "components-acoustic-lambda-1": "../runs/char-zh-cn-v1/components-acoustic-lambda-1/run-1",
+          "components-acoustic-lambda-10": "../runs/char-zh-cn-v1/components-acoustic-lambda-10/run-1"
+        },
+        "summary_run_id": "char-zh-cn-training-summary-v1",
+        "mode": "prepare"
+      }
+    }
+  ],
   "notebooks": {
     "install_dependencies": true
   }

@@ -9,7 +9,7 @@ import numpy as np
 ROOT=Path(__file__).resolve().parent; STYLE_PATH=ROOT/"style.toml"; REGISTRY_PATH=ROOT/"registry.toml"; MM_PER_INCH=25.4
 class VisualizationError(ValueError): """An actionable protocol violation."""
 STYLE_KEYS={"schema":{"version"},"font":{"family","axis_label_pt","tick_pt","legend_pt","panel_heading_pt","panel_letter_pt","annotation_pt","normal_weight","panel_letter_weight"},"color":{"background","foreground","secondary","tertiary","quaternary"},"line":{"data_pt","axes_pt","reference_pt","interval_pt","caps_pt"},"marker":{"size_pt","edge_pt","face","markevery_target"},"layout":{"single_width_mm","multi_width_mm","panel_aspect","left_mm","right_mm","bottom_mm","top_mm","hgap_mm","vgap_mm","legend_row_mm","legend_gap_mm","default_columns"},"axes":{"grid","minor_ticks","tick_direction","major_length_pt","major_width_pt","major_pad_pt","major_target","panel_label_x_mm","panel_label_y_mm"},"legend":{"max_per_row","handle_length_em","column_spacing_em","location"},"histogram":{"density","fill","bootstrap_bins"},"export":{"formats","dpi","transparent","overwrite"},"backend":{"rcparams"}}
-FIGURE_KEYS={"status","kind","name","xlabel","ylabel","series","order","scale","bin_rule","bins","density","columns","xlim","ylim","edges_start","edges_stop","edges_count"};SEMANTIC_KEYS={"label","color","linestyle","marker"};ALLOWED_RCPARAMS={"pdf.fonttype","ps.fonttype","svg.fonttype"}
+FIGURE_KEYS={"status","kind","name","xlabel","ylabel","series","order","scale","bin_rule","bins","density","columns","xlim","ylim","edges_start","edges_stop","edges_count","colorbar_label","color_scale_group","colormap"};SEMANTIC_KEYS={"label","color","linestyle","marker"};ALLOWED_RCPARAMS={"pdf.fonttype","ps.fonttype","svg.fonttype"}
 def _read(p):raw=Path(p).read_bytes();return tomllib.loads(raw.decode()),raw
 def _unknown(d,a,w):
  e=set(d)-a
@@ -48,9 +48,14 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
  for fid,f in r["figures"].items():
   _unknown(f,FIGURE_KEYS,f"figures.{fid}");req={"status","kind","name","xlabel","ylabel","series","order","scale"}
   if req-set(f):raise VisualizationError(f"Missing required registry keys for {fid}")
-  if f["status"] not in {"draft","approved"} or f["kind"] not in {"ecdf","histogram","bootstrap_histogram","distribution_triptych","stacked_bar","dotplot","line_histogram"} or f["scale"] not in {"linear","log"}:raise VisualizationError(f"Invalid status/kind/scale for {fid}")
+  if f["status"] not in {"draft","approved"} or f["kind"] not in {"ecdf","histogram","bootstrap_histogram","distribution_triptych","stacked_bar","dotplot","line_histogram","distance_map"} or f["scale"] not in {"linear","log"}:raise VisualizationError(f"Invalid status/kind/scale for {fid}")
   if not all(isinstance(f[k],str) and f[k].strip() for k in ("name","xlabel","ylabel")):raise VisualizationError(f"Invalid labels for {fid}")
   if f["series"]!=f["order"] or not f["series"] or len(set(f["series"]))!=len(f["series"]) or set(f["series"])-set(r["semantics"]):raise VisualizationError(f"Invalid series/order for {fid}")
+  map_fields={"colorbar_label","color_scale_group","colormap"}
+  if f["kind"]=="distance_map":
+   if (not all(isinstance(f.get(key),str) and f[key].strip() for key in map_fields)
+       or len(f["series"])!=1 or f["scale"]!="linear" or f["colormap"]!="Greys"):raise VisualizationError(f"Invalid distance map specification for {fid}")
+  elif map_fields&set(f):raise VisualizationError(f"Distance map settings require a distance map for {fid}")
   if "bin_rule" in f and f["bin_rule"]!="pooled_fd_sturges":raise VisualizationError(f"Invalid bin_rule for {fid}")
   if "bins" in f and (isinstance(f["bins"],bool) or not isinstance(f["bins"],int) or f["bins"]<1):raise VisualizationError(f"Invalid bins for {fid}")
   if "xlim" in f and (not isinstance(f["xlim"],list) or len(f["xlim"])!=2 or not all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in f["xlim"]) or f["xlim"][0]>=f["xlim"][1]):raise VisualizationError(f"Invalid xlim for {fid}")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import random
@@ -11,7 +12,7 @@ import math
 import numpy as np
 
 from .acoustic import validate_character_data
-from .artifacts import read_jsonl, sha256_file, write_json
+from .artifacts import read_jsonl, safe_artifact, sha256_file, write_json
 from .bundles import content_hash, seal_bundle, staging_directory, validate_bundle
 from .data_contract import sample_id, is_han
 from .objectives import canonical_model_id
@@ -206,6 +207,36 @@ def load_experiment(path):
             'splits': json.loads((root / 'splits.json').read_text(encoding='utf-8')),
             'acoustic_targets': np.load(root / 'targets.npy', allow_pickle=False),
             'labels': json.loads((root / 'labels.json').read_text(encoding='utf-8'))}
+
+
+def load_common_test(path, *, expected_manifest_sha256):
+    """Return common test samples from the exact bytes bound to the pinned manifest."""
+    root = Path(path)
+    manifest_bytes = safe_artifact(root, 'manifest.json').read_bytes()
+    if hashlib.sha256(manifest_bytes).hexdigest() != expected_manifest_sha256:
+        raise ValueError('experiment manifest SHA256 mismatch')
+    manifest = validate_experiment(root)
+    if manifest != json.loads(manifest_bytes):
+        raise ValueError('experiment manifest changed during validation')
+
+    splits_bytes = safe_artifact(root, 'splits.json').read_bytes()
+    if hashlib.sha256(splits_bytes).hexdigest() != manifest['artifacts']['splits.json']:
+        raise ValueError('experiment splits checksum mismatch while reading the common test split')
+    test_ids = json.loads(splits_bytes)['test']
+    selected_ids = set(test_ids)
+    selected = {}
+    corpus_digest = hashlib.sha256()
+    with safe_artifact(root, 'corpus.jsonl').open('rb') as stream:
+        for line in stream:
+            corpus_digest.update(line)
+            row = json.loads(line)
+            if row['sample_id'] in selected_ids:
+                selected[row['sample_id']] = row
+    if corpus_digest.hexdigest() != manifest['artifacts']['corpus.jsonl']:
+        raise ValueError('experiment corpus checksum mismatch while reading the common test split')
+    if selected.keys() != selected_ids:
+        raise ValueError('common test samples missing from the corpus')
+    return test_ids, [selected[sample_id] for sample_id in test_ids]
 
 
 def select_seed(experiment, seed):

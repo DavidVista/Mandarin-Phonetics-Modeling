@@ -143,7 +143,10 @@ def write_training_report(project_root,run_id,*,summary_output,source_hashes,sou
             source_hashes=source_hashes,expected_files=expected,scientific_pins=manifest['scientific_input_pins'],
             profile='training_report',figure_exports_on_complete='complete') as root:
         for name in tables:shutil.copyfile(Path(summary_output)/'tables'/name,root/'tables'/name)
-        _write(root/'data/selected-checkpoints.json',{'selected':data['selected'],'summary':data['selected_summary']})
+        checkpoints = {'selected':data['selected'],'summary':data['selected_summary']}
+        if 'paired_test' in data:
+            checkpoints['paired_test'] = data['paired_test']
+        _write(root/'data/selected-checkpoints.json',checkpoints)
         figs=build_training_figures(data,p)
         try:
             for fig,stem,fid in zip(figs,TRAINING_STEMS,TRAINING_FIGURES):

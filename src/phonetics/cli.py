@@ -27,6 +27,8 @@ def main(argv=None):
     workflow = commands.add_parser('workflow', help='Run one configured report or visualization locally')
     workflow.add_argument('--config', required=True)
     workflow.add_argument('--id', required=True)
+    evaluation = commands.add_parser("prepare-evaluation", help="Build the evaluation bundle from a pinned common test split")
+    evaluation.add_argument("--config", required=True)
     execute = commands.add_parser('execute-job', help='Execute a portable job using its exact SDK')
     execute.add_argument('--job', required=True)
     execute.add_argument('--output', required=True)
@@ -84,7 +86,7 @@ def main(argv=None):
             print(json.dumps({"path": str(result["run_dir"]), "status": result["manifest"]["status"]}))
         else:
             from .pipeline import load_config, run_stage
-            path = run_stage(load_config(args.config), args.command, allow_inference=args.allow_inference)
+            path = run_stage(load_config(args.config), args.command, allow_inference=getattr(args, "allow_inference", False))
             print(json.dumps({"path": str(path), "stage": args.command}, sort_keys=True))
     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile) as exc:
         parser.exit(1, f"Error: {exc}\n")

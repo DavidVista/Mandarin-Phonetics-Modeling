@@ -154,6 +154,8 @@ def _call(scorer: Callable[[str, str], float], left: str, right: str) -> tuple[f
         value = float(scorer(left, right))
         if not math.isfinite(value):
             return None, "nonfinite"
+        if value < 0:
+            return None, "negative"
         return value, "ok"
     except Exception as exc:
         return None, f"error:{type(exc).__name__}"
@@ -225,6 +227,26 @@ def evaluate_alignment(
     )]
     valid = [row for row in evaluated.values() if row["joint_valid"]]
     asym = [row for row in valid if not (tolerance(row["a_forward"], row["a_reverse"]) and tolerance(row["b_forward"], row["b_reverse"]))]
+    partner_counts = Counter()
+    absolute_deltas = Counter()
+    for row in valid:
+        delta = abs(row["delta_forward"])
+        if asym:
+            delta = (delta + abs(row["delta_reverse"])) / 2
+        for label in (row["left"], row["right"]):
+            partner_counts[label] += 1
+            absolute_deltas[label] += delta
+    planned_partners = len(population) - 1
+    exclusion_diagnostics = []
+    for label in population:
+        count = partner_counts[label]
+        mean = absolute_deltas[label] / count if count else None
+        exclusion_diagnostics.append({
+            "syllable": label, "category": by_label[label]["category"],
+            "planned_partners": planned_partners, "valid_partners": count,
+            "mean_absolute_delta": mean,
+            "above_historical_threshold": mean > 10 if count and count == planned_partners else None,
+        })
     summary = {
         "planned": len(all_pairs), "valid": len(valid), "invalid": len(all_pairs) - len(valid),
         "a_asymmetric": sum(not tolerance(row["a_forward"], row["a_reverse"]) for row in valid),
@@ -244,6 +266,7 @@ def evaluate_alignment(
         "affected_pairs": [evaluated[pair] for pair in affected_pair_plan(decompositions)],
         "symmetry_summary": summary,
         "symmetry_exceptions": exceptions,
+        "exclusion_diagnostics": exclusion_diagnostics,
     }
 
 
@@ -617,6 +640,11 @@ def write_alignment_research_artifacts(root: str | Path, *, decompositions: list
         "tables/symmetry-exceptions.csv.gz":(alignment["symmetry_exceptions"],_PAIR_HEADERS),
         "tables/statistics-by-syllable.csv":(statistics["statistics_by_syllable"],["syllable","category","direction",*_STAT_HEADERS,"bootstrap"]),
         "tables/statistics-by-category.csv":(statistics["statistics_by_category"],["scope","source_syllables",*_STAT_HEADERS]),
+        "tables/exclusion-diagnostics.csv": (
+            alignment["exclusion_diagnostics"],
+            ["syllable", "category", "planned_partners", "valid_partners",
+             "mean_absolute_delta", "above_historical_threshold"],
+        ),
     }
     for relative,(rows,headers) in files.items(): _csv_rows(root/relative,rows,headers,compressed=relative.endswith(".gz"))
     (root/"diagnostics/bootstrap-diagnostics.json").write_text(json.dumps(_json_safe(statistics["bootstrap_diagnostics"]),indent=2,sort_keys=True,allow_nan=False)+"\n",encoding="utf-8")

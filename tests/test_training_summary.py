@@ -9,7 +9,7 @@ import numpy as np
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from phonetics.evaluation.training_summary import (
-    TRAINING_MODELS,METRICS_SOURCE_SHA256,SELECTION_RULE,load_training_runs,
+    TRAINING_MODELS,METRICS_SOURCE_SHA256,CHARACTER_METRICS_SOURCE_SHA256,SELECTION_RULE,load_training_runs,
     write_training_summary,load_training_summary,
 )
 from phonetics.research.artifacts import file_sha256
@@ -20,7 +20,7 @@ def write_json(path,data):
     path.write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
 
 
-def make_training_fixture(root):
+def make_training_fixture(root, *, character=False):
     runs={}
     for model in TRAINING_MODELS:
         run=root/'runs'/model/'exact-run';artifacts={};results=[]
@@ -33,6 +33,8 @@ def make_training_fixture(root):
                 for split in ('train','validation'):
                     base=([1.,.4,.4][epoch-1] if split=='validation' else [1.2,.6,.5][epoch-1])+.01*seed
                     values={'characters':200 if split=='validation' else 1000,'steps':2}
+                    if character:
+                        values['characters'] += seed
                     if model=='syllable':
                         values.update(syllable_ce=base,objective=base,syllable_accuracy=.4+.15*epoch+.001*seed)
                     if model=='components' or model.startswith('components-acoustic'):
@@ -52,6 +54,9 @@ def make_training_fixture(root):
             if 'invalid_if_count' in test:test['invalid_if_rate']=test['invalid_if_count']/300
             summary={'seed':seed,'status':'complete','best_epoch':2,'best_validation_objective':best['validation']['objective'],
                      'best_validation_metrics':best['validation'],'test_metrics':test}
+            if character:
+                summary['seed_input_hashes'] = {'train': f'{seed + 1:064x}', 'validation': f'{seed + 6:064x}',
+                                                'vocabulary': f'{seed + 11:064x}', 'test': 'a' * 64}
             save(f'seed-{seed}/history.json',{'epochs':history});save(f'seed-{seed}/summary.json',summary)
             results.append(summary)
         save('summary.json',{'status':'complete','seeds_completed':5,'seed_results':results})
@@ -63,6 +68,9 @@ def make_training_fixture(root):
             'experiment_id':'synthetic','experiment_hashes':{'manifest.json':'a'*64,'splits.json':'b'*64},
             'config':{'training':{'epochs':3},'training_seeds':list(range(5))},
             'lambda_cosine':10. if model.endswith('lambda-10') else 1. if model.endswith('lambda-1') else None}
+        if character:
+            manifest['config'] = {'schema_version': 4, 'training': {'epochs': 3}, 'seed_count': 5}
+            manifest['code_sha256']['metrics.py'] = CHARACTER_METRICS_SOURCE_SHA256
         write_json(run/'manifest.json',manifest)
         runs[model]={'path':run,'manifest_sha256':file_sha256(run/'manifest.json')}
     return runs
@@ -75,6 +83,38 @@ def rehash(runs,model,relative):
 
 
 class TrainingSummaryTests(unittest.TestCase):
+    def test_character_runs_pair_by_seed_and_allow_independent_train_counts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runs = make_training_fixture(Path(folder), character=True)
+            data = load_training_runs(runs)
+            counts = data['config']['split_counts']
+            self.assertEqual(counts['per_seed']['0']['train'], 1000)
+            self.assertEqual(counts['per_seed']['4']['train'], 1004)
+            self.assertEqual(counts['test'], 300)
+            self.assertTrue(data['paired_test'])
+            self.assertTrue(all(len(row['seed_values']) == 5 and row['metric'] != 'objective'
+                                for row in data['paired_test']))
+            for model, seed, field, message in (
+                ('components', 0, 'vocabulary', 'paired seed inputs differ'),
+                ('syllable', 1, 'test', 'common test identity differs'),
+            ):
+                with self.subTest(field=field):
+                    run = runs[model]['path']
+                    relative = f'seed-{seed}/summary.json'
+                    one = json.loads((run / relative).read_text())
+                    all_seeds = json.loads((run / 'summary.json').read_text())
+                    original = copy.deepcopy(one)
+                    one['seed_input_hashes'][field] = 'f' * 64
+                    all_seeds['seed_results'][seed] = one
+                    for name, body in ((relative, one), ('summary.json', all_seeds)):
+                        write_json(run / name, body)
+                        rehash(runs, model, name)
+                    with self.assertRaisesRegex(ValueError, message):
+                        load_training_runs(runs)
+                    all_seeds['seed_results'][seed] = original
+                    for name, body in ((relative, original), ('summary.json', all_seeds)):
+                        write_json(run / name, body)
+                        rehash(runs, model, name)
     def test_realistic_selection_uses_validation_objective_earliest_tie(self):
         with tempfile.TemporaryDirectory() as folder:
             runs=make_training_fixture(Path(folder));data=load_training_runs(runs)

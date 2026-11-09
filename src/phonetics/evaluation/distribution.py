@@ -140,18 +140,25 @@ def reconstruct_distance(left: str, right: str) -> dict[str, Any]:
 
 
 def compute_retained_population(root: str | Path, *, expected_manifest_sha256: str) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-    """Compute only the population columns required by the retained figures."""
+    """Validate and recompute the complete nonzero syllable-pair population."""
     root=Path(root).resolve(); manifest_path=root/"manifest.json"; actual_hash=sha256_file(manifest_path)
     if actual_hash != expected_manifest_sha256: raise ValueError("unexpected evaluation manifest SHA256")
     manifest=_read_json(manifest_path)
-    if manifest.get("schema_version") not in {1,2} or manifest.get("pairing_policy") != "nonzero_nonzero" or not isinstance(manifest.get("evaluation_id"),str):
+    from .geometry_bundle import BUNDLE_TYPE, validate_geometry_bundle
+    geometry = manifest.get("bundle_type") == BUNDLE_TYPE
+    if geometry:
+        manifest = validate_geometry_bundle(root)
+        evaluation_id = manifest["identity"]["evaluation_id"]
+    elif manifest.get("schema_version") not in {1,2} or manifest.get("pairing_policy") != "nonzero_nonzero" or not isinstance(manifest.get("evaluation_id"),str):
         raise ValueError("unsupported evaluation schema, identity, or pairing policy")
+    else:
+        evaluation_id = manifest["evaluation_id"]
     artifacts=manifest.get("artifacts")
     if not isinstance(artifacts,dict) or not {"groups.jsonl","pairs/syllable.jsonl"}.issubset(artifacts): raise ValueError("evaluation manifest lacks required payloads")
     verified={}
     for relative,expected in artifacts.items():
         path=(root/relative).resolve()
-        if root not in path.parents or not path.is_file() or sha256_file(path)!=expected: raise ValueError(f"invalid evaluation artifact: {relative}")
+        if not geometry and (root not in path.parents or not path.is_file() or sha256_file(path)!=expected): raise ValueError(f"invalid evaluation artifact: {relative}")
         verified[relative]=expected
     groups=[]
     for number,row in enumerate(_jsonl(root/"groups.jsonl"),1):
@@ -160,9 +167,21 @@ def compute_retained_population(root: str | Path, *, expected_manifest_sha256: s
         if any(key not in row for key in required) or not all(isinstance(row[key],str) for key in required): raise ValueError(f"invalid syllable group metadata at row {number}")
         if row["initial"].strip(): groups.append(row)
     groups.sort(key=lambda row:row["group_id"]); by_id={row["group_id"]:row for row in groups}
-    if not groups or len(by_id)!=len(groups): raise ValueError("eligible syllable population is empty or duplicated")
+    if len(groups)<2 or len(by_id)!=len(groups): raise ValueError("eligible syllable population needs at least two distinct groups")
+    labels = [row["pinyin"] for row in groups]
+    if len(set(labels)) != len(labels):
+        raise ValueError("eligible syllable labels are duplicated")
+    if geometry and sorted(labels) != manifest["identity"]["inventory"]["eligible"]:
+        raise ValueError("syllable groups disagree with the sealed evaluation inventory")
     triples=[(row["initial"],row["final"],row["tone"]) for row in groups]
     if len(triples)!=len(set(triples)): raise ValueError("eligible gold component triples are duplicated")
+    parser_mismatches = set()
+    for group in groups:
+        label = group["pinyin"]
+        parsed = parse_library_syllable(label)
+        gold = (group["initial"], group["final"], int(group["tone"]))
+        if gold != (parsed.library_initial, parsed.library_final, parsed.tone):
+            parser_mismatches.add(label)
     pairs=list(_jsonl(root/"pairs/syllable.jsonl")); expected_count=len(groups)*(len(groups)-1)//2
     if len(pairs)!=expected_count: raise ValueError("pair population is incomplete")
     expected_endpoints=((groups[i]["group_id"],groups[j]["group_id"]) for i in range(len(groups)) for j in range(i+1,len(groups)))
@@ -178,14 +197,33 @@ def compute_retained_population(root: str | Path, *, expected_manifest_sha256: s
         bundled=float(pair.get("dimsim_distance",float("nan")))
         if not math.isfinite(bundled) or bundled<0: raise ValueError(f"invalid bundle distance at row {number}")
         public=metric(left,right); reverse=metric(right,left); formula=reconstruct_distance(left,right)
+        if not all(math.isfinite(value) and value >= 0 for value in (public, reverse, formula["distance"])):
+            raise ValueError(f"invalid recomputed distance at row {number}")
         if formula["hardcode_applied"]: raise ValueError("component decomposition requires no hardcodeMap override")
         max_bundle=max(max_bundle,abs(public-bundled)); max_formula=max(max_formula,abs(public-float(formula["distance"]))); max_reverse=max(max_reverse,abs(public-reverse))
-        rows.append({"left_id":left_id,"right_id":right_id,"distance":public,"bundle_distance":bundled,"overlap_mask":mask,"equal_initial":flags[0],"equal_final":flags[1],"equal_tone":flags[2],**formula})
-    max_diagonal=max(abs(metric(row["pinyin"],row["pinyin"])) for row in groups)
+        rows.append({
+            **formula,
+            "left_id": left_id, "right_id": right_id, "left_pinyin": left, "right_pinyin": right,
+            "distance": public, "bundle_distance": bundled, "overlap_mask": mask,
+            "equal_initial": flags[0], "equal_final": flags[1], "equal_tone": flags[2],
+            "left_gold_initial": left_group["initial"], "right_gold_initial": right_group["initial"],
+            "left_gold_final": left_group["final"], "right_gold_final": right_group["final"],
+            "left_gold_tone": int(left_group["tone"]), "right_gold_tone": int(right_group["tone"]),
+            "parser_mismatch": left in parser_mismatches or right in parser_mismatches,
+        })
+    diagonal = [metric(label, label) for label in labels]
+    if not all(math.isfinite(value) and value >= 0 for value in diagonal):
+        raise ValueError("invalid DIMSIM diagonal")
+    max_diagonal = max(diagonal)
     if max(max_bundle,max_formula,max_reverse,max_diagonal)>tolerance: raise ValueError("distance validation exceeded numerical tolerance")
     columns=_rows_to_columns(rows); distances=columns["distance"].astype(float)
     if not np.isfinite(distances).all() or np.any(distances<0): raise ValueError("DIMSIM returned a nonfinite or negative distance")
-    validation={"manifest_sha256":actual_hash,"evaluation_id":manifest["evaluation_id"],"artifact_sha256":verified,"syllable_count":len(groups),"pair_count":len(pairs),"expected_pair_count":expected_count,"finite":True,"nonnegative":True,"max_bundle_absolute_error":max_bundle,"max_formula_absolute_error":max_formula,"max_reverse_absolute_error":max_reverse,"max_diagonal_absolute_error":max_diagonal,"tolerance":tolerance,"hardcode_applied_pair_count":0,"metric_provenance":metric.provenance}
+    validation={"manifest_sha256":actual_hash,"evaluation_id":evaluation_id,"artifact_sha256":verified,"syllable_count":len(groups),"pair_count":len(pairs),"expected_pair_count":expected_count,"finite":True,"nonnegative":True,"max_bundle_absolute_error":max_bundle,"max_formula_absolute_error":max_formula,"max_reverse_absolute_error":max_reverse,"max_diagonal_absolute_error":max_diagonal,"tolerance":tolerance,"hardcode_applied_pair_count":0,"metric_provenance":metric.provenance}
+    validation["parser_mismatch_syllables"] = sorted(parser_mismatches)
+    validation["parser_mismatch_pair_count"] = int(columns["parser_mismatch"].sum())
+    if geometry:
+        validation["pairing_policy"] = manifest["identity"]["pairing_policy"]
+        validation["excluded_pinyin"] = manifest["identity"]["excluded_pinyin"]
     return columns,validation
 
 
@@ -394,7 +432,7 @@ def _histogram_robustness(distances: np.ndarray) -> dict[str, Any]:
 def _kde_summary(distances: np.ndarray, points: int = 401) -> dict[str, Any]:
     """Evaluate Gaussian KDE on a fixed grid by deterministic chunks."""
     grid = np.linspace(0.0, max(130.0, float(distances.max())), points)
-    std = float(distances.std(ddof=1))
+    std = float(distances.std(ddof=1)) if len(distances) > 1 else 0.0
     scott = len(distances) ** (-1 / 5)
     result = {"grid": grid.tolist(), "scott_factor": scott, "population_standard_deviation": std, "curves": {}}
     for factor in (.5, 1.0, 2.0):
@@ -415,7 +453,6 @@ def _cluster_summary(columns: dict[str, np.ndarray], syllables: list[str]) -> di
     """Average-linkage clustering with precomputed-distance silhouette, k=2..10."""
     from scipy.cluster.hierarchy import fcluster, linkage
     from scipy.spatial.distance import squareform
-    from sklearn.metrics import silhouette_score
 
     index = {value: i for i, value in enumerate(syllables)}
     components = {}
@@ -438,7 +475,20 @@ def _cluster_summary(columns: dict[str, np.ndarray], syllables: list[str]) -> di
                              "initials": Counter(components[x][0] for x in members).most_common(5),
                              "finals": Counter(components[x][1] for x in members).most_common(5),
                              "tones": Counter(components[x][2] for x in members).most_common()})
-        result[str(k)] = {"silhouette": float(silhouette_score(matrix, labels, metric="precomputed")), "clusters": clusters}
+        unique_labels = np.unique(labels)
+        silhouette = None
+        if 1 < len(unique_labels) < len(labels):
+            means = np.column_stack([matrix[:, labels == label].mean(axis=1) for label in unique_labels])
+            own = np.searchsorted(unique_labels, labels)
+            indexes = np.arange(len(labels))
+            sizes = np.bincount(own)[own]
+            within = np.divide(means[indexes, own] * sizes, sizes - 1, out=np.zeros(len(labels)), where=sizes > 1)
+            means[indexes, own] = np.inf
+            nearest = means.min(axis=1)
+            scale = np.maximum(within, nearest)
+            scores = np.divide(nearest - within, scale, out=np.zeros(len(labels)), where=(sizes > 1) & (scale > 0))
+            silhouette = float(scores.mean())
+        result[str(k)] = {"silhouette": silhouette, "clusters": clusters}
     return result
 
 
@@ -467,7 +517,8 @@ def summarize_population(columns: dict[str, np.ndarray], validation: dict[str, A
                          "quantiles": _quantiles(distances), "median_examples": _examples(columns, np.ones(len(distances), bool), median)},
         "bins": bin_summaries, "overlap_masks": masks, "global_overlap_mask_counts": global_mask_counts,
         "global_overlap_shares": {key: value / len(distances) for key, value in global_mask_counts.items()},
-        "tone_only": {**_group_summary(columns, tone_only), "examples": _examples(columns, tone_only, float(np.median(distances[tone_only])))},
+        "tone_only": {**_group_summary(columns, tone_only),
+                      "examples": _examples(columns, tone_only, float(np.median(distances[tone_only]))) if tone_only.any() else []},
         "parser_mismatches": {**_group_summary(columns, mismatch_selector), "endpoint_syllables": mismatch_endpoints,
                               "j_q_x_plus_u_endpoint_syllables": jqxu,
                               "examples": _examples(columns, mismatch_selector, float(np.median(distances[mismatch_selector])) if mismatch_selector.any() else 0)},

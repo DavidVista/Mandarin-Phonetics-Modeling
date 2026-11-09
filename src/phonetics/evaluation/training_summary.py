@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import itertools
+import json
 from pathlib import Path
 import numpy as np
 
@@ -11,6 +14,7 @@ from ..research.artifacts import file_sha256
 TRAINING_MODELS = ('syllable','components','acoustic','components-acoustic-lambda-1','components-acoustic-lambda-10')
 TRAINING_SEEDS = (0,1,2,3,4)
 METRICS_SOURCE_SHA256 = '10d41722970c5472cfe9c3f09346ae977d95dab520fc8d72a4f26d3e7f935fbc'
+CHARACTER_METRICS_SOURCE_SHA256 = '39f5ec037ac66e59fd338ce5d4efe99abc71ed059294fca5e03a145ed0f9fd84'
 SELECTION_RULE = 'minimum per-seed validation objective; strict improvement keeps earliest tie'
 TRAINING_CONFIG = {'seed_ids':list(TRAINING_SEEDS), 'selection':'minimum validation objective; earliest exact tie',
     'dispersion':'sample SD across training seeds; not SE or CI', 'classification_component':'mean of initial/final/tone CE',
@@ -57,41 +61,72 @@ def _training_stats(values):
     return {'seed_values':values,'mean':float(np.mean(values)), 'sample_sd':float(np.std(values,ddof=1))}
 
 
+def _pinned_json(path, expected, error):
+    payload = path.read_bytes()
+    if not _is_sha(expected) or hashlib.sha256(payload).hexdigest() != expected:
+        raise ValueError(error)
+    value = json.loads(payload)
+    json.dumps(value, allow_nan=False)
+    return value
+
+
+def _paired_test_metrics(selected):
+    by_model = {model: {row['seed']: row['test'] for row in selected if row['model_id'] == model}
+                for model in TRAINING_MODELS}
+    result = []
+    comparable = {'syllable_ce', 'initials_ce', 'finals_ce', 'tones_ce', 'component_ce',
+                  'cosine', 'invalid_if_rate', 'syllable_accuracy', 'initials_accuracy',
+                  'finals_accuracy', 'tones_accuracy', 'joint_ift_accuracy'}
+    for left, right in itertools.combinations(TRAINING_MODELS, 2):
+        for metric in sorted(comparable):
+            pairs = [(by_model[left][seed].get(metric), by_model[right][seed].get(metric)) for seed in TRAINING_SEEDS]
+            if all(_training_number(a) and _training_number(b) for a, b in pairs):
+                result.append({'left_model': left, 'right_model': right, 'metric': metric,
+                               **_training_stats([b - a for a, b in pairs])})
+    return result
+
+
 def load_training_runs(training_runs):
     """Explicit model→{path,manifest_sha256}; only manifests/history/summary opened."""
     if not isinstance(training_runs,dict) or set(training_runs)!=set(TRAINING_MODELS):
         raise ValueError('exact five training model paths and manifest pins required')
     result={'config':dict(TRAINING_CONFIG),'models':{},'selected':[],'diagnostics':[],'inputs':[]}
-    shared=None;split_counts={};selected_summary=[];metrics_fields={}
+    shared=None;split_counts={};selected_summary=[]
+    seed_inputs = {}
+    common_test = None
     for model in TRAINING_MODELS:
         entry=training_runs[model]
         root=Path(entry['path']).resolve(strict=True)
         sha=entry.get('manifest_sha256')
-        if not _is_sha(sha) or file_sha256(root/'manifest.json')!=sha:
-            raise ValueError(f'explicit training manifest hash mismatch: {model}')
-        m=_finite_json(root/'manifest.json')
+        m=_pinned_json(root/'manifest.json',sha,f'explicit training manifest hash mismatch: {model}')
+        character = m['config'].get('schema_version') == 4
+        allowed_metrics = {METRICS_SOURCE_SHA256, CHARACTER_METRICS_SOURCE_SHA256} if character else {METRICS_SOURCE_SHA256}
+        metrics_source = m.get('code_sha256',{}).get('metrics.py')
         if (m.get('schema_version')!=1 or m.get('run_type')!='training_run' or m.get('status')!='complete'
                 or m.get('model_id')!=model or m.get('run_id')!=root.name or m.get('seeds')!=list(TRAINING_SEEDS)
                 or any(type(s) is not int for s in m.get('seeds',[]))
                 or m.get('seed_status')!={str(s):'complete' for s in TRAINING_SEEDS}
-                or m.get('selection')!=SELECTION_RULE or m.get('code_sha256',{}).get('metrics.py')!=METRICS_SOURCE_SHA256):
+                or m.get('selection')!=SELECTION_RULE or metrics_source not in allowed_metrics):
             raise ValueError(f'incompatible training manifest/metric definitions: {model}')
         expected_weight=10. if model.endswith('lambda-10') else 1. if model.endswith('lambda-1') else None
         if m.get('lambda_cosine')!=expected_weight: raise ValueError('training lambda identity mismatch')
-        signature=(m['experiment_id'],m['experiment_hashes'],m['config'])
+        signature=(m['experiment_id'],m['experiment_hashes'],m['config'],metrics_source)
         if shared is None: shared=signature
         if signature!=shared: raise ValueError('training experiments/splits/configs differ')
         epochs=m['config']['training']['epochs']
         if type(epochs) is not int or epochs<1: raise ValueError('invalid epoch count')
-        if m['config']['training_seeds']!=list(TRAINING_SEEDS): raise ValueError('config seed identities differ')
+        if character:
+            if type(m['config'].get('seed_count')) is not int or m['config']['seed_count'] != len(TRAINING_SEEDS):
+                raise ValueError('config seed count differs')
+        elif m['config']['training_seeds']!=list(TRAINING_SEEDS):
+            raise ValueError('config seed identities differ')
         found=sorted(p.name for p in root.glob('seed-*') if p.is_dir())
         if found!=[f'seed-{s}' for s in TRAINING_SEEDS]: raise ValueError('seed directory inventory differs')
         files={}
         def read_log(name):
             expected=m['artifacts'].get(name)
             path=root/name
-            if not _is_sha(expected) or file_sha256(path)!=expected: raise ValueError(f'training log hash mismatch: {model}/{name}')
-            value=_finite_json(path)
+            value=_pinned_json(path,expected,f'training log hash mismatch: {model}/{name}')
             files[name]=expected
             return value
         run_summary=read_log('summary.json')
@@ -110,13 +145,25 @@ def load_training_runs(training_runs):
             if summary.get('seed')!=seed or type(summary.get('seed')) is not int or summary.get('status')!='complete':
                 raise ValueError('per-seed identity/status mismatch')
             if summary!=by_seed[seed]: raise ValueError('per-seed and run summaries disagree')
+            if character:
+                hashes = summary.get('seed_input_hashes')
+                if (not isinstance(hashes, dict) or set(hashes) != {'train', 'validation', 'test', 'vocabulary'}
+                        or not all(_is_sha(value) for value in hashes.values())):
+                    raise ValueError(f'invalid seed input hashes: {model}/seed-{seed}')
+                if seed_inputs.setdefault(str(seed), hashes) != hashes:
+                    raise ValueError(f'paired seed inputs differ: {model}/seed-{seed}')
+                if common_test is None:
+                    common_test = hashes['test']
+                if common_test != hashes['test']:
+                    raise ValueError(f'common test identity differs: {model}/seed-{seed}')
             for row in history:
                 for split in ('train','validation'):
                     values=row[split]
                     _training_metrics(values,model,result['diagnostics'],f'{model}/seed-{seed}/epoch-{row["epoch"]}/{split}')
                     count=values['characters']
-                    if split in split_counts and split_counts[split]!=count: raise ValueError('training split populations differ')
-                    split_counts[split]=count
+                    counts = split_counts.setdefault(str(seed), {}) if character else split_counts
+                    if counts.setdefault(split, count) != count:
+                        raise ValueError('training split populations differ')
             best=min(history,key=lambda r:(r['validation']['objective'],r['epoch']))
             if (type(summary.get('best_epoch')) is not int or best['epoch']!=summary['best_epoch']
                     or best['validation']['objective']!=summary.get('best_validation_objective')
@@ -127,6 +174,8 @@ def load_training_runs(training_runs):
                 _training_metrics(test,model,result['diagnostics'],f'{model}/seed-{seed}/test')
                 if 'test' in split_counts and split_counts['test']!=test['characters']: raise ValueError('test populations differ')
                 split_counts['test']=test['characters']
+            elif character:
+                raise ValueError(f'missing common test metrics: {model}/seed-{seed}')
             else: result['diagnostics'].append({'model':model,'seed':seed,'status':'missing_test_metrics'})
             selected_row={'model_id':model,'seed':seed,'best_epoch':best['epoch'],
                           'validation_objective':best['validation']['objective'],
@@ -160,6 +209,15 @@ def load_training_runs(training_runs):
     result['config']['split_counts']=split_counts
     result['config']['experiment_id']=shared[0]
     result['config']['experiment_hashes']=shared[1]
+    if shared[2].get('schema_version') == 4:
+        result['config'].update(
+            split_protocol='seed-specific train, validation and vocabulary; common test',
+            split_counts={'per_seed': {str(seed): split_counts[str(seed)] for seed in TRAINING_SEEDS},
+                          'test': split_counts['test']},
+            seed_input_hashes=seed_inputs, metrics_source_sha256=shared[3],
+            paired_test_difference='right model minus left model within each seed',
+        )
+        result['paired_test'] = _paired_test_metrics(result['selected'])
     return result
 
 
@@ -181,6 +239,12 @@ def training_tables(data):
             for metric,stats in row[split].items():
                 aggregate.append(f"| {row['model_id']} | {split} | {metric} | {number(stats['mean'])} | {number(stats['sample_sd'])} |")
         stat=row['best_epoch'];aggregate.append(f"| {row['model_id']} | selection | best_epoch | {number(stat['mean'])} | {number(stat['sample_sd'])} |")
+    if 'paired_test' in data:
+        aggregate.extend(['', '## Paired test differences', '', 'Differences are right model minus left model within each seed.', '',
+                          '| Left model | Right model | Metric | Mean difference | Seed SD |',
+                          '| --- | --- | --- | --- | --- |'])
+        for row in data['paired_test']:
+            aggregate.append(f"| {row['left_model']} | {row['right_model']} | {row['metric']} | {number(row['mean'])} | {number(row['sample_sd'])} |")
     return {'selected-checkpoints.md':'\n'.join(lines)+'\n', 'selected-metrics.md':'\n'.join(detail)+'\n',
             'selected-summary.md':'\n'.join(aggregate)+'\n'}
 
