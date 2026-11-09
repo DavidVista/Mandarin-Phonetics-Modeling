@@ -6,10 +6,8 @@ def validate_model_config(model):
     _keys(model, {"id", "revision", "layer", "pooling", "sample_rate", "mono", "padding", "dtype", "device"}, {"processor"}, "model")
     if not isinstance(model["revision"], str) or not model["revision"]:
         raise ValueError("model revision is required")
-    if model["pooling"] not in {"mean_all", "mean_valid"} or model["padding"] not in {"legacy_one_second", "none"}:
-        raise ValueError("unsupported pooling or padding")
-    if model["pooling"] == "mean_valid":
-        raise ValueError("mean_valid is unsupported until padding masks can be proven correct")
+    if model["pooling"] != "mean_all" or model["padding"] != "none":
+        raise ValueError("model requires pooling=mean_all and padding=none")
     if model["dtype"] != "float32" or not isinstance(model["mono"], bool) or not isinstance(model["layer"], int) or isinstance(model["layer"], bool):
         raise ValueError("model requires dtype=float32, boolean mono, and integer layer")
     if not isinstance(model["device"], str) or not model["device"]:

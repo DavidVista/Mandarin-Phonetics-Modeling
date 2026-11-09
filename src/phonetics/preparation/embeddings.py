@@ -70,7 +70,6 @@ class TransformersBackend:
         self.model.eval()
 
     def __call__(self, entry, config):
-        import numpy as np
         samples, sample_rate = _read_audio(Path(entry["path"]), mono=config["mono"])
         if sample_rate != config["sample_rate"]:
             try:
@@ -78,21 +77,13 @@ class TransformersBackend:
             except ImportError as exc:
                 raise RuntimeError("librosa is required for resampling") from exc
             samples = librosa.resample(samples, orig_sr=sample_rate, target_sr=config["sample_rate"])
-        if config["padding"] == "legacy_one_second" and len(samples) < config["sample_rate"]:
-            samples = np.pad(samples, (0, config["sample_rate"] - len(samples)))
         inputs = self.processor(samples, sampling_rate=config["sample_rate"], return_tensors="pt",
-                                padding=config["padding"] != "none")
+                                padding=False)
         inputs = {key: value.to(config["device"]) for key, value in inputs.items()}
         with self.torch.inference_mode():
             output = self.model(**inputs, output_hidden_states=True)
         hidden = output.hidden_states[int(config["layer"])]
-        if config["pooling"] == "mean_all":
-            pooled = hidden.mean(dim=1)
-        else:
-            if "attention_mask" not in inputs or not hasattr(self.model, "_get_feature_vector_attention_mask"):
-                raise ValueError("mean_valid requires model feature-vector attention-mask support")
-            mask = self.model._get_feature_vector_attention_mask(hidden.shape[1], inputs["attention_mask"])
-            pooled = (hidden * mask.unsqueeze(-1)).sum(dim=1) / mask.sum(dim=1, keepdim=True)
+        pooled = hidden.mean(dim=1)
         return pooled[0].detach().cpu().to(self.torch.float32).numpy()
 
 
