@@ -83,16 +83,27 @@ def _write_state(path, state):
         Path(name).unlink(missing_ok=True)
 
 
-def load_state(config):
+def _state_identity(config):
     if config['schema_version'] != 2:
         raise ValueError('orchestration requires configuration schema 2')
+    return {'config': config, 'sdk_sha256': content_hash(sdk_hashes()),
+            'acoustic_source_sha256': (_manifest_pin(config['acoustic']['existing_bundle'])
+                                        if config['acoustic']['existing_bundle'] else None)}
+
+
+def load_state(config, *, _allow_pending_training_sdk=False):
+    identity = _state_identity(config)
     path = Path(config['paths']['state'])
-    identity = {'config': config, 'sdk_sha256': content_hash(sdk_hashes()),
-                'acoustic_source_sha256': (_manifest_pin(config['acoustic']['existing_bundle'])
-                                            if config['acoustic']['existing_bundle'] else None)}
     if path.exists():
         state = _read(path)
-        if state.get('schema_version') != 1 or state.get('identity') != identity:
+        stored = state.get('identity', {})
+        pending = state.get('waiting') or {}
+        # Import can finish an already issued training job after an SDK upgrade.
+        upgrade = (_allow_pending_training_sdk and isinstance(pending, dict) and pending.get('stage') == 'training'
+                   and isinstance(stored, dict)
+                   and isinstance(stored.get('sdk_sha256'), str)
+                   and {**stored, 'sdk_sha256': identity['sdk_sha256']} == identity)
+        if state.get('schema_version') != 1 or (stored != identity and not upgrade):
             raise ValueError('configuration or SDK changed; select a new state path/run ID')
         return state
     return {'schema_version': 1, 'identity': identity, 'completed': {}, 'waiting': None}
@@ -189,14 +200,17 @@ def create_job(config, stage, input_path, *, model_id=None, workflow=None, _gene
             'model_id': model_id, 'workflow_id': workflow['id'] if workflow else None}
 
 
-def validate_job(path, *, expected_sources=None):
+def validate_job(path, *, expected_sources=None, expected_sdk_sha256=None):
     root = Path(path)
     manifest = validate_bundle(root, 'pipeline_job')
     job = _read(root / 'job.json')
     identity = {k: v for k, v in job.items() if k != 'job_id'}
     if identity != manifest['identity'] or content_hash(identity) != job['job_id']:
         raise ValueError('job identity mismatch')
-    if identity['sources'] != (sdk_hashes() if expected_sources is None else expected_sources):
+    if expected_sdk_sha256 is not None:
+        if content_hash(identity['sources']) != expected_sdk_sha256:
+            raise ValueError('job SDK differs from the pending state SDK')
+    elif identity['sources'] != (sdk_hashes() if expected_sources is None else expected_sources):
         raise ValueError('job SDK differs from the executing SDK')
     if identity['input_manifest_sha256'] and not identity.get('external_input') and _manifest_pin(root / 'input') != identity['input_manifest_sha256']:
         raise ValueError('job input pin mismatch')
@@ -222,10 +236,8 @@ def execute_job(path, destination, *, allow_execution=False, input_path=None):
             if _manifest_pin(selected) != job['input_manifest_sha256']:
                 raise ValueError('selected experiment manifest does not match the job')
             from .training import train_experiment
-            result = train_experiment(selected, runs_root=temporary / 'runs',
-                                      expected_manifest_sha256=job['input_manifest_sha256'], **job['parameters'])
-            shutil.move(str(result['run_dir']), temporary / 'payload')
-            shutil.rmtree(temporary / 'runs')
+            train_experiment(selected, runs_root=temporary / 'runs',
+                             expected_manifest_sha256=job['input_manifest_sha256'], **job['parameters'])
         else:
             from .workflows import run_packaged_workflow
             run_packaged_workflow(root, temporary / 'payload')
@@ -268,11 +280,13 @@ def validate_training_result(root, job):
 
 
 def import_result(config, result_path):
-    state = load_state(config)
+    state = load_state(config, _allow_pending_training_sdk=True)
     pending = state['waiting']
     if not pending:
         raise ValueError('pipeline has no pending notebook result')
-    job = validate_job(pending['path'])
+    job = validate_job(pending['path'], expected_sdk_sha256=state['identity']['sdk_sha256'])
+    if job['job_id'] != pending['job_id'] or job['stage'] != pending['stage']:
+        raise ValueError('job identity differs from the pending state')
     root = Path(result_path)
     validate_bundle(root, 'pipeline_result', identity={'job_id': job['job_id']})
     receipt = _read(root / 'receipt.json')
@@ -289,9 +303,16 @@ def import_result(config, result_path):
         target = Path(config['paths']['acoustic'])
         key = 'prepare-embeddings'
     elif job['stage'] == 'training':
-        manifest = validate_training_result(payload, job)
         expected_config = job['input_config'] if job.get('external_input') else _read(Path(pending['path']) / 'input' / 'config.json')
         experiment_id = job['experiment_id'] if job.get('external_input') else _read(Path(pending['path']) / 'input' / 'manifest.json')['identity']['experiment_id']
+        if (root / 'runs').exists():
+            if payload.exists():
+                raise ValueError('training result contains both runs and legacy payload')
+            parts = (experiment_id, job['parameters']['model_id'], job['parameters']['run_id'])
+            payload = root / 'runs'
+            for part in parts:
+                payload = payload / safe_id(part)
+        manifest = validate_training_result(payload, job)
         if (manifest['config'] != expected_config or manifest['seeds'] != list(range(expected_config['seed_count']))
                 or manifest['experiment_id'] != experiment_id):
             raise ValueError('training result config or seeds differ from the experiment')
@@ -322,6 +343,7 @@ def import_result(config, result_path):
             shutil.copytree(payload, temporary, dirs_exist_ok=True)
     state['completed'][key] = {'path': str(target), 'manifest_sha256': _manifest_pin(target), 'job_id': job['job_id']}
     state['waiting'] = None
+    state['identity'] = _state_identity(config)
     _write_state(config['paths']['state'], state)
     return target
 

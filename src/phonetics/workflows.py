@@ -19,7 +19,7 @@ PATH_FIELDS = {
 PARAMETERS = {
     'dimsim-distribution': set(),
     'dimsim-parser-alignment': {'seed', 'bootstrap_replicates', 'confidence', 'atol', 'rtol'},
-    'reference-geometry': {'tolerance'},
+    'reference-geometry': {'tolerance', 'base_manifest_sha256'},
     'training-visualization': {'training_runs', 'summary_run_id', 'mode'},
     'evaluation-visualization': {'derived_run_ids', 'derived_mode'},
 }
@@ -103,6 +103,15 @@ def _verify_files(root):
 def workflow_pins(workflow):
     pins = {}
     for name, path in _inputs(workflow).items():
+        if workflow['workflow'] == 'reference-geometry' and name == 'base_root':
+            manifest_path = Path(path) / 'manifest.json'
+            if not manifest_path.is_file():
+                raise ValueError(f'Base embedding bundle is missing at {path}; supply a bundle with padding=none before running the report')
+            expected = workflow['parameters'].get('base_manifest_sha256')
+            if expected is not None and sha256_file(manifest_path) != expected:
+                raise ValueError(f'Base embedding manifest SHA256 mismatch at {path}')
+            if json.loads(manifest_path.read_text(encoding='utf-8')).get('model', {}).get('padding') != 'none':
+                raise ValueError(f'Base embedding bundle at {path} requires padding=none')
         manifest = _verify_files(path)
         if manifest.get('bundle_type') == 'character_experiment':
             raise ValueError('existing research workflows do not accept character experiment bundles; character evaluation is separate')
@@ -112,13 +121,15 @@ def workflow_pins(workflow):
 
 def package_workflow(workflow, destination):
     workflow_pins(workflow)
-    from .execution import _copy_tree, preflight_copy
+    from .execution import _copy_tree, preflight_copy, safe_id
     preflight_copy(_inputs(workflow).values(), destination)
     copied = copy.deepcopy(workflow)
     for index, (name, path) in enumerate(_inputs(workflow).items()):
         relative = f'inputs/{index}'
         if name.startswith('training:'):
-            _copy_tree(path, Path(destination) / relative, ignore=shutil.ignore_patterns('*.pt'))
+            model = safe_id(name.split(':', 1)[1])
+            relative = f'inputs/{model}/{safe_id(Path(path).name)}'
+            _copy_tree(path, Path(destination) / relative, ignore=shutil.ignore_patterns('*.pt', 'events.jsonl'))
         else:
             _copy_tree(path, Path(destination) / relative)
         if name.startswith('training:'):

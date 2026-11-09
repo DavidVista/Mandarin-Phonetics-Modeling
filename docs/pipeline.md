@@ -33,7 +33,7 @@ The last command executes ML stages only when their modes select local computati
 
 Notebook generation never executes an ML stage. Training generation validates the original experiment once per command for all objectives, then writes small immutable reference jobs and notebooks without copying the experiment or writing a second SDK snapshot into each job. Upload the original experiment bundle once as a dataset and attach it to each training notebook. The job manifest and SDK are embedded; the input locator selects exactly one bundle by its pinned manifest SHA256 and training validates its contents. Acoustic and visualization stages retain their input packages. Training generates one job per configured objective, preserving its seed list. The pipeline hands off one job at a time; manual generation can prepare all training notebooks together.
 
-The dependency cell runs before project imports and installs supplementary packages only. Torch 2.11.0 must already be installed with the appropriate CPU/CUDA build for ML jobs. The final cell executes the stage and exports a result ZIP. Download and extract that ZIP:
+The dependency cell runs before project imports and installs supplementary packages only. Torch 2.11.0 must already be installed with the appropriate CPU/CUDA build for ML jobs. The final cell executes the stage and exports a result ZIP. Training archives preserve `runs/<experiment_id>/<model_id>/<run_id>/`, and the cell prints that path. For manual transfer, merge the contents of the archive's `runs/` directory into `paths.runs`. Keep the archive root with its receipt and manifest when importing a pending job. The importer accepts both the run tree and the legacy `payload/` layout. After an SDK upgrade, import a pending training result with the original config, state and job directory. The importer verifies the job against its recorded SDK and updates the state to the current SDK after successful import.
 
 ```sh
 phonetics import-result --config configs/experiment.json --result downloaded/result
@@ -96,13 +96,16 @@ Other available analysis jobs:
   "id": "reference-geometry-1",
   "workflow": "reference-geometry",
   "parameters": {
-    "base_root": "../datasets/pinyin-embeddings/selected-base",
+    "base_root": "../datasets/pinyin-embeddings/selected-base-none",
+    "base_manifest_sha256": "<SHA256 of the selected base manifest.json>",
     "zh_cn_root": "../datasets/pinyin-embeddings/selected-zh-cn",
     "evaluation_root": "../datasets/evaluations/selected-geometry-evaluation",
     "tolerance": 1e-12
   }
 }
 ```
+
+Before running the report on a fresh checkout, obtain the pinned `acoustic_embeddings` bundle with `padding: none` and `pooling: mean_all` and place it at `base_root`. To use a replacement, prepare it separately in the same bundle format using the chosen model revision, audio inventory and extraction settings. Select a new bundle path and report ID, then set `base_manifest_sha256` to the replacement manifest's actual SHA256. The report consumes prepared embeddings and checks the base bundle before calculation.
 
 The reference geometry workflow uses the common inventory, records missing
 labels, verifies matching source audio for both checkpoints and writes one

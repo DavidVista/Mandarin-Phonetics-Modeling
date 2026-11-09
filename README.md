@@ -120,7 +120,7 @@ The source stage downloads the pinned official Chinese Lessons archive and recor
 
 At a notebook stage, `run` prints `status: waiting` and the notebook and job paths. Training generation validates the experiment once for all objectives and creates small reference jobs. Upload the original experiment bundle as a dataset and attach it to the training notebooks; their job manifests and SDK are embedded. Acoustic and visualization jobs use accompanying input packages. Acoustic notebooks are generated after inventory preparation; training notebooks after experiment preparation. Running the final cell executes the configured stage. ML notebooks require Torch 2.11.0, installed separately with the CPU/CUDA build appropriate to the selected device.
 
-Download the resulting ZIP, extract it, then continue:
+Download and extract the result ZIP. A training archive contains `runs/<experiment_id>/<model_id>/<run_id>/`. For manual transfer, merge the contents of the archive's `runs/` into the configured runs directory. To verify and register a pending job, pass the extracted archive root to the importer:
 
 ```sh
 phonetics import-result --config configs/experiment.json --result path/to/extracted-result

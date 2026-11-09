@@ -103,11 +103,12 @@
   },
   "analysis": [
     {
-      "id": "char-zh-cn-reference-geometry-v3",
+      "id": "char-zh-cn-reference-geometry-v4",
       "workflow": "reference-geometry",
       "parameters": {
         "evaluation_root": "../datasets/evaluations/char-zh-cn-geometry-v1",
-        "base_root": "../datasets/pinyin-embeddings/duyu-chinese-lessons-base-v1",
+        "base_root": "../datasets/pinyin-embeddings/duyu-chinese-lessons-base-none-v1",
+        "base_manifest_sha256": "1958415e79c407bf8cd5db7f2e06fa71ba667d09c85207b890a7dabcc0382035",
         "zh_cn_root": "../datasets/pinyin-embeddings/duyu-chinese-lessons-zh-cn-v1",
         "tolerance": 1e-12
       }

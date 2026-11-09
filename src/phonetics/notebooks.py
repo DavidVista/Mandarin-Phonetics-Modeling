@@ -118,6 +118,8 @@ result = execute_job(JOB_PATH, OUTPUT_PATH, allow_execution=True, input_path=glo
 import shutil
 archive = shutil.make_archive(str(OUTPUT_PATH), "zip", root_dir=result)
 print("Result:", result, "Download:", archive)
+if job["stage"] == "training":
+    print("Run tree:", Path("runs") / job["experiment_id"] / job["parameters"]["model_id"] / job["parameters"]["run_id"])
 '''
     title = f'{stage.capitalize()} — {job["parameters"].get("model_id", job_id[:12])}'
     document = {'nbformat': 4, 'nbformat_minor': 5,

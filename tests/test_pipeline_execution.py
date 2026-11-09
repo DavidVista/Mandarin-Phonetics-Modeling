@@ -40,11 +40,13 @@ class ExecutionTests(unittest.TestCase):
     def mock_stage(self, config, stage, **kwargs):
         return self.acoustic if stage == 'prepare-embeddings' else self.experiment
 
-    def make_result(self, pending):
+    def make_result(self, pending, *, run_tree=False):
         from phonetics.execution import validate_job
         job = validate_job(pending['path'])
         root = self.root / 'download'
         payload = root / 'payload'
+        if run_tree:
+            payload = root / 'runs' / job['experiment_id'] / job['parameters']['model_id'] / job['parameters']['run_id']
         payload.mkdir(parents=True)
         (payload / 'opaque.pt').write_bytes(b'opaque checkpoint fixture; never deserialize')
         cfg = self.fixture.config
@@ -73,11 +75,34 @@ class ExecutionTests(unittest.TestCase):
             waiting = run_pipeline(self.config)
             self.assertEqual((waiting['status'], waiting['model_id']), ('waiting', 'syllable'))
             self.assertEqual(run_pipeline(self.config)['job_id'], waiting['job_id'])
-            imported = import_result(self.config, self.make_result(waiting))
+            imported = import_result(self.config, self.make_result(waiting, run_tree=True))
             self.assertTrue((imported / 'opaque.pt').exists())
             self.assertIsNone(load_state(self.config)['waiting'])
             self.assertEqual(run_pipeline(self.config)['model_id'], 'components')
         self.assertNotIn('torch', sys.modules)
+
+    def test_import_legacy_training_payload_after_sdk_upgrade(self):
+        from phonetics.execution import sdk_files
+        old_sources = sdk_files()
+        old_sources['execution.py'] += '\n# Previous SDK snapshot\n'
+        with patch('phonetics.execution.sdk_files', return_value=old_sources), patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
+            pending = run_pipeline(self.config)
+            result = self.make_result(pending)
+            old_state = load_state(self.config)
+        with self.assertRaisesRegex(ValueError, 'configuration or SDK changed'):
+            load_state(self.config)
+        mismatched = copy.deepcopy(old_state)
+        mismatched['identity']['sdk_sha256'] = '0' * 64
+        _write_state(self.config['paths']['state'], mismatched)
+        with self.assertRaisesRegex(ValueError, 'job SDK differs from the pending state SDK'):
+            import_result(self.config, result)
+        self.assertFalse(Path(self.config['paths']['runs']).exists())
+        _write_state(self.config['paths']['state'], old_state)
+        imported = import_result(self.config, result)
+        self.assertTrue((imported / 'opaque.pt').exists())
+        self.assertIsNone(load_state(self.config)['waiting'])
+        with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
+            self.assertEqual(run_pipeline(self.config)['model_id'], 'components')
 
     def test_wrong_receipt_cannot_publish_or_advance(self):
         with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
