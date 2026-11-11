@@ -114,28 +114,31 @@ def render_page(path, labels, components, distances, maps, tables, *, evaluation
     Path(path).write_text(re.sub(r"@@(\w+)@@", lambda match: replacements[match[1]], PAGE), encoding="utf-8")
 
 
-def render_distance_maps(root, labels, distances, order, *, provenance):
+REFERENCE_MAPS = (
+    ("reference_dimsim_distances", "dimsim-distances"),
+    ("reference_base_cosine_distances", "base-cosine-distances"),
+    ("reference_zh_cn_cosine_distances", "zh-cn-cosine-distances"),
+)
+
+
+def render_distance_maps(root, labels, distances, order, *, provenance, figures=REFERENCE_MAPS):
     from matplotlib import pyplot as plt
     from matplotlib.ticker import MaxNLocator
 
     protocol = load_protocol()
     apply_style(protocol)
-    figures = (
-        ("reference_dimsim_distances", "dimsim-distances"),
-        ("reference_base_cosine_distances", "base-cosine-distances"),
-        ("reference_zh_cn_cosine_distances", "zh-cn-cosine-distances"),
-    )
     specs = [protocol.figure(figure_id) for figure_id, _ in figures]
     maxima = {}
     for spec, matrix in zip(specs, distances):
         group = spec["color_scale_group"]
-        maxima[group] = max(maxima.get(group, 0), float(np.max(matrix)))
+        maxima[group] = max(maxima.get(group, 0), float(np.nanmax(matrix)))
     for index, ((figure_id, stem), spec) in enumerate(zip(figures, specs)):
         figure, (axis,) = layout(1, protocol)
         try:
             limit = maxima[spec["color_scale_group"]] or 1.0
+            cmap = plt.get_cmap(spec["colormap"]).with_extremes(bad="#bfbfbf")
             image = axis.imshow(distances[index][np.ix_(order, order)], origin="upper",
-                                interpolation="nearest", cmap=spec["colormap"], vmin=0, vmax=limit)
+                                interpolation="nearest", cmap=cmap, vmin=0, vmax=limit)
             axis.set(xlabel=spec["xlabel"], ylabel=spec["ylabel"], xticks=[], yticks=[])
             for label in axis.texts:
                 label.set_visible(False)

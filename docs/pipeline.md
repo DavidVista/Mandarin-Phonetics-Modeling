@@ -137,6 +137,47 @@ The audit scores both parsers on the selected inventory and publishes
 partner coverage for each eligible syllable. The historical threshold flag
 requires full partner coverage. Use a new run ID for each audit.
 
+## Encoder geometry
+
+The optional `encoder_geometry` section selects the five training runs, the
+hidden-state output root, an extraction device and batch size, and the report
+ID and tie tolerance. Its input is the sealed evaluation bundle selected by
+`evaluation`. The example uses CPU as a configuration value. Review the device
+and exact input dataset versions before extraction.
+
+```sh
+phonetics generate-notebooks --config configs/experiment.example.json --stage encoder-geometry
+```
+
+This creates two notebooks with pinned manifests and embedded source. Run the
+extraction notebook once per selected model. It processes the five checkpoints
+in order and exports a single ZIP containing one sealed artifact per seed.
+Running the final cell starts extraction with the selected model and device.
+After an approved run, extract its ZIP and verify and import it with:
+
+```sh
+phonetics import-hidden-states --config configs/experiment.example.json --model syllable --result PATH
+```
+
+The same extraction API is available via `extract-hidden-states --config ...
+--model ... --allow-execution`. It requires Torch 2.11.0. It encodes full
+sentences and exports only the evaluation positions, retaining UNK positions
+with explicit flags. The report notebook and local workflow use saved exports
+and run without Torch:
+
+```sh
+phonetics workflow --config configs/experiment.example.json --id char-zh-cn-encoder-geometry-v1
+```
+
+If Arial is supplied as a Kaggle input dataset, set `FONT_FILES` in the
+report notebook configuration. The final cell registers the files with
+Matplotlib before validating inputs and computing the report.
+
+Keep the generated report directory together when opening `encoder_geometry.html`.
+It loads the selected seed view locally and displays DIMSIM with two selected
+models. The across-seeds view averages matrices and displays seedwise metric
+means and sample SD. The five static distance maps show mean distances.
+
 ## Visualization
 
 Add jobs to `visualization`. Both workflows are available locally through `workflow` and in optional generated notebooks. They render existing numerical results and preserve the approved style; the required Arial font must be installed. The training report supports historical shared-population logs and character experiment logs. It verifies matched training, validation and vocabulary hashes within each seed across models, and a common test hash across seeds. The character report includes paired test differences for shared metrics and reports sample SD across seeds.

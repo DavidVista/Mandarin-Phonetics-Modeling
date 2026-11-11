@@ -14,7 +14,7 @@ def load_config(path):
     version = value.get('schema_version') if isinstance(value, dict) else None
     if version == 2:
         required |= {'execution', 'analysis', 'visualization', 'notebooks'}
-    optional = {"evaluation"} if version == 2 else set()
+    optional = {"evaluation", "encoder_geometry"} if version == 2 else set()
     if (not isinstance(value, dict) or not required <= set(value) <= required | optional
             or type(version) is not int or version not in (1, 2)):
         raise ValueError("invalid pipeline configuration schema")
@@ -49,6 +49,14 @@ def load_config(path):
     if "evaluation" in value:
         from .evaluation.geometry_bundle import resolve_evaluation_config
         value["evaluation"] = resolve_evaluation_config(value["evaluation"], resolve)
+    if "encoder_geometry" in value:
+        from .encoder_jobs import resolve_encoder_config
+        if "evaluation" not in value:
+            raise ValueError("encoder_geometry requires the evaluation config section")
+        value["encoder_geometry"] = resolve_encoder_config(value["encoder_geometry"], resolve)
+        if any(job["id"] == value["encoder_geometry"]["id"]
+               for group in ("analysis", "visualization") for job in value[group]):
+            raise ValueError("encoder_geometry requires a unique workflow ID")
     from .experiment import _validate_config
     _validate_config(value['experiment'], value['experiment']['architecture']['acoustic_dim'])
     return value

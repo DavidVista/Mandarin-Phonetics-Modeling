@@ -20,7 +20,15 @@ def main(argv=None):
     run.add_argument('--allow-training', action='store_true')
     generate = commands.add_parser('generate-notebooks', help='Generate notebooks and portable input jobs from one config')
     generate.add_argument('--config', required=True)
-    generate.add_argument('--stage', choices=('ready', 'acoustic', 'training', 'visualization'), default='ready')
+    generate.add_argument('--stage', choices=('ready', 'acoustic', 'training', 'visualization', 'encoder-geometry'), default='ready')
+    extraction = commands.add_parser("extract-hidden-states", help="Export one encoder model over its configured seeds")
+    extraction.add_argument("--config", required=True)
+    extraction.add_argument("--model", required=True)
+    extraction.add_argument("--allow-execution", action="store_true")
+    hidden = commands.add_parser("import-hidden-states", help="Verify and import an extracted hidden-state bundle")
+    hidden.add_argument("--config", required=True)
+    hidden.add_argument("--model", required=True)
+    hidden.add_argument("--result", required=True)
     receive = commands.add_parser('import-result', help='Verify and import the pending notebook result')
     receive.add_argument('--config', required=True)
     receive.add_argument('--result', required=True, help='Extracted result directory containing receipt.json and manifest.json')
@@ -48,7 +56,16 @@ def main(argv=None):
     train.add_argument("--allow-training", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.command in ('run', 'generate-notebooks', 'import-result', 'workflow'):
+        if args.command in ("extract-hidden-states", "import-hidden-states"):
+            from .pipeline import load_config
+            from .encoder_jobs import extract_configured, import_hidden_states
+            config = load_config(args.config)
+            if args.command == "extract-hidden-states":
+                path = extract_configured(config, args.model, allow_execution=args.allow_execution)
+            else:
+                path = import_hidden_states(config, args.model, args.result)
+            print(json.dumps({"path": str(path)}))
+        elif args.command in ('run', 'generate-notebooks', 'import-result', 'workflow'):
             from .pipeline import load_config
             config = load_config(args.config)
             if args.command == 'run':
@@ -62,6 +79,10 @@ def main(argv=None):
                 from .execution import import_result
                 result = {'path': str(import_result(config, args.result)), 'status': 'imported'}
             else:
+                if args.id == config.get("encoder_geometry", {}).get("id"):
+                    from .encoder_jobs import run_configured_report
+                    print(json.dumps({"path": str(run_configured_report(config))}))
+                    return 0
                 from .workflows import run_workflow
                 jobs = [w for group in ('analysis', 'visualization') for w in config[group] if w['id'] == args.id]
                 if len(jobs) != 1:

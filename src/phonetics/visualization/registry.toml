@@ -339,3 +339,68 @@ scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "wav2vec2"
 colormap = "Greys"
+
+[figures.encoder_syllable_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Syllable cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["syllable"]
+order = ["syllable"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "encoder_cosine"
+colormap = "Greys"
+
+[figures.encoder_components_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Components cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["components"]
+order = ["components"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "encoder_cosine"
+colormap = "Greys"
+
+[figures.encoder_acoustic_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Acoustic cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["acoustic"]
+order = ["acoustic"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "encoder_cosine"
+colormap = "Greys"
+
+[figures.encoder_components_acoustic_lambda_1_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Components + Acoustic (lambda 1) cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["components-acoustic-lambda-1"]
+order = ["components-acoustic-lambda-1"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "encoder_cosine"
+colormap = "Greys"
+
+[figures.encoder_components_acoustic_lambda_10_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Components + Acoustic (lambda 10) cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["components-acoustic-lambda-10"]
+order = ["components-acoustic-lambda-10"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "encoder_cosine"
+colormap = "Greys"

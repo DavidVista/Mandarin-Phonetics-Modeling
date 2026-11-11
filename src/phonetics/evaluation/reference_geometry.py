@@ -27,27 +27,35 @@ def _rate(score, count):
     return float(score / count) if count else None
 
 
-def evaluate_geometry(labels, components, distances, *, tolerance):
+def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTEMS, contextual=False):
     """Process one anchor at a time. Map projections never drive table weights."""
     n = len(labels)
     distances = np.asarray(distances, dtype=np.float64)
-    if (n < 2 or len(set(labels)) != n or len(components) != n or distances.shape != (3, n, n)
-            or not np.isfinite(distances).all() or np.any(distances < 0)
-            or not np.array_equal(distances, distances.transpose(0, 2, 1))
-            or np.any(distances.diagonal(axis1=1, axis2=2))):
+    count_systems = len(systems)
+    if distances.shape != (count_systems, n, n):
+        raise ValueError("distance matrices do not match the system and label inventories")
+    diagonal = distances.diagonal(axis1=1, axis2=2)
+    availability = np.isfinite(diagonal[1:]).all(axis=0)
+    off_diagonal = distances[:, ~np.eye(n, dtype=bool)]
+    if (n < 2 or len(set(labels)) != n or len(components) != n or not np.isfinite(off_diagonal).all()
+            or np.any(distances < 0) or np.isinf(distances).any()
+            or not np.array_equal(distances, distances.transpose(0, 2, 1), equal_nan=True)
+            or np.any(diagonal[0]) or (not contextual and np.any(diagonal))
+            or (contextual and not np.all(np.isfinite(diagonal[1:]) == availability))):
         raise ValueError("invalid shared reference geometry distance views")
     masks = component_masks(components)
     if np.count_nonzero(masks == 7) != n:
         raise ValueError("duplicate component triples")
     left, right = np.triu_indices(n, k=1)
     candidate_changes = 7 ^ masks[left, right]
-    transition_totals = np.zeros((len(TRANSITIONS), 3, 5))
-    agreement_totals = np.zeros((3, 3, 3))
+    planned = np.zeros(len(TRANSITIONS), dtype=np.int64)
+    transition_totals = np.zeros((len(TRANSITIONS), count_systems, 5))
+    agreement_totals = np.zeros((3, count_systems, 3))
     controlled_anchors = np.zeros((len(TRANSITIONS), n), dtype=bool)
     agreement_anchors = np.zeros((3, n), dtype=bool)
-    anchor_wins = np.zeros((n, 3))
+    anchor_wins = np.zeros((n, count_systems))
     anchor_support = np.zeros(n, dtype=np.int64)
-    projections = np.full((2, 3, n, n), np.nan)
+    projections = np.full((2, count_systems, n, n), np.nan)
     projection_counts = np.zeros((2, n, n), dtype=np.int32)
     records, controlled_values = [], []
     transition_index = np.full((8, 8), -1)
@@ -64,6 +72,9 @@ def evaluate_geometry(labels, components, distances, *, tolerance):
         trade = distinct & (shared != low)
         same = distinct & (low == high)
         anchor_distances = distances[:, anchor]
+        planned += np.bincount(transition[controlled], minlength=len(TRANSITIONS))
+        if not availability[anchor]:
+            controlled &= distinct
         chosen = np.flatnonzero(controlled)
         if chosen.size:
             b = np.where(ml[chosen] > mr[chosen], left[chosen], right[chosen])
@@ -88,7 +99,7 @@ def evaluate_geometry(labels, components, distances, *, tolerance):
                 agree_count = np.bincount(inverse[valid], minlength=len(count))
                 controlled_anchors[code, anchor] = True
                 rows = []
-                for model in range(3):
+                for model in range(count_systems):
                     effect, win, score = effects[model, select], wins[model, select], scores[model, select]
                     sums = np.bincount(inverse, weights=effect)
                     successes = np.bincount(inverse, weights=win)
@@ -110,17 +121,18 @@ def evaluate_geometry(labels, components, distances, *, tolerance):
             endpoints = np.r_[a[valid], b[valid]]
             counts = np.bincount(endpoints, minlength=n)
             projection_counts[index - 1, anchor] = counts
-            for model in range(3):
+            for model in range(count_systems):
                 totals = np.bincount(endpoints, weights=np.tile(scores[model], 2), minlength=n)
                 np.divide(totals, counts, out=projections[index - 1, model, anchor], where=counts > 0)
 
     controlled_rows, agreement_rows, anchor_rows, anchor_summary, rank_rows = [], [], [], [], []
-    for model, name in enumerate(SYSTEMS):
+    for model, name in enumerate(systems):
         for index, (low, high) in enumerate((*TRANSITIONS, (None, None))):
             totals = transition_totals[:, model].sum(axis=0) if low is None else transition_totals[index, model]
             count, wins, effect, ref_count, agree = totals
             anchors = controlled_anchors.any(axis=0) if low is None else controlled_anchors[index]
             controlled_rows.append({
+                **({"planned_triples": int(planned.sum() if low is None else planned[index])} if contextual else {}),
                 "system": name, "from_mask": MASKS[low] if low is not None else "All",
                 "to_mask": MASKS[high] if high is not None else "All", "triples": int(count),
                 "anchors": int(anchors.sum()), "win_rate": _rate(wins, count),
@@ -147,10 +159,10 @@ def evaluate_geometry(labels, components, distances, *, tolerance):
     tables = {"controlled_match": controlled_rows, "dimsim_agreement": agreement_rows,
               "anchor_win_rates": anchor_rows, "anchor_summary": anchor_summary,
               "pairwise_spearman": rank_rows}
-    tables.update(_profiles(labels, distances, masks, left, right))
+    tables.update(_profiles(labels, distances, masks, left, right, systems=systems))
     maps = {
         "masks": masks, "controlled_cells": np.asarray(records, dtype=np.int32).reshape(-1, 5),
-        "controlled_values": np.concatenate(controlled_values) if controlled_values else np.empty((0, 3, 3)),
+        "controlled_values": np.concatenate(controlled_values) if controlled_values else np.empty((0, count_systems, 3)),
         "agreement": projections, "agreement_counts": projection_counts,
         "neighborhood": np.argsort(distances[0], axis=1, kind="stable"),
         "component_order": np.asarray(sorted(range(n), key=lambda index: (tuple(components[index]), labels[index]))),
@@ -158,24 +170,29 @@ def evaluate_geometry(labels, components, distances, *, tolerance):
     return tables, maps
 
 
-def _profiles(labels, distances, masks, left, right):
+def _profiles(labels, distances, masks, left, right, *, systems):
     n = len(labels)
     rows, summary, gains, residuals = [], [], [], []
-    for model, system in enumerate(SYSTEMS):
+    for model, system in enumerate(systems):
         similarity = -distances[model] if model == 0 else 1 - distances[model]
         values, pair_masks = similarity[left, right], masks[left, right]
         counts = np.bincount(pair_masks, minlength=8)
         sums = np.bincount(pair_masks, weights=values, minlength=8)
-        counts[7] = n
-        sums[7] = similarity.diagonal().sum()
+        diagonal = similarity.diagonal()
+        diagonal = diagonal[np.isfinite(diagonal)]
+        counts[7] = len(diagonal)
+        sums[7] = diagonal.sum()
         means = np.divide(sums, counts, out=np.full(8, np.nan), where=counts > 0)
         for mask in range(8):
             rows.append({"system": system, "mask": MASKS[mask], "pairs": int(counts[mask]),
                          "mean_similarity": float(means[mask]) if counts[mask] else None})
         error = values - means[pair_masks]
         for include_diagonal in (False, True):
-            y = np.r_[values, similarity.diagonal()] if include_diagonal else values
+            y = np.r_[values, diagonal] if include_diagonal else values
             sse = np.dot(error, error)
+            if include_diagonal and len(diagonal):
+                diagonal_error = diagonal - means[7]
+                sse += np.dot(diagonal_error, diagonal_error)
             sst = np.dot(y - y.mean(), y - y.mean())
             summary.append({"system": system, "includes_full_match": include_diagonal,
                             "pairs": len(y), "r_squared": float(1 - sse / sst) if sst else None})
