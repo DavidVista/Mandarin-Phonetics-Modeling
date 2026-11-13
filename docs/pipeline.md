@@ -9,7 +9,7 @@
 | `model` | Acoustic model/processor identifiers, exact revision, device, precision, extraction layer, audio normalization and pooling |
 | `acoustic` | Existing reference directory or null; optional expected manifest SHA256 (null computes and records it automatically) |
 | `experiment_id` | Immutable experiment directory name |
-| `experiment` | Sentence count, number of seeds, fixed split protocol, encoder, heads, training settings and selected objectives |
+| `experiment` | Per-seed sentence count, optional common test size, number of seeds, encoder, heads, training settings and selected objectives |
 | `evaluation` | Optional pinned character experiment, output root and ID, excluded tone-labelled Pinyin forms and their source audit |
 | `execution` | Local/notebook mode by eligible stage, explicit training device and run ID |
 | `notebooks` | Whether the first code cell installs supplementary dependencies |
@@ -19,6 +19,10 @@
 The current encoder is `experiment.architecture.encoder.type: char_bilstm`. Its embedding dimension, hidden units per direction and number of layers are validated positive integers. Context dimension is derived as twice the hidden dimension. Head settings specify classification hidden dimension and dropout. Acoustic output dimension must match the actual targets. Unknown encoder types, including `bert`, fail before execution. A future BERT adapter must implement character alignment and its own validated config; selecting a name alone cannot supply that implementation.
 
 Supported training changes are `epochs`, `batch_size` and `learning_rate`; all must be positive and finite with integer epochs/batch size. Other optimizer, scheduler, selection and loss settings retain the current protocol and are validated rather than silently ignored. Old flat architecture configs inside existing bundles remain readable without rewriting those bundles.
+
+`experiment.sample_size` sets the total train and validation sentences per seed. Validation uses `sample_size // 10`. The optional `experiment.test_size` sets the exact number of sentences in the shared test and must be a positive integer. If omitted, the test also uses `sample_size // 10`. The eligible corpus must have at least `sample_size + test_size` sentences, using the effective test size.
+
+For a new experiment with 90,000 train and 10,000 validation sentences per seed and a shared test of 100,000 sentences, set `experiment.sample_size` and `experiment.test_size` to `100000` and select a new `experiment_id`.
 
 ## Preparation and execution modes
 

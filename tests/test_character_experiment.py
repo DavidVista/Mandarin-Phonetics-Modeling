@@ -96,6 +96,29 @@ class CharacterExperimentTests(unittest.TestCase):
         for name in ('splits.json', 'seeds/0/vocabulary.json', 'seeds/1/input_hashes.json'):
             self.assertEqual((first / name).read_bytes(), (second / name).read_bytes())
 
+    def test_explicit_common_test_size_preserves_per_seed_sizes(self):
+        self.config['test_size'] = 15
+        first, second = self.build('a'), self.build('b')
+        loaded = load_experiment(first)
+        self.assertEqual(loaded['config']['test_size'], 15)
+        self.assertEqual((first / 'splits.json').read_bytes(), (second / 'splits.json').read_bytes())
+        test = set(loaded['splits']['test'])
+        self.assertEqual(len(test), 15)
+        for split in loaded['splits']['seeds'].values():
+            self.assertEqual((len(split['train']), len(split['validation'])), (18, 2))
+            self.assertTrue(test.isdisjoint(split['train']))
+            self.assertTrue(test.isdisjoint(split['validation']))
+
+    def test_explicit_common_test_size_requires_a_positive_integer_and_enough_rows(self):
+        for invalid in (None, True, 0, -1, 2.0, '2'):
+            with self.subTest(test_size=invalid):
+                self.config['test_size'] = invalid
+                with self.assertRaisesRegex(ValueError, 'test_size must be a positive integer'):
+                    self.build()
+        self.config['test_size'] = 16
+        with self.assertRaisesRegex(ValueError, 'too small'):
+            self.build()
+
     def test_vocabulary_leak_rejected_after_outer_reseal(self):
         root = self.build()
         manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))

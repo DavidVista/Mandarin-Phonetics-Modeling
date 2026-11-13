@@ -34,12 +34,14 @@ def default_experiment_config(acoustic_dim=1024):
 
 def _validate_config(value, acoustic_dim):
     expected = default_experiment_config(acoustic_dim)
-    if not isinstance(value, dict) or set(value) != set(expected):
+    if not isinstance(value, dict) or set(value) - {'test_size'} != set(expected):
         raise ValueError('invalid character experiment config keys')
     cfg = copy.deepcopy(value)
     for key in ('sample_size', 'seed_count'):
         if type(cfg[key]) is not int or cfg[key] <= 0:
             raise ValueError(f'{key} must be a positive integer')
+    if 'test_size' in cfg and (type(cfg['test_size']) is not int or cfg['test_size'] <= 0):
+        raise ValueError('test_size must be a positive integer')
     for key in ('schema_version', 'test_seed', 'test_fraction', 'validation_fraction'):
         if content_hash(cfg[key]) != content_hash(expected[key]):
             raise ValueError(f'{key} conflicts with the experiment protocol')
@@ -63,7 +65,7 @@ def _validate_config(value, acoustic_dim):
     if not isinstance(ids, list) or not ids or [canonical_model_id(x) for x in ids] != ids or len(set(ids)) != len(ids):
         raise ValueError('model_ids must be unique canonical identifiers')
     if cfg['sample_size'] // 10 < 1:
-        raise ValueError('sample_size must allow nonempty test and validation')
+        raise ValueError('sample_size must allow nonempty validation')
     return cfg
 
 
@@ -76,7 +78,8 @@ def make_splits(ids, config):
     if len(set(ids)) != len(ids):
         raise ValueError('duplicate sample IDs')
     n, count = config['sample_size'], config['seed_count']
-    test_size, validation_size = n // 10, n // 10
+    test_size = config.get('test_size', n // 10)
+    validation_size = n // 10
     if len(ids) < n + test_size:
         raise ValueError('eligible corpus is too small for sample_size plus common test')
     test = sorted(random.Random(stream_seed(config['test_seed'], 'test')).sample(ids, test_size))
