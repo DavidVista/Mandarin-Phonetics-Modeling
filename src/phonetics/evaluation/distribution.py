@@ -182,6 +182,7 @@ def compute_retained_population(root: str | Path, *, expected_manifest_sha256: s
         gold = (group["initial"], group["final"], int(group["tone"]))
         if gold != (parsed.library_initial, parsed.library_final, parsed.tone):
             parser_mismatches.add(label)
+    excluded = set(manifest["identity"]["inventory"]["excluded_by_list"]) if geometry else set()
     pairs=list(_jsonl(root/"pairs/syllable.jsonl")); expected_count=len(groups)*(len(groups)-1)//2
     if len(pairs)!=expected_count: raise ValueError("pair population is incomplete")
     expected_endpoints=((groups[i]["group_id"],groups[j]["group_id"]) for i in range(len(groups)) for j in range(i+1,len(groups)))
@@ -196,6 +197,8 @@ def compute_retained_population(root: str | Path, *, expected_manifest_sha256: s
         if any(pair.get(key)!=value or (isinstance(value,bool) and type(pair.get(key)) is not bool) for key,value in required_values.items()): raise ValueError(f"pair labels, flags, mask, or identity mismatch at row {number}")
         bundled=float(pair.get("dimsim_distance",float("nan")))
         if not math.isfinite(bundled) or bundled<0: raise ValueError(f"invalid bundle distance at row {number}")
+        if left in excluded or right in excluded:
+            continue
         public=metric(left,right); reverse=metric(right,left); formula=reconstruct_distance(left,right)
         if not all(math.isfinite(value) and value >= 0 for value in (public, reverse, formula["distance"])):
             raise ValueError(f"invalid recomputed distance at row {number}")
@@ -211,6 +214,12 @@ def compute_retained_population(root: str | Path, *, expected_manifest_sha256: s
             "left_gold_tone": int(left_group["tone"]), "right_gold_tone": int(right_group["tone"]),
             "parser_mismatch": left in parser_mismatches or right in parser_mismatches,
         })
+    groups = [group for group in groups if group["pinyin"] not in excluded]
+    labels = [group["pinyin"] for group in groups]
+    expected_count = len(groups) * (len(groups) - 1) // 2
+    if not expected_count:
+        raise ValueError("retained distribution requires at least two primary syllables")
+    parser_mismatches.intersection_update(labels)
     diagonal = [metric(label, label) for label in labels]
     if not all(math.isfinite(value) and value >= 0 for value in diagonal):
         raise ValueError("invalid DIMSIM diagonal")
@@ -218,7 +227,7 @@ def compute_retained_population(root: str | Path, *, expected_manifest_sha256: s
     if max(max_bundle,max_formula,max_reverse,max_diagonal)>tolerance: raise ValueError("distance validation exceeded numerical tolerance")
     columns=_rows_to_columns(rows); distances=columns["distance"].astype(float)
     if not np.isfinite(distances).all() or np.any(distances<0): raise ValueError("DIMSIM returned a nonfinite or negative distance")
-    validation={"manifest_sha256":actual_hash,"evaluation_id":evaluation_id,"artifact_sha256":verified,"syllable_count":len(groups),"pair_count":len(pairs),"expected_pair_count":expected_count,"finite":True,"nonnegative":True,"max_bundle_absolute_error":max_bundle,"max_formula_absolute_error":max_formula,"max_reverse_absolute_error":max_reverse,"max_diagonal_absolute_error":max_diagonal,"tolerance":tolerance,"hardcode_applied_pair_count":0,"metric_provenance":metric.provenance}
+    validation={"manifest_sha256":actual_hash,"evaluation_id":evaluation_id,"artifact_sha256":verified,"syllable_count":len(groups),"pair_count":len(rows),"expected_pair_count":expected_count,"finite":True,"nonnegative":True,"max_bundle_absolute_error":max_bundle,"max_formula_absolute_error":max_formula,"max_reverse_absolute_error":max_reverse,"max_diagonal_absolute_error":max_diagonal,"tolerance":tolerance,"hardcode_applied_pair_count":0,"metric_provenance":metric.provenance}
     validation["parser_mismatch_syllables"] = sorted(parser_mismatches)
     validation["parser_mismatch_pair_count"] = int(columns["parser_mismatch"].sum())
     if geometry:

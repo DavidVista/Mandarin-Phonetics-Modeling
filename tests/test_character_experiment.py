@@ -16,6 +16,7 @@ from phonetics.experiment import (default_experiment_config, prepare_experiment,
 
 class CharacterExperimentTests(unittest.TestCase):
     fixture_labels = ("ma1",)
+    fixture_suffix = ""
 
     def setUp(self):
         import numpy as np
@@ -27,7 +28,7 @@ class CharacterExperimentTests(unittest.TestCase):
         rows = []
         labels = list(self.fixture_labels)
         for i in range(35):
-            text = chr(0x4e00 + i) * len(labels)
+            text = chr(0x4e00 + i) * (len(labels) - len(self.fixture_suffix)) + self.fixture_suffix
             rows.append({"text": text, "labels": labels, "sample_id": sample_id(text, labels),
                          "source_ids": [str(i)], "sentence_length": len(labels), "positions": list(range(len(labels)))})
         rows.sort(key=lambda r: r["sample_id"])

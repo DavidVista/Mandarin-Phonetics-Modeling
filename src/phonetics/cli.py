@@ -35,6 +35,7 @@ def main(argv=None):
     workflow = commands.add_parser('workflow', help='Run one configured report or visualization locally')
     workflow.add_argument('--config', required=True)
     workflow.add_argument('--id', required=True)
+    workflow.add_argument('--allow-execution', action='store_true', help='Allow extraction for missing encoder exports')
     evaluation = commands.add_parser("prepare-evaluation", help="Build the evaluation bundle from a pinned common test split")
     evaluation.add_argument("--config", required=True)
     execute = commands.add_parser('execute-job', help='Execute a portable job using its exact SDK')
@@ -81,7 +82,8 @@ def main(argv=None):
             else:
                 if args.id == config.get("encoder_geometry", {}).get("id"):
                     from .encoder_jobs import run_configured_report
-                    print(json.dumps({"path": str(run_configured_report(config))}))
+                    path = run_configured_report(config, allow_execution=args.allow_execution)
+                    print(json.dumps({"path": str(path)}))
                     return 0
                 from .workflows import run_workflow
                 jobs = [w for group in ('analysis', 'visualization') for w in config[group] if w['id'] == args.id]

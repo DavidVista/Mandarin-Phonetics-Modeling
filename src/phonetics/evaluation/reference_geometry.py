@@ -27,6 +27,12 @@ def _rate(score, count):
     return float(score / count) if count else None
 
 
+def _agreement_counts(signs, reference):
+    comparison = signs * reference
+    return np.column_stack(((comparison > 0).sum(axis=1), (comparison < 0).sum(axis=1),
+                            (comparison == 0).sum(axis=1)))
+
+
 def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTEMS, contextual=False):
     """Process one anchor at a time. Map projections never drive table weights."""
     n = len(labels)
@@ -50,7 +56,11 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
     candidate_changes = 7 ^ masks[left, right]
     planned = np.zeros(len(TRANSITIONS), dtype=np.int64)
     transition_totals = np.zeros((len(TRANSITIONS), count_systems, 5))
+    controlled_outcomes = np.zeros((len(TRANSITIONS), count_systems, 3), dtype=np.int64)
     agreement_totals = np.zeros((3, count_systems, 3))
+    agreement_outcomes = np.zeros((3, count_systems, 3), dtype=np.int64)
+    same_mask_counts = np.zeros((7, 2), dtype=np.int64)
+    same_mask_outcomes = np.zeros((7, count_systems, 3), dtype=np.int64)
     controlled_anchors = np.zeros((len(TRANSITIONS), n), dtype=bool)
     agreement_anchors = np.zeros((3, n), dtype=bool)
     anchor_wins = np.zeros((n, count_systems))
@@ -91,11 +101,18 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
             agreement_totals[0, :, 0] += len(b)
             agreement_totals[0, :, 1] += ref_valid.sum()
             agreement_totals[0, :, 2] += scores[:, ref_valid].sum(axis=1)
+            if contextual:
+                agreement_outcomes[0] += _agreement_counts(signs[:, ref_valid], signs[0, ref_valid])
             for code in np.unique(codes):
                 select = codes == code
                 candidates, inverse = np.unique(b[select], return_inverse=True)
                 count = np.bincount(inverse)
                 valid = ref_valid[select]
+                if contextual:
+                    selected_signs = signs[:, select]
+                    controlled_outcomes[code] += _agreement_counts(
+                        selected_signs, np.ones(len(valid), dtype=np.int8)
+                    )
                 agree_count = np.bincount(inverse[valid], minlength=len(count))
                 controlled_anchors[code, anchor] = True
                 rows = []
@@ -118,6 +135,15 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
             agreement_totals[index, :, 0] += len(a)
             agreement_totals[index, :, 1] += valid.sum()
             agreement_totals[index, :, 2] += scores.sum(axis=1)
+            if contextual:
+                agreement_outcomes[index] += _agreement_counts(signs[:, valid], signs[0, valid])
+            if contextual and index == 2:
+                mask_codes = low[selection]
+                for code in np.unique(mask_codes):
+                    group = mask_codes == code
+                    compared = group & valid
+                    same_mask_counts[code] += [group.sum(), compared.sum()]
+                    same_mask_outcomes[code] += _agreement_counts(signs[:, compared], signs[0, compared])
             endpoints = np.r_[a[valid], b[valid]]
             counts = np.bincount(endpoints, minlength=n)
             projection_counts[index - 1, anchor] = counts
@@ -126,10 +152,12 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
                 np.divide(totals, counts, out=projections[index - 1, model, anchor], where=counts > 0)
 
     controlled_rows, agreement_rows, anchor_rows, anchor_summary, rank_rows = [], [], [], [], []
+    same_mask_rows = []
     for model, name in enumerate(systems):
         for index, (low, high) in enumerate((*TRANSITIONS, (None, None))):
             totals = transition_totals[:, model].sum(axis=0) if low is None else transition_totals[index, model]
             count, wins, effect, ref_count, agree = totals
+            outcomes = controlled_outcomes[:, model].sum(axis=0) if low is None else controlled_outcomes[index, model]
             anchors = controlled_anchors.any(axis=0) if low is None else controlled_anchors[index]
             controlled_rows.append({
                 **({"planned_triples": int(planned.sum() if low is None else planned[index])} if contextual else {}),
@@ -138,12 +166,24 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
                 "anchors": int(anchors.sum()), "win_rate": _rate(wins, count),
                 "mean_effect": _rate(effect, count), "dimsim_agreement": _rate(agree, ref_count),
                 "dimsim_comparisons": int(ref_count),
+                **(dict(zip(("wins", "losses", "model_ties"), map(int, outcomes))) if contextual else {}),
             })
         for index, name_slice in enumerate(SLICES):
             count, valid, score = agreement_totals[index, model]
+            wins, losses, ties = map(int, agreement_outcomes[index, model])
             agreement_rows.append({"system": name, "slice": name_slice, "triples": int(count),
                                    "anchors": int(agreement_anchors[index].sum()), "dimsim_ties": int(count - valid),
-                                   "comparisons": int(valid), "agreement": _rate(score, valid)})
+                                   "comparisons": int(valid), "agreement": _rate(score, valid),
+                                   **({"wins": wins, "losses": losses, "model_ties": ties} if contextual else {})})
+        if contextual:
+            for code, (count, valid) in enumerate(same_mask_counts):
+                wins, losses, ties = map(int, same_mask_outcomes[code, model])
+                same_mask_rows.append({
+                    "system": name, "mask": MASKS[code], "triples": int(count),
+                    "dimsim_ties": int(count - valid), "comparisons": int(valid),
+                    "wins": wins, "losses": losses, "model_ties": ties,
+                    "agreement": _rate(wins + .5 * ties, valid),
+                })
         for anchor, label in enumerate(labels):
             anchor_rows.append({"system": name, "anchor": label, "triples": int(anchor_support[anchor]),
                                 "win_rate": _rate(anchor_wins[anchor, model], anchor_support[anchor])})
@@ -159,7 +199,10 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
     tables = {"controlled_match": controlled_rows, "dimsim_agreement": agreement_rows,
               "anchor_win_rates": anchor_rows, "anchor_summary": anchor_summary,
               "pairwise_spearman": rank_rows}
-    tables.update(_profiles(labels, distances, masks, left, right, systems=systems))
+    if contextual:
+        tables["same_mask_agreement"] = same_mask_rows
+    tables.update(_profiles(labels, distances, masks, left, right, systems=systems,
+                            full_match=availability))
     maps = {
         "masks": masks, "controlled_cells": np.asarray(records, dtype=np.int32).reshape(-1, 5),
         "controlled_values": np.concatenate(controlled_values) if controlled_values else np.empty((0, count_systems, 3)),
@@ -170,7 +213,7 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
     return tables, maps
 
 
-def _profiles(labels, distances, masks, left, right, *, systems):
+def _profiles(labels, distances, masks, left, right, *, systems, full_match):
     n = len(labels)
     rows, summary, gains, residuals = [], [], [], []
     for model, system in enumerate(systems):
@@ -178,8 +221,7 @@ def _profiles(labels, distances, masks, left, right, *, systems):
         values, pair_masks = similarity[left, right], masks[left, right]
         counts = np.bincount(pair_masks, minlength=8)
         sums = np.bincount(pair_masks, weights=values, minlength=8)
-        diagonal = similarity.diagonal()
-        diagonal = diagonal[np.isfinite(diagonal)]
+        diagonal = similarity.diagonal()[full_match]
         counts[7] = len(diagonal)
         sums[7] = diagonal.sum()
         means = np.divide(sums, counts, out=np.full(8, np.nan), where=counts > 0)

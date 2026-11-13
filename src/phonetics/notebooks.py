@@ -165,10 +165,9 @@ def generate_notebooks(config, *, stage='ready'):
 
 
 def generate_encoder_notebooks(config):
-    """Generate two reusable, input-pinned notebook clients without executing them."""
+    """Generate the input-pinned encoder geometry notebook without executing it."""
     from .bundles import content_hash
     from .encoder_jobs import encoder_inputs
-    from .evaluation.training_summary import TRAINING_MODELS
     from .execution import sdk_hashes
 
     refs, pins = encoder_inputs(config)
@@ -177,21 +176,18 @@ def generate_encoder_notebooks(config):
     spec = config["encoder_geometry"]
     root = Path(config["paths"]["generated"]) / "notebooks"
     root.mkdir(parents=True, exist_ok=True)
-    results = []
-    for stage, title in (("extract-hidden-states", "Extract hidden states"), ("encoder-geometry", "Run encoder geometry")):
-        requirements = ["numpy==2.1.3", "pypinyin==0.55.0"]
-        if stage == "encoder-geometry":
-            requirements += ["dimsim==0.2.2", "matplotlib==3.10.8", "pandas==3.1.1", "scipy==1.18.1"]
-        installation = f"REQUIREMENTS = {requirements!r}\n"
-        if config["notebooks"]["install_dependencies"]:
-            installation += 'import subprocess, sys\nsubprocess.check_call([sys.executable, "-m", "pip", "install", *REQUIREMENTS])\n'
-        installation += """from importlib.metadata import version
+    requirements = ["numpy==2.1.3", "pypinyin==0.55.0", "dimsim==0.2.2",
+                    "matplotlib==3.10.8", "pandas==3.1.1", "scipy==1.18.1"]
+    installation = f"REQUIREMENTS = {requirements!r}\n"
+    if config["notebooks"]["install_dependencies"]:
+        installation += 'import subprocess, sys\nsubprocess.check_call([sys.executable, "-m", "pip", "install", *REQUIREMENTS])\n'
+    installation += """from importlib.metadata import version
 for requirement in REQUIREMENTS:
     name, expected = requirement.split("==")
     if version(name) != expected:
         raise RuntimeError(f"Required {requirement}")
 """
-        sdk = f"""import hashlib, shutil, sys, tempfile
+    sdk = f"""import hashlib, shutil, sys, tempfile
 from pathlib import Path
 if any(name == "phonetics" or name.startswith("phonetics.") for name in sys.modules):
     raise RuntimeError("Restart the kernel before loading the generated SDK")
@@ -206,57 +202,57 @@ for name, source in SOURCES.items():
         raise RuntimeError(f"SDK checksum mismatch: {{name}}")
 sys.path.insert(0, str(SDK_ROOT))
 """
-        settings = f"PINS = {pins!r}\nSOURCE_SHA256 = {content_hash(hashes)!r}\n"
-        if stage == "extract-hidden-states":
-            settings += (
-                f"REFERENCES = {refs!r}\nMODELS = {TRAINING_MODELS!r}\nMODEL = MODELS[0]\n"
-                f"DEVICE = {spec['device']!r}\nBATCH_SIZE = {spec['batch_size']!r}\n"
-            )
-            execution = """from phonetics.encoder_jobs import locate_manifest
-from phonetics.evaluation.encoder_extraction import extract_hidden_states
-evaluation, experiment, training = (locate_manifest(PINS[key], REFERENCES[key]) for key in ("evaluation", "experiment", MODEL))
-result = extract_hidden_states(
-    evaluation_root=evaluation, evaluation_pin=PINS["evaluation"],
-    experiment_root=experiment, experiment_pin=PINS["experiment"],
-    training_root=training, training_pin=PINS[MODEL], model=MODEL, device=DEVICE,
-    batch_size=BATCH_SIZE, output=Path.cwd() / "results" / MODEL,
-    source_sha256=SOURCE_SHA256, allow_execution=True)
-"""
-            instructions = "Attach the pinned evaluation and experiment bundles and the checkpoint bundle for the selected model. Torch 2.11.0 must be installed before extraction. The final cell starts extraction."
-        else:
-            report_spec = {key: spec[key] for key in ("id", "representations_root", "tolerance")}
-            settings += f"EVALUATION_ROOT = {refs['evaluation']!r}\nSPEC = {report_spec!r}\n"
-            settings += """# Set these paths when Arial is supplied as an input dataset.
+
+    notebook_spec = {key: spec[key] for key in ("id", "device", "batch_size", "tolerance")}
+    settings = (
+        f"PINS = {pins!r}\nREFERENCES = {refs!r}\nSPEC = {notebook_spec!r}\n"
+        f"SOURCE_SHA256 = {content_hash(hashes)!r}\n"
+    )
+    settings += """RESULTS_ROOT = Path.cwd() / "results"
+INPUT_ROOT = Path("/kaggle/input")
+ALLOW_EXTRACTION = False
 FONT_FILES = []
 # FONT_FILES = ["/kaggle/input/your-fonts/arial.ttf", "/kaggle/input/your-fonts/arialbd.ttf"]
 """
-            execution = """from matplotlib import font_manager
-from phonetics.visualization.core import require_arial
+    execution = """from matplotlib import font_manager
+from phonetics.encoder_jobs import run_encoder_workflow
+from phonetics.evaluation.training_summary import TRAINING_MODELS
 
 for filename in FONT_FILES:
     font_file = Path(filename).resolve(strict=True)
     if font_manager.FontProperties(fname=str(font_file)).get_name() != "Arial":
         raise ValueError(f"Expected an Arial font file: {font_file}")
     font_manager.fontManager.addfont(str(font_file))
-require_arial()
 
-from phonetics.encoder_jobs import locate_exports, locate_manifest
-from phonetics.research.encoder_geometry import run_encoder_geometry
-evaluation = locate_manifest(PINS["evaluation"], EVALUATION_ROOT)
-result = run_encoder_geometry(evaluation_root=evaluation, pins=PINS, exports=locate_exports(SPEC, PINS),
-    output=Path.cwd() / "results" / SPEC["id"], tolerance=SPEC["tolerance"], source_sha256=SOURCE_SHA256)
+representations = RESULTS_ROOT / "hidden-states"
+result = run_encoder_workflow(
+    refs=REFERENCES, pins=PINS, spec={**SPEC, "representations_root": representations},
+    reports_root=RESULTS_ROOT / "reports", source_sha256=SOURCE_SHA256,
+    allow_execution=ALLOW_EXTRACTION, mount=INPUT_ROOT,
+)
+print(shutil.make_archive(str(result), "zip", root_dir=result))
+for model in TRAINING_MODELS:
+    export = representations / model
+    if (export / "manifest.json").is_file():
+        print(shutil.make_archive(str(export), "zip", root_dir=export))
 """
-            instructions = "Attach the pinned evaluation bundle and one verified hidden-state export dataset per model. If Arial is supplied as an input dataset, set FONT_FILES in Configuration."
-        execution += 'print(shutil.make_archive(str(result), "zip", root_dir=result))\n'
-        document = {
-            "nbformat": 4, "nbformat_minor": 5,
-            "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-                         "source_sha256": hashes, "input_manifest_sha256": pins},
-            "cells": [_cell("markdown", f"# {title}\n\n{instructions}\n", "overview"),
-                      _cell("code", installation, "dependencies"), _cell("code", sdk, "sdk"),
-                      _cell("code", settings, "configuration"), _cell("code", execution, "run")],
-        }
-        destination = root / f"{stage}-{content_hash({'pins': pins, 'sources': hashes, 'config': spec})[:16]}.ipynb"
-        write_json(destination, document)
-        results.append({"stage": stage, "notebook": str(destination)})
-    return results
+    instructions = (
+        "Attach the pinned evaluation, experiment and training bundles. Attach any existing "
+        "hidden-state exports to reuse. To extract missing exports, enable ALLOW_EXTRACTION "
+        "after reviewing the device and inputs. Extraction requires Torch 2.11.0. "
+        "Set FONT_FILES when Arial is supplied as an input dataset. The report and new "
+        "hidden-state exports are saved separately."
+    )
+    document = {
+        "nbformat": 4, "nbformat_minor": 5,
+        "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+                     "source_sha256": hashes, "input_manifest_sha256": pins},
+        "cells": [_cell("markdown", f"# Encoder geometry\n\n{instructions}\n", "overview"),
+                  _cell("code", installation, "dependencies"), _cell("code", sdk, "sdk"),
+                  _cell("code", settings, "configuration"), _cell("code", execution, "run")],
+    }
+    identity = {"pins": pins, "sources": hashes, "config": spec,
+                "install_dependencies": config["notebooks"]["install_dependencies"]}
+    destination = root / f"encoder-geometry-{content_hash(identity)[:16]}.ipynb"
+    write_json(destination, document)
+    return [{"stage": "encoder-geometry", "notebook": str(destination)}]

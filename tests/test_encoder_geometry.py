@@ -1,15 +1,15 @@
 """CPU-only encoder geometry contract and numerical regression checks."""
-import json
-from pathlib import Path
 import sys
 import unittest
 
 import numpy as np
 
 import test_character_experiment as character_experiment
-from phonetics.artifacts import read_jsonl, sha256_file, write_json
+from phonetics.artifacts import sha256_file, write_json
 from phonetics.bundles import seal_bundle, validate_bundle
-from phonetics.evaluation.encoder_extraction import EXTRACTION_TYPE, SEED_TYPE, extract_hidden_states
+from phonetics.evaluation.encoder_extraction import (
+    EXTRACTION_TYPE, SEED_TYPE, expected_unknown_positions, extract_hidden_states, load_positions,
+)
 from phonetics.evaluation.geometry_bundle import prepare_geometry_bundle
 from phonetics.evaluation.reference_geometry import evaluate_geometry
 from phonetics.evaluation.training_summary import TRAINING_MODELS, TRAINING_SEEDS
@@ -51,24 +51,30 @@ class EncoderGeometryTests(unittest.TestCase):
             self.skipTest(str(error))
         fixture = character_experiment.CharacterExperimentTests()
         fixture.fixture_labels = ("ba1", "ba2", "ma1", "ma2")
+        fixture.fixture_suffix = "妈麻马"
         self.addCleanup(fixture.doCleanups)
         fixture.setUp()
+        fixture.config["seed_count"] = len(TRAINING_SEEDS)
         experiment = fixture.build()
         experiment_pin = sha256_file(experiment / "manifest.json")
         evaluation = prepare_geometry_bundle({
             "id": "geometry", "experiment_root": str(experiment), "experiment_manifest_sha256": experiment_pin,
-            "output_root": str(fixture.root / "evaluations"), "excluded_pinyin": [],
+            "output_root": str(fixture.root / "evaluations"), "excluded_pinyin": ["ma2"],
             "exclusion_source": {"run_id": "fixture", "manifest_sha256": "a" * 64},
         })
-        positions = sorted(row["occurrence_id"] for row in read_jsonl(evaluation / "occurrences.jsonl"))
         evaluation_pin = sha256_file(evaluation / "manifest.json")
-        test_pin = json.loads((evaluation / "manifest.json").read_text())["identity"]["test_ids_sha256"]
+        manifest, occurrences = load_positions(evaluation, evaluation_pin)
+        positions = [row["occurrence_id"] for row in occurrences]
+        test_pin = manifest["identity"]["test_ids_sha256"]
+        unknown, seed_hashes = expected_unknown_positions(experiment, experiment_pin, occurrences, test_pin)
         pins = {"experiment": experiment_pin, "evaluation": evaluation_pin}
         exports = {}
+        checkpoints = {}
         rng = np.random.default_rng(21)
         for model in TRAINING_MODELS:
             root = fixture.root / "exports" / model
             exports[model] = root
+            checkpoints[model] = {}
             pins[model] = "b" * 64
             identity = {"model": model, "evaluation_manifest_sha256": evaluation_pin,
                         "experiment_manifest_sha256": experiment_pin, "training_manifest_sha256": pins[model],
@@ -78,16 +84,29 @@ class EncoderGeometryTests(unittest.TestCase):
                 child.mkdir(parents=True)
                 write_json(child / "occurrence_ids.json", positions)
                 np.save(child / "hidden.npy", rng.normal(size=(len(positions), 3)).astype(np.float32))
-                np.save(child / "unknown.npy", np.zeros(len(positions), dtype=bool))
-                seal_bundle(child, SEED_TYPE, {**identity, "seed": seed, "seed_input_hashes": {
-                    "test": test_pin, "train": "d" * 64, "validation": "e" * 64, "vocabulary": "f" * 64},
-                    "representation": "raw pre-head", "best_epoch": 1, "checkpoint_sha256": "a" * 64})
+                np.save(child / "unknown.npy", unknown[seed])
+                checkpoints[model][seed] = {"seed_input_hashes": seed_hashes[seed], "best_epoch": 1,
+                                            "checkpoint_sha256": "a" * 64}
+                seal_bundle(child, SEED_TYPE, {**identity, **checkpoints[model][seed], "seed": seed,
+                                               "representation": "raw pre-head"})
             seal_bundle(root, EXTRACTION_TYPE, identity)
-        result = run_encoder_geometry(evaluation_root=evaluation, pins=pins, exports=exports,
-                                      output=fixture.root / "report", tolerance=1e-12, source_sha256="c" * 64)
+        arguments = {"evaluation_root": evaluation, "experiment_root": experiment, "pins": pins,
+                     "exports": exports, "checkpoints": checkpoints, "output": fixture.root / "report",
+                     "tolerance": 1e-12, "source_sha256": "c" * 64}
+        for field, wrong in (("best_epoch", 2), ("checkpoint_sha256", "0" * 64)):
+            selected = checkpoints[TRAINING_MODELS[0]][TRAINING_SEEDS[0]]
+            original = selected[field]
+            selected[field] = wrong
+            with self.assertRaisesRegex(ValueError, "checkpoint provenance mismatch"):
+                run_encoder_geometry(**arguments)
+            selected[field] = original
+        result = run_encoder_geometry(**arguments)
         validate_bundle(result, "encoder_geometry_report")
         self.assertEqual(len(list((result / "views").glob("*.js"))), 6)
         self.assertEqual(len(list((result / "figures").glob("*.png"))), 5)
         self.assertIn("planned_triples", (result / "tables/controlled_match.csv").read_text())
         self.assertIn("valid_full_matches", (result / "tables/coverage.csv").read_text())
+        self.assertIn("Component mismatch count", (result / "tables/pairwise_spearman.csv").read_text())
+        self.assertIn("model_ties", (result / "tables/same_mask_agreement.csv").read_text())
+        self.assertIn("components-acoustic-lambda-1", (result / "tables/paired_differences.csv").read_text())
         self.assertNotIn("torch", sys.modules)

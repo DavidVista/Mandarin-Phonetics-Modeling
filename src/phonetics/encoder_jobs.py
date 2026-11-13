@@ -42,21 +42,28 @@ def encoder_inputs(config):
     return refs, pins
 
 
-def locate_manifest(pin, preferred, mount="/kaggle/input"):
-    paths = {Path(preferred).resolve()}
+def locate_manifests(refs, pins, mount):
+    matches = {pin: set() for pin in pins.values()}
+    paths = {Path(path).resolve() / "manifest.json" for path in refs.values()}
     if Path(mount).is_dir():
-        paths.update(path.parent.resolve() for path in Path(mount).rglob("manifest.json"))
-    matches = sorted(path for path in paths if (path / "manifest.json").is_file()
-                     and sha256_file(path / "manifest.json") == pin)
-    if len(matches) != 1:
-        raise ValueError(f"attach exactly one bundle with manifest SHA256 {pin}; found {len(matches)}")
-    return matches[0]
+        paths.update(path.resolve() for path in Path(mount).rglob("manifest.json"))
+    for path in sorted(paths):
+        if path.is_file():
+            pin = sha256_file(path)
+            if pin in matches:
+                matches[pin].add(path.parent)
+    roots = {}
+    for key, pin in pins.items():
+        if len(matches[pin]) != 1:
+            raise ValueError(f"attach exactly one {key} bundle with manifest SHA256 {pin}; found {len(matches[pin])}")
+        roots[key] = next(iter(matches[pin]))
+    return roots
 
 
-def locate_exports(spec, pins, mount="/kaggle/input"):
+def locate_exports(spec, pins, mount=None):
     preferred = Path(spec["representations_root"])
     manifests = {preferred / model / "manifest.json" for model in TRAINING_MODELS}
-    if Path(mount).is_dir():
+    if mount is not None and Path(mount).is_dir():
         manifests.update(Path(mount).rglob("manifest.json"))
     result = {model: set() for model in TRAINING_MODELS}
     for path in sorted(manifests):
@@ -71,10 +78,10 @@ def locate_exports(spec, pins, mount="/kaggle/input"):
                 and identity.get("experiment_manifest_sha256") == pins["experiment"]
                 and identity.get("training_manifest_sha256") == pins[model]):
             result[model].add(path.parent.resolve())
-    if any(len(paths) != 1 for paths in result.values()):
+    if any(len(paths) > 1 for paths in result.values()):
         counts = {model: len(paths) for model, paths in result.items()}
-        raise ValueError(f"attach one compatible hidden-state export per model: {counts}")
-    return {model: paths.pop() for model, paths in result.items()}
+        raise ValueError(f"multiple compatible hidden-state exports: {counts}")
+    return {model: paths.pop() for model, paths in result.items() if paths}
 
 
 def extract_configured(config, model, *, allow_execution):
@@ -99,16 +106,13 @@ def extract_configured(config, model, *, allow_execution):
 def import_hidden_states(config, model, result):
     import shutil
     from .bundles import staging_directory
-    from .evaluation.encoder_extraction import inspect_checkpoints, load_export, load_positions
+    from .evaluation.encoder_extraction import expected_checkpoint_seeds, load_export, load_positions
 
     if model not in TRAINING_MODELS:
         raise ValueError("unknown encoder model")
     refs, pins = encoder_inputs(config)
     _, rows = load_positions(refs["evaluation"], pins["evaluation"])
-    training, selected = inspect_checkpoints(refs[model], pins[model], model, pins["experiment"])
-    expected_seeds = {seed: {"checkpoint_sha256": training["artifacts"][f"seed-{seed}/best.pt"],
-                             "seed_input_hashes": item["seed_input_hashes"], "best_epoch": item["best_epoch"]}
-                      for seed, item in selected.items()}
+    expected_seeds = expected_checkpoint_seeds(refs[model], pins[model], model, pins["experiment"])
     positions = [row["occurrence_id"] for row in rows]
     target = (Path(config["encoder_geometry"]["representations_root"]) / model).resolve()
     result = Path(result).resolve()
@@ -126,14 +130,45 @@ def import_hidden_states(config, model, result):
     return target
 
 
-def run_configured_report(config):
+def run_configured_report(config, *, allow_execution=False):
     from .bundles import content_hash
     from .execution import sdk_hashes
-    from .research.encoder_geometry import run_encoder_geometry
 
     refs, pins = encoder_inputs(config)
     spec = config["encoder_geometry"]
-    exports = locate_exports(spec, pins)
-    return run_encoder_geometry(evaluation_root=refs["evaluation"], pins=pins, exports=exports,
-                                output=Path(config["paths"]["reports"]) / spec["id"],
-                                tolerance=spec["tolerance"], source_sha256=content_hash(sdk_hashes()))
+    return run_encoder_workflow(refs=refs, pins=pins, spec=spec, reports_root=config["paths"]["reports"],
+                                source_sha256=content_hash(sdk_hashes()), allow_execution=allow_execution)
+
+
+def run_encoder_workflow(*, refs, pins, spec, reports_root, source_sha256, allow_execution=False, mount=None):
+    from .evaluation.encoder_extraction import expected_checkpoint_seeds, load_positions
+    from .evaluation.geometry_bundle import PAIRING_POLICY
+    from .research.encoder_geometry import run_encoder_geometry
+    from .visualization.core import require_arial
+
+    roots = (locate_manifests(refs, pins, mount) if mount is not None
+             else {key: Path(refs[key]) for key in pins})
+    evaluation, _ = load_positions(roots["evaluation"], pins["evaluation"])
+    if evaluation["identity"]["pairing_policy"] != PAIRING_POLICY:
+        raise ValueError("encoder geometry requires the complete nonzero-initial evaluation bundle")
+    if evaluation["identity"]["experiment_manifest_sha256"] != pins["experiment"]:
+        raise ValueError("evaluation and experiment pins differ")
+    exports = locate_exports(spec, pins, mount)
+    missing = [model for model in TRAINING_MODELS if model not in exports]
+    if missing and not allow_execution:
+        raise PermissionError(f"missing compatible exports for {', '.join(missing)}; authorize extraction first")
+    require_arial()
+    checkpoints = {model: expected_checkpoint_seeds(roots[model], pins[model], model, pins["experiment"])
+                   for model in TRAINING_MODELS}
+    for model in missing:
+        exports[model] = extract_hidden_states(
+            evaluation_root=roots["evaluation"], evaluation_pin=pins["evaluation"],
+            experiment_root=roots["experiment"], experiment_pin=pins["experiment"],
+            training_root=roots[model], training_pin=pins[model], model=model,
+            output=Path(spec["representations_root"]) / model, device=spec["device"],
+            batch_size=spec["batch_size"], source_sha256=source_sha256, allow_execution=allow_execution,
+        )
+    return run_encoder_geometry(evaluation_root=roots["evaluation"], experiment_root=roots["experiment"],
+                                pins=pins, exports=exports, checkpoints=checkpoints,
+                                output=Path(reports_root) / spec["id"],
+                                tolerance=spec["tolerance"], source_sha256=source_sha256)

@@ -14,7 +14,7 @@ from phonetics.pipeline import load_config, run_stage
 
 
 class GeometryEvaluationTests(unittest.TestCase):
-    def test_configured_cli_filters_readings_and_preserves_context(self):
+    def test_configured_cli_keeps_nonzero_readings_and_preserves_context(self):
         fixture = character_experiment.CharacterExperimentTests()
         fixture.fixture_labels = ("a1", "gu1", "gu2", "ma1", "ma2")
         self.addCleanup(fixture.doCleanups)
@@ -35,7 +35,7 @@ class GeometryEvaluationTests(unittest.TestCase):
         manifest = validate_geometry_bundle(target)
         self.assertEqual(manifest["identity"]["exclusion_confirmation"], config["evaluation"]["exclusion_confirmation"])
         inventory = manifest["identity"]["inventory"]
-        self.assertEqual(inventory["eligible"], ["gu2", "ma1", "ma2"])
+        self.assertEqual(inventory["eligible"], ["gu1", "gu2", "ma1", "ma2"])
         self.assertEqual(inventory["zero_initial"], ["a1"])
         self.assertEqual(inventory["excluded_by_list"], ["gu1"])
         self.assertEqual(inventory["configured_but_unobserved"], ["qu1"])
@@ -44,9 +44,11 @@ class GeometryEvaluationTests(unittest.TestCase):
         self.assertEqual({row["sample_id"] for row in sentences}, test_ids)
         self.assertTrue(all(len(row["text"]) == 5 for row in sentences))
         occurrences = read_jsonl(target / "occurrences.jsonl")
-        self.assertEqual(len(occurrences), 3 * len(test_ids))
+        self.assertEqual(len(occurrences), 4 * len(test_ids))
         self.assertEqual({(row["character_position"], row["pinyin"]) for row in occurrences},
-                         {(2, "gu2"), (3, "ma1"), (4, "ma2")})
+                         {(1, "gu1"), (2, "gu2"), (3, "ma1"), (4, "ma2")})
+        self.assertEqual(manifest["identity"]["occurrence_counts"]["zero_initial"], len(test_ids))
+        self.assertEqual(manifest["identity"]["syllable_pair_count"], 6)
         digest = sha256_file(target / "manifest.json")
         _, validation = compute_retained_population(target, expected_manifest_sha256=digest)
         self.assertEqual(validation["pair_count"], 3)

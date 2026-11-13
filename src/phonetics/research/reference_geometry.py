@@ -85,6 +85,10 @@ def run_reference_geometry(root, parameters, pins):
     if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or tolerance < 0:
         raise ValueError("reference geometry tolerance must be finite and nonnegative")
     labels, components, dimsim, identity = _read_reference(parameters["evaluation_root"], pins["evaluation_root"])
+    excluded = set(identity["inventory"]["excluded_by_list"])
+    indices = [index for index, label in enumerate(labels) if label not in excluded]
+    labels = [labels[index] for index in indices]
+    dimsim = dimsim[np.ix_(indices, indices)]
     acoustic = {key: load_embedding_bundle(key, parameters[key], pins[key], model) for key, model in _MODELS.items()}
     missing = {key: sorted(set(labels) - bundle["vectors"].keys()) for key, bundle in acoustic.items()}
     common = sorted(set(labels) - set().union(*missing.values()))

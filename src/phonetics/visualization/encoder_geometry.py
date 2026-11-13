@@ -87,12 +87,14 @@ def write_view(path, key, distances, maps, tables, tolerance, *, rankings=None):
             for row in tables["dimsim_agreement"] if row["system"] == "DIMSIM"}
     profiles, residuals = _view_profiles(tables, across)
     overlap, near_far = rankings if rankings is not None else rank_metrics(distances, maps["neighborhood"], tolerance)
-    keys = ("controlled_match", "dimsim_agreement", "pairwise_spearman", "mask_summary", "full_match_gains")
+    keys = ("controlled_match", "dimsim_agreement", "same_mask_agreement", "pairwise_spearman",
+            "paired_differences", "mask_summary", "full_match_gains")
     view = {
         "distance": _encode_models(ordered, "<f4"),
         "maxima": [float(np.nanmax(ordered[0])), float(np.nanmax(ordered[1:]))],
         "rank": _encode(inverse[maps["neighborhood"][order]], "<u2"),
-        "rankStats": [overlap, [row["spearman_mean" if across else "spearman"] for row in tables["pairwise_spearman"]], near_far],
+        "rankStats": [overlap, [row["spearman_mean" if across else "spearman"]
+                                for row in tables["pairwise_spearman"] if row["system"] in SYSTEMS], near_far],
         "rankGroupSize": (len(order) - 1) // 10,
         "prepared": {
             "factor": factor, "cells": _encode(cells, "<u2"),
@@ -125,8 +127,8 @@ def _encoder_template():
         "cosine distances from matching audio for the contextual encoders": "weighted cosine distances from the contextual encoders",
         "wav2vec2 ties": "Encoder ties",
         "these wav2vec2 systems": "the acoustic reference systems",
-        "Self-distances are zero for the current matrices.": "Contextual full match excludes self-comparisons. Grey diagonals lack two distinct occurrences.",
-        "Mask 111 uses self-pairs, with cosine 1 and DIMSIM distance 0.": "Mask 111 uses contextual within-reading distances and the zero DIMSIM diagonal.",
+        "Self-distances are zero for the current matrices.": "Contextual full match excludes self-comparisons. Grey encoder diagonals lack two distinct occurrences in at least one seed. The DIMSIM matrix shows its zero self-distances.",
+        "Mask 111 uses self-pairs, with cosine 1 and DIMSIM distance 0.": "Mask 111 uses contextual within-reading distances and the corresponding zero DIMSIM distances on the shared Full Match inventory.",
         "Mask means, centered R², J and residuals describe each system independently.": "Mask means, centered R², J and residuals describe each system independently. Residuals are available for individual seeds.",
         "const preparedCells=decode(prepared.cells,Uint16Array), preparedEffects=decode(prepared.effects,Float64Array);":
             "const preparedCells=decode(prepared.cells,Uint16Array), preparedEffects=prepared.effects.map(x=>decode(x,Float64Array));",
@@ -165,6 +167,9 @@ table{border-collapse:collapse}th,td{padding:6px 10px;border-bottom:1px solid #d
 <p id="status" aria-live="polite"></p><a href="tables/coverage.csv">Coverage and UNK counts</a> · <a href="manifest.json">Manifest</a></header>
 <iframe id="view" title="Synchronized encoder distance maps"></iframe>
 <details><summary>Selected metrics and seed dispersion</summary><div id="summary"></div></details>
+<p>DIMSIM Agreement excludes reference ties. The score is (wins + 0.5 × model ties) / comparisons,
+with 50% as the neutral level. Controlled match win rate uses the expected component direction.
+Paired differences subtract the first model from the second within each seed.</p>
 <script>
 const settings=@@SETTINGS@@, template=@@TEMPLATE@@;
 window.encoderViews={};
@@ -184,11 +189,12 @@ function load(key){
  });
 }
 const escapeHTML=value=>String(value??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function selectedTables(view, models, across){
+function selectedTables(view, models){
  const names=new Set(models.map(i=>settings.systems[i]));
  const display=value=>escapeHTML(typeof value==='number'?Number(value.toPrecision(6)):value);
  return Object.entries(view.tables).map(([name, rows])=>{
-  const selected=rows.filter(row=>names.has(row.system));
+  const selected=rows.filter(row=>names.has(row.system)||row.system==='Component mismatch count'||
+    (names.has(row.from_system)&&names.has(row.to_system)));
   if(!selected.length)return '';
   const keys=Object.keys(selected[0]);
   return '<h3>'+escapeHTML(name.replaceAll('_',' '))+'</h3><div style="overflow:auto"><table><tr>'+
@@ -218,7 +224,7 @@ async function render(){
   $('view').srcdoc=template.replace(/@@([A-Za-z_]+)@@/g,(_,name)=>substitutions[name]);
   const across=key==='across-seeds';
   $('status').textContent=across?'Maps show mean distances and seedwise comparison scores. Tables summarize metrics computed separately by seed.':'Showing distances and metrics for '+$('seed').selectedOptions[0].text+'.';
-  $('summary').innerHTML=selectedTables(view,systems,across);
+  $('summary').innerHTML=selectedTables(view,systems);
   for(const loaded of Object.keys(window.encoderViews))if(loaded!==key)delete window.encoderViews[loaded];
  }catch(error){if(token===revision)$('status').textContent=error.message;}
 }
@@ -231,7 +237,8 @@ def write_page(path, labels, components, coverage, *, evaluation, excluded, tole
     order = sorted(range(len(labels)), key=lambda index: (tuple(components[index]), labels[index]))
     rows = "".join(
         f"<tr><th>{html.escape(row['system'])} · Seed {row['seed']}</th>"
-        f"<td>{row['occurrences']} occurrences</td><td>{row['unknown_fraction']:.2%} UNK</td>"
+        f"<td>{row['occurrences']} retained occurrences</td>"
+        f"<td>{row['unknown_fraction']:.2%} target UNK before filtering</td>"
         f"<td>{row['valid_full_matches']} / {row['planned_full_matches']} full matches</td></tr>"
         for row in coverage
     )

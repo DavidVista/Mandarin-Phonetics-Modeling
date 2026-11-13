@@ -51,11 +51,12 @@ phonetics prepare-evaluation --config configs/experiment.json
 ```
 
 This standalone stage uses the pinned experiment's common test split. It keeps
-whole test sentences and records positions only for readings with a strict
-nonempty initial that are outside `excluded_pinyin`. The bundle contains the
-observed and eligible inventories, exclusions, and every unique unordered
-eligible syllable pair with its DIMSIM distance. The manifest binds the
-experiment, test IDs, filter, source audit, optional confirming audit
+whole test sentences and records every position with a strict nonempty
+initial. Forms in `excluded_pinyin` remain in the bundle and are marked for
+exclusion from the primary report. The bundle contains observed and eligible
+inventories, coverage counts including zero-initial positions, and all unique
+unordered nonzero-initial pairs with their DIMSIM A distances. The manifest binds the
+experiment, test IDs, exclusions, source audit, optional confirming audit
 (`exclusion_confirmation`), and artifact hashes. Identical
 inputs can reuse a verified bundle. Use a new evaluation ID when changing the
 input or exclusions.
@@ -149,29 +150,49 @@ and exact input dataset versions before extraction.
 phonetics generate-notebooks --config configs/experiment.example.json --stage encoder-geometry
 ```
 
-This creates two notebooks with pinned manifests and embedded source. Run the
-extraction notebook once per selected model. It processes the five checkpoints
-in order and exports a single ZIP containing one sealed artifact per seed.
-Running the final cell starts extraction with the selected model and device.
-After an approved run, extract its ZIP and verify and import it with:
+This creates one notebook with pinned evaluation, experiment, and training
+manifests and an embedded SDK and plot style. Attach these bundles and any
+compatible hidden-state exports. The notebook verifies the selected checkpoint
+SHA256 and epoch per model and seed. After approval, set `ALLOW_EXTRACTION` in
+the notebook configuration to extract any missing exports on the configured
+device. Extraction requires Torch 2.11.0. The notebook writes a report ZIP and
+separate ZIPs for locally saved model exports. Each export retains occurrence
+IDs, raw pre-head vectors, and target-position UNK flags.
+
+To import a saved export for local use:
 
 ```sh
 phonetics import-hidden-states --config configs/experiment.example.json --model syllable --result PATH
 ```
 
-The same extraction API is available via `extract-hidden-states --config ...
---model ... --allow-execution`. It requires Torch 2.11.0. It encodes full
-sentences and exports only the evaluation positions, retaining UNK positions
-with explicit flags. The report notebook and local workflow use saved exports
-and run without Torch:
+The local workflow uses the same implementation and supports verified exports
+without Torch. Add `--allow-execution` after approval to extract missing
+exports. The standalone `extract-hidden-states` command can still produce one
+model's export independently.
 
 ```sh
-phonetics workflow --config configs/experiment.example.json --id char-zh-cn-encoder-geometry-v1
+phonetics workflow --config configs/experiment.example.json --id char-zh-cn-encoder-geometry-v2
 ```
 
 If Arial is supplied as a Kaggle input dataset, set `FONT_FILES` in the
-report notebook configuration. The final cell registers the files with
-Matplotlib before validating inputs and computing the report.
+notebook configuration. The final cell registers the files with Matplotlib
+before invoking the workflow. The local workflow requires Arial to be installed.
+
+The primary report excludes the marked forms and positions whose target is UNK.
+It uses the shared syllable inventory across seeds and identical positions
+across models within each seed. All retained occurrences contribute to mean
+cosine distances, with equal weight per character within a reading and equal
+weight per occurrence within each character. Full Match uses distinct
+occurrences. A diagonal is unavailable in the shared comparison when any seed
+has fewer than two eligible occurrences for that reading.
+
+Spearman uses distinct syllable pairs. DIMSIM Agreement excludes reference
+ties and assigns half credit to a model tie, giving
+`(wins + 0.5 * ties) / (wins + losses + ties)` with a neutral level of 50%.
+Differences of at most the configured tolerance in absolute value count as
+ties. Same mask agreement is also reported by overlap mask. The component
+baseline is the number of mismatched initial, final and tone labels. Paired
+differences subtract the first model from the second within each seed.
 
 Keep the generated report directory together when opening `encoder_geometry.html`.
 It loads the selected seed view locally and displays DIMSIM with two selected

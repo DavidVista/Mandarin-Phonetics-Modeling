@@ -87,7 +87,7 @@
     "run_id": "run-1"
   },
   "evaluation": {
-    "id": "char-zh-cn-geometry-v1",
+    "id": "char-zh-cn-geometry-v2",
     "experiment_root": "../datasets/experiments/char-zh-cn-v1",
     "experiment_manifest_sha256": "10a8dffe5c0492fe8bd43731d00ac35a4ecf1b151aa8c5f9ca84f10980ce18af",
     "output_root": "../datasets/evaluations",
@@ -102,7 +102,7 @@
     }
   },
   "encoder_geometry": {
-    "id": "char-zh-cn-encoder-geometry-v1",
+    "id": "char-zh-cn-encoder-geometry-v2",
     "training_runs": {
       "syllable": "../runs/char-zh-cn-v1/syllable/run-1",
       "components": "../runs/char-zh-cn-v1/components/run-1",
@@ -110,17 +110,17 @@
       "components-acoustic-lambda-1": "../runs/char-zh-cn-v1/components-acoustic-lambda-1/run-1",
       "components-acoustic-lambda-10": "../runs/char-zh-cn-v1/components-acoustic-lambda-10/run-1"
     },
-    "representations_root": "../outputs/encoder-hidden-states",
+    "representations_root": "../outputs/encoder-hidden-states-v2",
     "device": "cpu",
     "batch_size": 32,
     "tolerance": 1e-12
   },
   "analysis": [
     {
-      "id": "char-zh-cn-reference-geometry-v4",
+      "id": "char-zh-cn-reference-geometry-v5",
       "workflow": "reference-geometry",
       "parameters": {
-        "evaluation_root": "../datasets/evaluations/char-zh-cn-geometry-v1",
+        "evaluation_root": "../datasets/evaluations/char-zh-cn-geometry-v2",
         "base_root": "../datasets/pinyin-embeddings/duyu-chinese-lessons-base-none-v1",
         "base_manifest_sha256": "1958415e79c407bf8cd5db7f2e06fa71ba667d09c85207b890a7dabcc0382035",
         "zh_cn_root": "../datasets/pinyin-embeddings/duyu-chinese-lessons-zh-cn-v1",

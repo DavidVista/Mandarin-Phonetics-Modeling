@@ -79,6 +79,36 @@ def inspect_checkpoints(root, pin, model, experiment_pin):
     return manifest, selections
 
 
+def expected_checkpoint_seeds(root, pin, model, experiment_pin):
+    manifest, selections = inspect_checkpoints(root, pin, model, experiment_pin)
+    return {
+        seed: {
+            "checkpoint_sha256": manifest["artifacts"][f"seed-{seed}/best.pt"],
+            "best_epoch": selected["best_epoch"],
+            "seed_input_hashes": selected["seed_input_hashes"],
+        }
+        for seed, selected in selections.items()
+    }
+
+
+def expected_unknown_positions(root, pin, occurrences, test_pin):
+    manifest = json.loads(pinned_bytes(root, "manifest.json", pin))
+    artifacts = manifest["artifacts"]
+    unknown = {}
+    hashes = {}
+    for seed in TRAINING_SEEDS:
+        base = f"seeds/{seed}"
+        name = f"{base}/vocabulary.json"
+        vocabulary = json.loads(pinned_bytes(root, name, artifacts[name]))
+        stoi, unk_id = vocabulary["stoi"], vocabulary["unk_id"]
+        unknown[seed] = np.asarray([stoi.get(row["character"], unk_id) == unk_id for row in occurrences])
+        name = f"{base}/input_hashes.json"
+        hashes[seed] = json.loads(pinned_bytes(root, name, artifacts[name]))
+        if hashes[seed]["test"] != test_pin:
+            raise ValueError(f"experiment test identity differs for seed {seed}")
+    return unknown, hashes
+
+
 def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, experiment_pin,
                           training_root, training_pin, model, output, device, batch_size,
                           source_sha256, allow_execution=False):
@@ -131,6 +161,7 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
             artifacts = experiment["artifacts"]
             vocab_bytes = pinned_bytes(experiment_root, f"{base}/vocabulary.json", artifacts[f"{base}/vocabulary.json"])
             vocabulary = json.loads(vocab_bytes)
+            stoi, unk_id = vocabulary["stoi"], vocabulary["unk_id"]
             seed_hashes = json.loads(pinned_bytes(
                 experiment_root, f"{base}/input_hashes.json", artifacts[f"{base}/input_hashes.json"]
             ))
@@ -158,7 +189,7 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
             with torch.inference_mode():
                 for start in range(0, len(samples), batch_size):
                     batch = samples[start:start+batch_size]
-                    tokens = [[vocabulary["stoi"].get(char, 1) for char in sample["text"]] for sample in batch]
+                    tokens = [[stoi.get(char, unk_id) for char in sample["text"]] for sample in batch]
                     lengths = torch.tensor([len(row) for row in tokens])
                     ids = torch.zeros((len(tokens), int(lengths.max())), dtype=torch.long, device=device)
                     for i, token_row in enumerate(tokens):
@@ -171,7 +202,7 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
                     for i, sample in enumerate(batch):
                         for index, position in by_sample[sample["sample_id"]]:
                             hidden[index] = values[i, position]
-                            unknown[index] = tokens[i][position] == 1
+                            unknown[index] = tokens[i][position] == unk_id
             if not np.isfinite(hidden).all() or np.any(np.linalg.norm(hidden, axis=1) == 0):
                 raise ValueError(f"nonfinite or zero hidden state in seed {seed}")
             root = stage / f"seed-{seed}"
@@ -186,14 +217,14 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
     return target
 
 
-def load_export(root, *, model, evaluation_pin, experiment_pin, occurrence_ids, training_pin=None,
-                expected_seeds=None):
+def load_export(root, *, model, evaluation_pin, experiment_pin, occurrence_ids, training_pin,
+                expected_seeds):
     manifest = validate_bundle(root, EXTRACTION_TYPE)
     identity = manifest["identity"]
     if (identity.get("model") != model or identity.get("evaluation_manifest_sha256") != evaluation_pin
             or identity.get("experiment_manifest_sha256") != experiment_pin
             or identity.get("seeds") != list(TRAINING_SEEDS)
-            or (training_pin is not None and identity.get("training_manifest_sha256") != training_pin)):
+            or identity.get("training_manifest_sha256") != training_pin):
         raise ValueError(f"hidden-state export identity mismatch for {model}")
     expected = {f"seed-{seed}/{name}" for seed in TRAINING_SEEDS
                 for name in ("manifest.json", "occurrence_ids.json", "hidden.npy", "unknown.npy")}
@@ -208,7 +239,8 @@ def load_export(root, *, model, evaluation_pin, experiment_pin, occurrence_ids, 
         info = child["identity"]
         if info.get("seed") != seed or any(info.get(key) != value for key, value in identity.items()):
             raise ValueError(f"hidden-state seed identity mismatch for {model}/{seed}")
-        if expected_seeds is not None and any(info.get(key) != value for key, value in expected_seeds[seed].items()):
+        if any(info.get(key) != expected_seeds[seed][key]
+               for key in ("checkpoint_sha256", "best_epoch", "seed_input_hashes")):
             raise ValueError(f"hidden-state checkpoint provenance mismatch for {model}/{seed}")
         seed_hashes = info.get("seed_input_hashes")
         if (info.get("representation") != "raw pre-head" or type(info.get("best_epoch")) is not int

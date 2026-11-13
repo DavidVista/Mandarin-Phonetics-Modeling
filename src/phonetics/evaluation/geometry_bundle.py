@@ -16,7 +16,8 @@ from .dimsim import DimsimDistance
 from .sampling import pair_count
 
 BUNDLE_TYPE = "syllable_geometry_evaluation"
-PAIRING_POLICY = "strict_nonzero_excluded_pinyin"
+LEGACY_PAIRING_POLICY = "strict_nonzero_excluded_pinyin"
+PAIRING_POLICY = "strict_nonzero_all_observed"
 ARTIFACTS = {"inventory.json", "sentences.jsonl", "occurrences.jsonl", "groups.jsonl", "pairs/syllable.jsonl"}
 
 
@@ -60,7 +61,8 @@ def resolve_evaluation_config(spec, resolve):
 
 def validate_geometry_bundle(path, *, identity=None):
     manifest = validate_bundle(path, BUNDLE_TYPE, identity=identity)
-    if set(manifest["artifacts"]) != ARTIFACTS or manifest["identity"].get("pairing_policy") != PAIRING_POLICY:
+    if (set(manifest["artifacts"]) != ARTIFACTS
+            or manifest["identity"].get("pairing_policy") not in (PAIRING_POLICY, LEGACY_PAIRING_POLICY)):
         raise ValueError("invalid geometry evaluation bundle contract")
     return manifest
 
@@ -82,8 +84,8 @@ def prepare_geometry_bundle(spec):
     excluded = set(spec["excluded_pinyin"])
     zero_initial = [label for label, parsed in components.items() if not parsed.initial]
     applied = [label for label, parsed in components.items() if parsed.initial and label in excluded]
-    eligible = [label for label, parsed in components.items() if parsed.initial and label not in excluded]
-    if len(eligible) < 2:
+    eligible = [label for label, parsed in components.items() if parsed.initial]
+    if len(set(eligible) - excluded) < 2:
         raise ValueError("evaluation requires at least two eligible syllables")
     if len({(components[label].initial, components[label].final, components[label].tone)
             for label in eligible}) != len(eligible):
@@ -103,16 +105,13 @@ def prepare_geometry_bundle(spec):
     }
     if "exclusion_confirmation" in spec:
         identity["exclusion_confirmation"] = spec["exclusion_confirmation"]
-    if target.exists() or target.is_symlink():
-        validate_geometry_bundle(target, identity=identity)
-        return target
-
     groups = {}
     by_label = {}
     for label in eligible:
         parsed = components[label]
         group_id = _group_id("syllable", (label,))
         group = {"group_id": group_id, "group_kind": "syllable", "keys": [label], "pinyin": label,
+                 "excluded_from_primary": label in excluded,
                  "initial": parsed.initial, "final": parsed.final, "tone": parsed.tone}
         groups[group_id] = group
         by_label[label] = group
@@ -129,6 +128,18 @@ def prepare_geometry_bundle(spec):
                     "character_position": position, "character": character, "pinyin": label,
                     "initial": group["initial"], "final": group["final"], "tone": group["tone"],
                 })
+
+    identity["occurrence_counts"] = {
+        "observed": sum(len(sample["labels"]) for sample in samples),
+        "eligible": len(occurrences),
+        "excluded_by_list": sum(row["pinyin"] in excluded for row in occurrences),
+    }
+    identity["occurrence_counts"]["zero_initial"] = (
+        identity["occurrence_counts"]["observed"] - len(occurrences)
+    )
+    if target.exists() or target.is_symlink():
+        validate_geometry_bundle(target, identity=identity)
+        return target
 
     with staging_directory(target) as staging:
         write_json(staging / "inventory.json", inventory)
