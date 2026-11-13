@@ -3,6 +3,7 @@ import importlib.util, json, sys, tempfile, unittest
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
@@ -16,6 +17,14 @@ def approved(td):
     s=td/"style.toml";r=td/"registry.toml";s.write_bytes((PKG/"style.toml").read_bytes());r.write_text((PKG/"registry.toml").read_text().replace('status = "draft"','status = "approved"',1));return viz.load_protocol(s,r)
 
 class Tests(unittest.TestCase):
+    def setUp(self):
+        existing = set(plt.get_fignums())
+        self.addCleanup(self.close_new_figures, existing)
+
+    def close_new_figures(self, existing):
+        for number in set(plt.get_fignums()) - existing:
+            plt.close(number)
+
     def test_schema_layout_and_math(self):
         with tempfile.TemporaryDirectory() as x:
             d=Path(x);r=d/"r";r.write_bytes((PKG/"registry.toml").read_bytes())

@@ -164,7 +164,7 @@ class DataPersistenceTests(unittest.TestCase):
                     (output / f"{stem}.{suffix}").write_text("synthetic render fixture", encoding="utf-8")
 
         with patch("phonetics.visualization.evaluation_report.apply_style"), patch(
-            "phonetics.visualization.evaluation_report.render_evaluation", side_effect=renderer
+            "phonetics.visualization.evaluation_report.render_loaded_evaluation", side_effect=renderer
         ):
             root = self.report(result, "separate-report")
         manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
@@ -180,7 +180,7 @@ class DataPersistenceTests(unittest.TestCase):
     def test_failed_report_keeps_numerical_runs_complete(self):
         result = self.persist()
         with patch("phonetics.visualization.evaluation_report.apply_style"), patch(
-            "phonetics.visualization.evaluation_report.render_evaluation", side_effect=RuntimeError("renderer failed")
+            "phonetics.visualization.evaluation_report.render_loaded_evaluation", side_effect=RuntimeError("renderer failed")
         ):
             with self.assertRaisesRegex(RuntimeError, "renderer failed"):
                 self.report(result, "failed-report")
