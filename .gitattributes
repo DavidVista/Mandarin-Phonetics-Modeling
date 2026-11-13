@@ -10,3 +10,4 @@ datasets/evaluations/**/config.json -text
 datasets/evaluations/**/coverage.json -text
 datasets/pinyin-embeddings/** -text
 datasets/ids-decomposition/** -text
+datasets/dimsim-human-agreement/** -text

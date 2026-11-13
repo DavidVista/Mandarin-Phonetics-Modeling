@@ -1,0 +1,15 @@
+{
+  "citation": "Li et al. (2022), Neural representation of phonological information during Chinese character reading",
+  "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9374885/#db_ds_supplementary-material1_reqid_",
+  "tables": {
+    "readings.csv": "Appendix S1, Table S2",
+    "similarity.csv": "Appendix S1, Table S3"
+  },
+  "participants": 27,
+  "transcription": "Readings and mean ratings recovered from the existing pilot transcription.",
+  "pilot_transcription_sha256": "7983d28ec714dad68c5403d4ee7f1f35d0d3721e27229d9221beee30a1474b28",
+  "files": {
+    "readings.csv": "d8666b982c24d789e042830915d0ec6001de98487a3b7f41979ac72d88cb7899",
+    "similarity.csv": "ddb6d8eeb39af021aa21a143e8a96ce33183afb4fd8ac24207cbca21c89b7d88"
+  }
+}

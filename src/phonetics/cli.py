@@ -10,6 +10,9 @@ import zipfile
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="phonetics")
     commands = parser.add_subparsers(dest="command", required=True)
+    human = commands.add_parser("dimsim-human-agreement", help="Compare DIMSIM with published human ratings")
+    human.add_argument("--input", required=True, type=Path, help="Directory with pinned readings and similarity CSVs")
+    human.add_argument("--output", required=True, type=Path, help="Directory for the sealed report")
     download = commands.add_parser("download-sounds", help="Download and verify the official Mandarin archive")
     download.add_argument("--output", required=True, help="Source bundle directory; existing content must match the source pin")
     download.add_argument("--timeout", type=float, default=60, help="Network read timeout in seconds")
@@ -57,7 +60,10 @@ def main(argv=None):
     train.add_argument("--allow-training", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.command in ("extract-hidden-states", "import-hidden-states"):
+        if args.command == "dimsim-human-agreement":
+            from .research.dimsim_human_agreement import run_human_agreement
+            print(json.dumps({"path": str(run_human_agreement(args.input, args.output))}))
+        elif args.command in ("extract-hidden-states", "import-hidden-states"):
             from .pipeline import load_config
             from .encoder_jobs import extract_configured, import_hidden_states
             config = load_config(args.config)

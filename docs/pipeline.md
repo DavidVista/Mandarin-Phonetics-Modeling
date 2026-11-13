@@ -78,6 +78,24 @@ nonzero-initial syllable-pair table. It publishes the retained figures and
 tables, plus `tables/descriptive_summary.json` with quantiles, overlap masks,
 peak and tail diagnostics, segment-pair reweighting and clustering.
 
+The standalone human agreement command uses the local transcription of
+Li et al. (2022), Appendix S1, Tables S2 and S3. The CSVs were recovered from
+the existing pilot transcription, without an independent comparison to the
+publisher appendix during packaging. The command verifies the CSV hashes in
+`source.json`, transforms mean similarity into distance as `8 - similarity`,
+and evaluates original DIMSIM (A). Install the project's `analysis` extra
+for DIMSIM and SciPy.
+
+```sh
+phonetics dimsim-human-agreement --input datasets/dimsim-human-agreement/li-2022-v1 --output outputs/dimsim-human-agreement/li-2022-v1
+```
+
+The output contains `pairs.csv`, `summary.csv` and a manifest. The summary gives
+Spearman correlations for all character pairs, character pairs with two
+nonzero initials, and unique pairs of distinct tonal readings in that
+nonzero-initial subset. The last slice averages human distances over character
+pairs sharing the same reading pair.
+
 Other available analysis jobs:
 
 ```json
