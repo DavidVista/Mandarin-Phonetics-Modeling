@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import csv
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +16,7 @@ from ..evaluation.training_summary import TRAINING_MODELS, TRAINING_SEEDS
 from ..visualization.encoder_geometry import rank_metrics, write_view, write_page
 from ..visualization.reference_geometry import render_distance_maps
 from .reference_geometry import _read_reference
+from . import encoder_diagnostics as diagnostic
 
 SYSTEMS = ("DIMSIM", *TRAINING_MODELS)
 BASELINE = "Component mismatch count"
@@ -116,7 +117,7 @@ def _write_tables(root, tables, suffix):
 
 
 def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, checkpoints,
-                         output, tolerance, source_sha256):
+                         output, tolerance, source_sha256, diagnostics=False):
     _, occurrences = load_positions(evaluation_root, pins["evaluation"])
     labels, components, reference, identity = _read_reference(evaluation_root, pins["evaluation"])
     if identity["experiment_manifest_sha256"] != pins["experiment"]:
@@ -141,6 +142,7 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
     if len(common) < 2:
         raise ValueError("primary geometry requires at least two syllables shared across all seeds")
     label_indices = [index for index, label in enumerate(labels) if label in common]
+    all_labels, all_reference = labels, reference
     reference = reference[np.ix_(label_indices, label_indices)]
     labels = [labels[index] for index in label_indices]
     component_rows = [components[label] for label in labels]
@@ -152,7 +154,7 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
     baseline[unavailable, unavailable] = np.nan
     export_pins = {model: sha256_file(Path(exports[model]) / "manifest.json") for model in TRAINING_MODELS}
     report_identity = {"inputs": pins, "exports": export_pins, "tolerance": tolerance,
-                       "source_sha256": source_sha256, "models": list(TRAINING_MODELS),
+                       "source_sha256": source_sha256, "diagnostics": diagnostics, "models": list(TRAINING_MODELS),
                        "seeds": list(TRAINING_SEEDS), "unknown_policy": "exclude_target_position",
                        "population": "common_primary_syllables_across_seeds",
                        "full_match_policy": "at_least_two_occurrences_in_every_seed",
@@ -192,7 +194,35 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                                        for seed, counts in counts_by_seed.items()},
             "excluded_from_shared_inventory": sorted(candidate_labels - common),
         })
+        diagnostic_rows = defaultdict(list)
+        if diagnostics:
+            populations, support = diagnostic.plan_diagnostics(
+                all_labels, occurrences, unknown_by_seed, excluded, labels
+            )
+            diagnostic_rows["support"].extend(support)
+            bins = Counter()
+            for row in support:
+                if row["excluded_from_primary"]:
+                    continue
+                occurrences_count, characters = row["occurrences"], row["characters"]
+                occurrence_bin = ("0", "1")[occurrences_count] if occurrences_count <= 1 else (
+                    "2–10" if occurrences_count <= 10 else ">10"
+                )
+                character_bin = str(characters) if characters < 3 else "3+"
+                bins[row["seed"], occurrence_bin, character_bin] += 1
+            diagnostic_rows["support_bins"].extend(
+                {"seed": seed, "occurrence_bin": occurrence_bin,
+                 "character_bin": character_bin, "syllables": count}
+                for (seed, occurrence_bin, character_bin), count in sorted(bins.items())
+            )
+            expanded = populations["expanded"][0]
+            reference_b, provenance_b = diagnostic.reference_b_matrix(expanded)
+            write_json(stage / "data/diagnostics.json", {
+                "dimsim_b": provenance_b,
+                "inventories": {"primary": labels, **{name: value[0] for name, value in populations.items()}},
+            })
         for seed in TRAINING_SEEDS:
+            diagnostic_distances = defaultdict(list)
             selected = [index for index in indices_by_seed[seed] if occurrences[index]["pinyin"] in common]
             retained = [occurrences[index] for index in selected]
             distances = [reference]
@@ -203,6 +233,21 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                         or not np.array_equal(unknown, unknown_by_seed[seed])):
                     raise ValueError("encoder export differs from the pinned seed inputs")
                 distance = contextual_distances(labels, retained, hidden[selected])
+                if diagnostics:
+                    diagnostic_rows["full_match"].extend(
+                        {"seed": seed, **row} for row in diagnostic.full_match_rows(
+                            labels, component_rows, retained, hidden[selected], distance, tolerance, model
+                        )
+                    )
+                    for name, (inventory, _, positions_by_seed, match) in populations.items():
+                        if len(inventory) < 2:
+                            continue
+                        positions_for_slice = positions_by_seed[seed]
+                        matrix = contextual_distances(inventory, [occurrences[i] for i in positions_for_slice],
+                                                      hidden[positions_for_slice])
+                        missing = [i for i, label in enumerate(inventory) if label not in match]
+                        matrix[missing, missing] = np.nan
+                        diagnostic_distances[name].append(matrix)
                 distance[unavailable, unavailable] = np.nan
                 distances.append(distance)
                 coverage.append({"seed": seed, "system": model, "syllables": len(labels),
@@ -227,6 +272,15 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                 row.update(top_overlap=overlap, near_far_win_rate=near_far)
             rankings = (overlap_rates[:len(SYSTEMS)], near_far_rates[:len(SYSTEMS)])
             tables["paired_differences"] = _paired_differences(tables)
+            if diagnostics:
+                diagnostic_rows["coverage"].append(
+                    {"seed": seed, "population": "primary", "syllables": len(labels),
+                     "occurrences": len(retained), "full_matches": int(full_match.sum())}
+                )
+                diagnostic.add_seed_tables(
+                    diagnostic_rows, seed, populations, diagnostic_distances, all_reference,
+                    reference_b, components, (*SYSTEMS, BASELINE), tolerance, tables, _paired_differences,
+                )
             np.savez_compressed(stage / f"data/seed-{seed}.npz", distances=distances, **maps)
             for name, rows in tables.items():
                 all_tables[name].extend({"seed": seed, **row} for row in rows)
@@ -251,13 +305,19 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
         np.savez_compressed(stage / "data/across-seeds.npz", distances=means, **map_sum)
         _write_tables(stage / "tables", {**all_tables, "coverage": coverage}, "")
         _write_tables(stage / "tables", summary, "_across_seeds")
+        if diagnostics:
+            for name, fields in diagnostic.TABLE_FIELDS.items():
+                with (stage / "tables" / f"diagnostic_{name}.csv").open("w", encoding="utf-8", newline="") as stream:
+                    writer = csv.DictWriter(stream, fieldnames=fields.split())
+                    writer.writeheader()
+                    writer.writerows(diagnostic_rows[name])
         rankings = tuple([row[field] for row in summary["pairwise_spearman"] if row["system"] in SYSTEMS]
                          for field in ("top_overlap_mean", "near_far_win_rate_mean"))
         write_view(stage / "views/across-seeds.js", "across-seeds", means, map_sum, summary,
                    tolerance, rankings=rankings)
         write_page(stage / "encoder_geometry.html", labels, [components[x] for x in labels], coverage,
                    evaluation=identity["evaluation_id"], excluded=identity["excluded_pinyin"],
-                   tolerance=tolerance)
+                   tolerance=tolerance, diagnostics=diagnostics)
         render_distance_maps(stage / "figures", labels, means[1:], map_sum["component_order"], figures=FIGURES,
                              provenance={"source_digest": content_hash(report_identity),
                                          "evaluation_manifest_sha256": pins["evaluation"],

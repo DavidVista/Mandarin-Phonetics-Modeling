@@ -12,8 +12,10 @@ from .execution import safe_id
 
 def resolve_encoder_config(spec, resolve):
     required = {"id", "training_runs", "representations_root", "device", "batch_size", "tolerance"}
-    if not isinstance(spec, dict) or set(spec) != required:
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics"}:
         raise ValueError("encoder_geometry requires id, training_runs, representations_root, device, batch_size and tolerance")
+    if type(spec.get("diagnostics", False)) is not bool:
+        raise ValueError("encoder diagnostics must be a boolean")
     safe_id(spec["id"])
     if not isinstance(spec["training_runs"], dict) or set(spec["training_runs"]) != set(TRAINING_MODELS):
         raise ValueError("select exactly one training run for each encoder model")
@@ -171,4 +173,5 @@ def run_encoder_workflow(*, refs, pins, spec, reports_root, source_sha256, allow
     return run_encoder_geometry(evaluation_root=roots["evaluation"], experiment_root=roots["experiment"],
                                 pins=pins, exports=exports, checkpoints=checkpoints,
                                 output=Path(reports_root) / spec["id"],
-                                tolerance=spec["tolerance"], source_sha256=source_sha256)
+                                tolerance=spec["tolerance"], source_sha256=source_sha256,
+                                diagnostics=spec.get("diagnostics", False))

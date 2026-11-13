@@ -204,6 +204,7 @@ sys.path.insert(0, str(SDK_ROOT))
 """
 
     notebook_spec = {key: spec[key] for key in ("id", "device", "batch_size", "tolerance")}
+    notebook_spec["diagnostics"] = spec.get("diagnostics", False)
     settings = (
         f"PINS = {pins!r}\nREFERENCES = {refs!r}\nSPEC = {notebook_spec!r}\n"
         f"SOURCE_SHA256 = {content_hash(hashes)!r}\n"

@@ -165,6 +165,7 @@ table{border-collapse:collapse}th,td{padding:6px 10px;border-bottom:1px solid #d
 <header><h1>Encoder geometry</h1><label>Seed <select id="seed"></select></label>
 <label>Left model <select id="left"></select></label><label>Right model <select id="right"></select></label>
 <p id="status" aria-live="polite"></p><a href="tables/coverage.csv">Coverage and UNK counts</a> · <a href="manifest.json">Manifest</a></header>
+@@DIAGNOSTICS@@
 <iframe id="view" title="Synchronized encoder distance maps"></iframe>
 <details><summary>Selected metrics and seed dispersion</summary><div id="summary"></div></details>
 <p>DIMSIM Agreement excludes reference ties. The score is (wins + 0.5 × model ties) / comparisons,
@@ -233,7 +234,7 @@ render();
 </script></html>"""
 
 
-def write_page(path, labels, components, coverage, *, evaluation, excluded, tolerance):
+def write_page(path, labels, components, coverage, *, evaluation, excluded, tolerance, diagnostics=False):
     order = sorted(range(len(labels)), key=lambda index: (tuple(components[index]), labels[index]))
     rows = "".join(
         f"<tr><th>{html.escape(row['system'])} · Seed {row['seed']}</th>"
@@ -246,4 +247,11 @@ def write_page(path, labels, components, coverage, *, evaluation, excluded, tole
                 "names": NAMES, "systems": SYSTEMS, "seeds": TRAINING_SEEDS, "coverage": rows,
                 "evaluation": html.escape(evaluation), "excluded": len(excluded), "tolerance": f"{tolerance:g}"}
     page = _SHELL.replace("@@SETTINGS@@", _json(settings)).replace("@@TEMPLATE@@", _json(_encoder_template()))
-    Path(path).write_text(page, encoding="utf-8")
+    links = ""
+    if diagnostics:
+        from ..research.encoder_diagnostics import TABLE_FIELDS
+        links = "<p>Diagnostics: " + " · ".join(
+            f'<a href="tables/diagnostic_{name}.csv">{name.replace("_", " ").capitalize()}</a>'
+            for name in TABLE_FIELDS
+        ) + ' · <a href="data/diagnostics.json">Inventories and provenance</a></p>'
+    Path(path).write_text(page.replace("@@DIAGNOSTICS@@", links), encoding="utf-8")

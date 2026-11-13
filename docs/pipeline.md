@@ -194,6 +194,19 @@ ties. Same mask agreement is also reported by overlap mask. The component
 baseline is the number of mismatched initial, final and tone labels. Paired
 differences subtract the first model from the second within each seed.
 
+Set `"diagnostics": true` in the `encoder_geometry` configuration and choose a
+new report ID to include optional diagnostic CSV tables. The notebook carries
+this setting in `SPEC`. The report links the tables and records slice inventories
+and DIMSIM B provenance. The UNK comparison retains a common syllable inventory
+and Full Match support. The high-support slice requires more than 10 occurrences
+and at least three characters in every seed. The Full Match table compares the
+two estimators on identical anchors and one-component candidates. The primary
+estimator conditions the character-balanced occurrence weights on distinct
+occurrences. The alternative gives equal weight to unordered pairs of distinct
+characters and averages over their occurrence pairs. The expanded
+slice includes the marked readings when supported in every seed. DIMSIM A and B
+are compared on the same strictly ordered triples of distinct syllables.
+
 Keep the generated report directory together when opening `encoder_geometry.html`.
 It loads the selected seed view locally and displays DIMSIM with two selected
 models. The across-seeds view averages matrices and displays seedwise metric
