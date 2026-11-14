@@ -269,6 +269,14 @@ def validate_training_result(root, job):
     if 'sources' in job:
         codes = manifest.get('code_sha256', {})
         required = {'training.py', 'model.py', 'metrics.py', 'architecture.py', 'experiment.py'}
+        from .bert import is_bert
+        from .architecture import BERT_REQUIREMENTS
+        if is_bert(manifest.get('config', {'architecture': {}})):
+            required.add('bert.py')
+            for requirement in BERT_REQUIREMENTS:
+                name, expected = requirement.split('==')
+                if manifest.get('runtime', {}).get(name) != expected:
+                    raise ValueError('training result BERT runtime differs from the job')
         if (not required <= set(codes) or any(job['sources'].get(name) != digest for name, digest in codes.items())
                 or manifest.get('runtime', {}).get('torch', '').split('+', 1)[0] != '2.11.0'):
             raise ValueError('training result SDK/runtime differs from the job')

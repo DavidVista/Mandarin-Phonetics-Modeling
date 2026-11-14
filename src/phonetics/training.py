@@ -11,6 +11,7 @@ import random
 import shutil
 import statistics
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,8 +22,9 @@ import torch
 from .artifacts import sha256_file, write_json
 from .data import create_loaders
 from .experiment import SELECTION_RULE, load_experiment, select_seed, training_epoch_limit
+from .bert import BertInputs, is_bert
 from .metrics import batch_objective, finalize_epoch
-from .model import build_encoder, shared_encoder_sha256
+from .model import BertEncoder, build_encoder, shared_encoder_sha256
 from .objectives import canonical_model_id, parse_model_id
 from .reproducibility import rng_snapshot, seed_everything
 
@@ -65,20 +67,28 @@ def _move(batch, device):
 
 
 def _gradient_norm(model):
-    squared_norm = torch.zeros((), dtype=torch.float64, device="cpu")
-    finite = True
+    if not isinstance(getattr(model, "encoder", None), BertEncoder):
+        squared_norm = torch.zeros((), dtype=torch.float64, device="cpu")
+        finite = True
+        for parameter in model.parameters():
+            if parameter.grad is None:
+                continue
+            grad = parameter.grad.detach()
+            if not bool(torch.isfinite(grad).all()):
+                finite = False
+            squared_norm += grad.to(device="cpu", dtype=torch.float64).square().sum()
+        value = float(torch.sqrt(squared_norm).item())
+        return value, finite and math.isfinite(value)
+    norms = []
     for parameter in model.parameters():
         if parameter.grad is None:
             continue
-        grad = parameter.grad.detach()
-        if not bool(torch.isfinite(grad).all()):
-            finite = False
-        squared_norm += grad.to(device="cpu", dtype=torch.float64).square().sum()
-    value = float(torch.sqrt(squared_norm).item())
-    return value, finite and math.isfinite(value)
+        norms.append(torch.linalg.vector_norm(parameter.grad.detach(), dtype=torch.float64))
+    value = torch.linalg.vector_norm(torch.stack(norms)).item() if norms else 0.0
+    return value, math.isfinite(value)
 
 
-def _epoch(model, loader, acoustic_targets, model_id, device, *, optimizer=None, event_writer=None,
+def _epoch(model, loader, acoustic_targets, model_id, device, *, optimizer=None, scheduler=None, event_writer=None,
            epoch_number=None, step_start=0):
     training = optimizer is not None
     model.train(training)
@@ -113,6 +123,8 @@ def _epoch(model, loader, acoustic_targets, model_id, device, *, optimizer=None,
                                               _failure_diagnostic(record, gradient_norms, nonfinite_gradients))
                 gradient_norms.append(grad_norm)
                 optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
             else:
                 grad_norm = None
         detached = _jsonable_metrics(stats)
@@ -176,6 +188,17 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
     if model_id not in config["model_ids"]:
         raise ValueError("selected model_id is not configured in the experiment")
     epoch_limit = training_epoch_limit(config, model_id)
+    bert_inputs = None
+    bert_rows = {}
+    if is_bert(config):
+        bert_inputs = BertInputs(config["architecture"]["encoder"], pretrained=True)
+        splits = experiment["splits"]
+        populations = [("test", splits["test"])]
+        populations.extend((f"seed {seed} {split}", ids) for seed, partitions in splits["seeds"].items()
+                           for split, ids in partitions.items())
+        for split, ids in populations:
+            samples = [experiment["samples"][sid] for sid in ids if sid not in bert_rows]
+            bert_rows.update(bert_inputs.prepare(samples, split=split))
     seeds = experiment["manifest"]["identity"]["training_seeds"]
     requested_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     target_device = torch.device(requested_device)
@@ -204,6 +227,9 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
                     "cuda_available": torch.cuda.is_available(), "cuda_version": torch.version.cuda},
         "seed_results": [], "summary": None, "artifacts": {},
     }
+    if bert_inputs is not None:
+        manifest["code_sha256"]["bert.py"] = sha256_file(Path(__file__).with_name("bert.py"))
+        manifest["runtime"].update({name: importlib.metadata.version(name) for name in ("transformers", "tokenizers")})
     write_json(run_dir / "manifest.json", manifest)
     seed_results = []
     statuses = {str(seed): "pending" for seed in seeds}
@@ -224,22 +250,34 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
             seed_input = select_seed(experiment, seed)
             seed_inputs = json.loads((experiment_root / "seeds" / str(seed) / "input_hashes.json").read_text(encoding="utf-8"))
             seed_everything(seed)
-            model = build_encoder(config, seed_input["vocab"], model_id=model_id, seed=seed).to(target_device)
+            model = build_encoder(config, seed_input["vocab"], model_id=model_id, seed=seed,
+                                  bert_inputs=bert_inputs).to(target_device)
             initial_state = {key: value.detach().cpu().clone() for key, value in model.encoder.state_dict().items()}
             shared_hash = _state_hash(initial_state)
             torch.save({"state_dict": initial_state, "seed": seed, "sha256": shared_hash,
                         "seed_input_hashes": seed_inputs, "experiment_hashes": manifest["experiment_hashes"]},
                        seed_dir / "shared_encoder.pt")
-            loaders = create_loaders(seed_input, seed, batch_size=config["training"]["batch_size"], num_workers=0)
+            loaders = create_loaders(seed_input, seed, batch_size=config["training"]["batch_size"], num_workers=0,
+                                     bert_inputs=bert_inputs, bert_rows=bert_rows)
             acoustic = torch.as_tensor(experiment["acoustic_targets"], dtype=torch.float32, device=target_device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["learning_rate"], weight_decay=0.0)
+            settings = config["training"]
+            optimizer_type = torch.optim.AdamW if settings["optimizer"] == "AdamW" else torch.optim.Adam
+            optimizer = optimizer_type(model.parameters(), lr=settings["learning_rate"],
+                                       weight_decay=settings["weight_decay"])
+            scheduler = None
+            if settings["scheduler"] is not None:
+                from transformers import get_linear_schedule_with_warmup
+                steps = epoch_limit * len(loaders["train"])
+                scheduler = get_linear_schedule_with_warmup(
+                    optimizer, int(steps * settings["scheduler"]["warmup_ratio"]), steps)
             best = math.inf
             best_epoch = None
             best_validation = None
             epoch_history = []
             for epoch_num in range(1, epoch_limit + 1):
+                started = time.perf_counter()
                 train_metrics, global_step = _epoch(model, loaders["train"], acoustic, model_id, target_device,
-                                                    optimizer=optimizer, event_writer=log_event,
+                                                    optimizer=optimizer, scheduler=scheduler, event_writer=log_event,
                                                     epoch_number=epoch_num, step_start=global_step)
                 norm_values.extend(train_metrics.pop("gradient_norms"))
                 nonfinite_count += train_metrics.pop("gradient_nonfinite_count")
@@ -247,6 +285,8 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
                                                event_writer=log_event, epoch_number=epoch_num)
                 val_objective = float(validation_metrics["objective"])
                 epoch_history.append({"epoch": epoch_num, "train": train_metrics, "validation": validation_metrics})
+                if bert_inputs is not None:
+                    epoch_history[-1]["seconds"] = time.perf_counter() - started
                 if val_objective < best:
                     best, best_epoch, best_validation = val_objective, epoch_num, validation_metrics
                     torch.save({"state_dict": model.state_dict(), "model_id": model_id, "lambda_cosine": lambda_cosine, "seed": seed,
@@ -257,6 +297,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
                                 "vocab_sha256": sha256_file(experiment_root / "seeds" / str(seed) / "vocabulary.json"),
                                 "seed_input_hashes": seed_inputs}, seed_dir / "best.pt")
                 torch.save({"state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(),
+                            **({"scheduler_state_dict": scheduler.state_dict()} if scheduler is not None else {}),
                             "seed": seed, "epoch": epoch_num, "rng_state": rng_snapshot(loaders["train"].generator),
                             "model_id": model_id, "seed_input_hashes": seed_inputs,
                             "experiment_hashes": manifest["experiment_hashes"],

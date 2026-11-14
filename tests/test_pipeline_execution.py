@@ -157,10 +157,30 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'configuration or SDK changed'):
             load_state(self.config)
 
+    def test_bert_notebook_includes_pinned_dependencies_and_snapshot_setting(self):
+        from phonetics.architecture import BERT_FILES, BERT_MODEL_ID, BERT_REVISION
+        self.fixture.config['architecture']['encoder'] = {
+            'type': 'bert', 'model_id': BERT_MODEL_ID,
+            'revision': BERT_REVISION, 'files': dict(BERT_FILES),
+        }
+        self.experiment = self.fixture.build('bert')
+        self.config['experiment_id'] = self.experiment.name
+        with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
+            pending = run_pipeline(self.config)
+        cells = json.loads(Path(pending['notebook']).read_text(encoding='utf-8'))['cells']
+        self.assertIn('transformers==4.57.6', ''.join(cells[1]['source']))
+        self.assertIn('tokenizers==0.22.2', ''.join(cells[1]['source']))
+        self.assertIn('BERT_SNAPSHOT', ''.join(cells[-2]['source']))
+        self.assertIn('PHONETICS_BERT_SNAPSHOT', ''.join(cells[-1]['source']))
+        for cell in cells:
+            if cell['cell_type'] == 'code':
+                compile(''.join(cell['source']), cell['id'], 'exec')
+        self.assertNotIn('torch', sys.modules)
+
     def test_encoder_and_training_validation(self):
         value = copy.deepcopy(self.fixture.config)
         value['architecture']['encoder']['type'] = 'bert'
-        with self.assertRaisesRegex(ValueError, 'unsupported encoder'):
+        with self.assertRaisesRegex(ValueError, 'BERT requires'):
             _validate_config(value, 2)
         for key, bad in (('epochs', True), ('batch_size', 0), ('learning_rate', float('nan'))):
             value = copy.deepcopy(self.fixture.config)

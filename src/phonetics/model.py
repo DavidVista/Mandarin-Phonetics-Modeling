@@ -43,6 +43,30 @@ class SharedEncoder(nn.Module):
         return self.encode(batch)
 
 
+class BertEncoder(nn.Module):
+    def __init__(self, inputs, *, pretrained):
+        super().__init__()
+        from transformers import BertModel
+
+        self.context_dim = inputs.config.hidden_size
+        if pretrained:
+            self.backbone, loading = BertModel.from_pretrained(
+                inputs.root, config=inputs.config, add_pooling_layer=False,
+                local_files_only=True, use_safetensors=True, output_loading_info=True,
+            )
+            if loading["missing_keys"] or loading["mismatched_keys"] or loading["error_msgs"]:
+                raise ValueError("pinned BERT weights do not fully initialize the encoder")
+        else:
+            self.backbone = BertModel(inputs.config, add_pooling_layer=False)
+
+    def encode(self, batch):
+        states = self.backbone(input_ids=batch["bert_input_ids"],
+                               attention_mask=batch["bert_attention_mask"]).last_hidden_state
+        mask = batch["char_mask"]
+        positions = batch["bert_positions"].unsqueeze(-1).expand(-1, -1, self.context_dim)
+        return states.gather(1, positions).masked_fill(~mask.unsqueeze(-1), 0), mask
+
+
 class ClassifierHead(nn.Module):
     def __init__(self, output_dim: int, context_dim: int, parameters: dict):
         super().__init__()
@@ -55,7 +79,7 @@ class ClassifierHead(nn.Module):
 
 
 class TrainingModel(nn.Module):
-    def __init__(self, encoder: SharedEncoder, model_id: str, vocab: dict, acoustic_dim: int, heads: dict):
+    def __init__(self, encoder: nn.Module, model_id: str, vocab: dict, acoustic_dim: int, heads: dict):
         super().__init__()
         model_id = canonical_model_id(model_id)
         family, weight = parse_model_id(model_id)
@@ -86,27 +110,33 @@ class TrainingModel(nn.Module):
         return result
 
 
-def _construct_with_streams(config: dict, vocab: dict, model_id: str, seed: int) -> TrainingModel:
+def _construct_with_streams(config, vocab, model_id, seed, bert_inputs, pretrained):
     """Initialize shared weights and heads from independent seed streams."""
     model_id = canonical_model_id(model_id)
     architecture = normalize_architecture(config['architecture'])
     devices = []
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(int(seed))
-        encoder = SharedEncoder(len(vocab["characters"]["tokens"]), architecture['encoder'])
+        if architecture["encoder"]["type"] == "bert":
+            if bert_inputs is None:
+                raise ValueError("BERT requires verified tokenizer and model inputs")
+            encoder = BertEncoder(bert_inputs, pretrained=pretrained)
+        else:
+            encoder = SharedEncoder(len(vocab["characters"]["tokens"]), architecture['encoder'])
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(int(seed) + 1_000_003)
         model = TrainingModel(encoder, model_id, vocab, architecture['acoustic_dim'], architecture['heads'])
     return model
 
 
-def build_encoder(config: dict, vocab: dict, model_id: str | None = None, seed: int = 0) -> TrainingModel:
+def build_encoder(config: dict, vocab: dict, model_id: str | None = None, seed: int = 0, *,
+                  bert_inputs=None, pretrained=True) -> TrainingModel:
     """Build a full model; the returned `.encode(batch)` is the shared export API."""
     normalize_architecture(config.get("architecture", {}))
     selected = model_id or config.get("model_id")
     if selected is None:
         raise ValueError("model_id is required to construct objective heads")
-    return _construct_with_streams(config, vocab, selected, seed)
+    return _construct_with_streams(config, vocab, selected, seed, bert_inputs, pretrained)
 
 
 def shared_encoder_sha256(model: TrainingModel) -> str:

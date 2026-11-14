@@ -12,8 +12,10 @@ import numpy as np
 
 from ..artifacts import safe_artifact, sha256_file, write_json
 from ..bundles import content_hash, seal_bundle, staging_directory, validate_bundle
+from ..architecture import BERT_REQUIREMENTS
 from ..experiment import SCHEMA_VERSION, SELECTION_RULE, load_common_test
 from ..objectives import canonical_model_id, parse_model_id
+from ..bert import BertInputs, is_bert
 from .geometry_bundle import validate_geometry_bundle
 
 EXTRACTION_TYPE = "encoder_prehead_export"
@@ -73,11 +75,21 @@ def inspect_checkpoints(root, pin, model, experiment_pin, experiment):
             or manifest.get("selection") != SELECTION_RULE
             or manifest.get("experiment_hashes", {}).get("manifest.json") != experiment_pin):
         raise ValueError(f"incompatible character checkpoint manifest for {model}")
-    model_source = (Path(__file__).parents[1] / "model.py").read_text(encoding="utf-8")
-    source_pins = {hashlib.sha256(text.encode()).hexdigest()
-                   for text in (model_source, model_source.replace("\n", "\r\n"))}
-    if manifest.get("code_sha256", {}).get("model.py") not in source_pins:
-        raise ValueError(f"trained encoder source differs for {model}")
+    if is_bert(config):
+        runtime = manifest.get("runtime", {})
+        if any(runtime.get(name) != expected
+               for name, expected in (item.split("==") for item in BERT_REQUIREMENTS)):
+            raise ValueError(f"trained BERT runtime differs for {model}")
+    for name in ("model.py", "bert.py") if is_bert(config) else ("model.py",):
+        source = (Path(__file__).parents[1] / name).read_text(encoding="utf-8")
+        source_pins = {hashlib.sha256(text.encode()).hexdigest()
+                       for text in (source, source.replace("\n", "\r\n"))}
+        if not is_bert(config):
+            # The pre-BERT model implements the same BiLSTM state and input contract.
+            source_pins.update(("ee0a140f942238a9bdd99721ed1dcc6f4124bc4bb650cde33808cb49a7bcd12e",
+                                "2807eb7ea7d05ebd160b66f24b8b54a70c497caf120257856e07eeaa93847311"))
+        if manifest.get("code_sha256", {}).get(name) not in source_pins:
+            raise ValueError(f"trained encoder source differs for {model}: {name}")
     artifacts = manifest["artifacts"]
     selections = {}
     for seed in seeds:
@@ -115,12 +127,24 @@ def expected_unknown_positions(root, pin, occurrences, test_pin):
     artifacts = manifest["artifacts"]
     unknown = {}
     hashes = {}
+    config = manifest["identity"]["config"]
+    bert_unknown = None
+    if is_bert(config):
+        test_ids, samples = load_common_test(root, expected_manifest_sha256=pin)
+        if content_hash(test_ids) != test_pin:
+            raise ValueError("BERT evaluation test identity differs")
+        rows = BertInputs(config["architecture"]["encoder"]).prepare(samples, split="test")
+        bert_unknown = np.asarray([rows[row["sample_id"]][2][row["character_position"]] for row in occurrences],
+                                  dtype=bool)
     for seed in seeds:
         base = f"seeds/{seed}"
-        name = f"{base}/vocabulary.json"
-        vocabulary = json.loads(pinned_bytes(root, name, artifacts[name]))
-        stoi, unk_id = vocabulary["stoi"], vocabulary["unk_id"]
-        unknown[seed] = np.asarray([stoi.get(row["character"], unk_id) == unk_id for row in occurrences])
+        if bert_unknown is None:
+            name = f"{base}/vocabulary.json"
+            vocabulary = json.loads(pinned_bytes(root, name, artifacts[name]))
+            stoi, unk_id = vocabulary["stoi"], vocabulary["unk_id"]
+            unknown[seed] = np.asarray([stoi.get(row["character"], unk_id) == unk_id for row in occurrences])
+        else:
+            unknown[seed] = bert_unknown
         name = f"{base}/input_hashes.json"
         hashes[seed] = json.loads(pinned_bytes(root, name, artifacts[name]))
         if hashes[seed]["test"] != test_pin:
@@ -148,6 +172,8 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
     labels = json.loads(pinned_bytes(experiment_root, "labels.json", experiment["artifacts"]["labels.json"]))
     if content_hash(config) != content_hash(training["config"]):
         raise ValueError("training and experiment configurations differ")
+    bert_inputs = BertInputs(config["architecture"]["encoder"]) if is_bert(config) else None
+    bert_rows = bert_inputs.prepare(samples, split="test") if bert_inputs is not None else None
     sample_map = {sample["sample_id"]: sample for sample in samples}
     by_sample = defaultdict(list)
     for index, row in enumerate(rows):
@@ -173,6 +199,8 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
                 "experiment_manifest_sha256": experiment_pin, "training_manifest_sha256": training_pin,
                 "seeds": experiment["identity"]["training_seeds"], "source_sha256": source_sha256,
                 "device": device, "batch_size": batch_size, "torch": torch.__version__}
+    if bert_inputs is not None:
+        identity["bert_runtime"] = {name: training["runtime"][name] for name in ("transformers", "tokenizers")}
     with staging_directory(target) as stage:
         for seed, selected in selections.items():
             base = f"seeds/{seed}"
@@ -199,7 +227,8 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
                 raise ValueError(f"checkpoint payload identity differs for seed {seed}")
             vocab = {"characters": vocabulary, "syllables": labels,
                      "labels": {"initials": INITIALS, "finals": FINALS, "tones": TONES}}
-            encoder = build_encoder(config, vocab, model_id=model, seed=seed)
+            encoder = build_encoder(config, vocab, model_id=model, seed=seed,
+                                    bert_inputs=bert_inputs, pretrained=False)
             encoder.load_state_dict(checkpoint["state_dict"], strict=True)
             encoder.to(device).eval()
             hidden = np.empty((len(rows), encoder.context_dim), dtype=np.float32)
@@ -207,20 +236,29 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
             with torch.inference_mode():
                 for start in range(0, len(samples), batch_size):
                     batch = samples[start:start+batch_size]
-                    tokens = [[stoi.get(char, unk_id) for char in sample["text"]] for sample in batch]
-                    lengths = torch.tensor([len(row) for row in tokens])
-                    ids = torch.zeros((len(tokens), int(lengths.max())), dtype=torch.long, device=device)
-                    for i, token_row in enumerate(tokens):
-                        ids[i, :len(token_row)] = torch.tensor(token_row, device=device)
-                    mask = ids != 0
-                    values, result_mask = encoder.encode({"token_ids": ids, "sentence_lengths": lengths, "char_mask": mask})
+                    lengths = torch.tensor([len(sample["text"]) for sample in batch])
+                    mask = torch.arange(int(lengths.max()))[None, :] < lengths[:, None]
+                    if bert_inputs is not None:
+                        aligned = [bert_rows[sample["sample_id"]] for sample in batch]
+                        encoder_batch = bert_inputs.batch(aligned, mask)
+                        unknown_rows = [row[2] for row in aligned]
+                    else:
+                        tokens = [[stoi.get(char, unk_id) for char in sample["text"]] for sample in batch]
+                        ids = torch.zeros(mask.shape, dtype=torch.long)
+                        for i, token_row in enumerate(tokens):
+                            ids[i, :len(token_row)] = torch.tensor(token_row)
+                        encoder_batch = {"token_ids": ids, "sentence_lengths": lengths, "char_mask": mask}
+                        unknown_rows = [[token == unk_id for token in row] for row in tokens]
+                    encoder_batch = {key: value.to(device) for key, value in encoder_batch.items()}
+                    mask = encoder_batch["char_mask"]
+                    values, result_mask = encoder.encode(encoder_batch)
                     if not torch.equal(mask, result_mask):
                         raise ValueError("encoder returned a different position mask")
                     values = values.detach().cpu().numpy()
                     for i, sample in enumerate(batch):
                         for index, position in by_sample[sample["sample_id"]]:
                             hidden[index] = values[i, position]
-                            unknown[index] = tokens[i][position] == unk_id
+                            unknown[index] = unknown_rows[i][position]
             if not np.isfinite(hidden).all() or np.any(np.linalg.norm(hidden, axis=1) == 0):
                 raise ValueError(f"nonfinite or zero hidden state in seed {seed}")
             root = stage / f"seed-{seed}"

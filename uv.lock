@@ -651,6 +651,11 @@ analysis = [
 audio = [
     { name = "soundfile" },
 ]
+bert = [
+    { name = "tokenizers" },
+    { name = "torch" },
+    { name = "transformers" },
+]
 inference = [
     { name = "librosa" },
     { name = "soundfile" },
@@ -680,11 +685,14 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'analysis'", specifier = "==1.18.1" },
     { name = "soundfile", marker = "extra == 'audio'", specifier = "==0.14.0" },
     { name = "soundfile", marker = "extra == 'inference'", specifier = "==0.14.0" },
+    { name = "tokenizers", marker = "extra == 'bert'", specifier = "==0.22.2" },
+    { name = "torch", marker = "extra == 'bert'", specifier = "==2.11.0" },
     { name = "torch", marker = "extra == 'inference'", specifier = "==2.11.0" },
     { name = "torch", marker = "extra == 'training'", specifier = "==2.11.0" },
+    { name = "transformers", marker = "extra == 'bert'", specifier = "==4.57.6" },
     { name = "transformers", marker = "extra == 'inference'", specifier = ">=4.48,<5" },
 ]
-provides-extras = ["audio", "sources", "training", "inference", "analysis", "test"]
+provides-extras = ["audio", "sources", "training", "bert", "inference", "analysis", "test"]
 
 [[package]]
 name = "markupsafe"

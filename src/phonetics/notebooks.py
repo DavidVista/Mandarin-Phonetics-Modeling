@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 from .artifacts import write_json
+from .architecture import BERT_REQUIREMENTS
+from .bert import is_bert
 from .execution import sdk_files, validate_job
 
 
@@ -22,11 +24,14 @@ def render_job_notebook(job_path, *, install_dependencies=True, _sources=None):
     job = validate_job(job_path, expected_sources=sdk_hashes(sources))
     job_id = job['job_id']
     stage = job['stage']
+    bert = stage == 'training' and is_bert(job.get('input_config') or {'architecture': {}})
     requirements = ['numpy==2.1.3', 'pypinyin==0.55.0']
     if stage == 'acoustic':
         requirements += ['soundfile==0.14.0', 'transformers==4.57.6', 'librosa==0.11.0']
     elif stage == 'visualization':
         requirements += ['dimsim==0.2.2', 'matplotlib==3.10.8', 'pandas==3.1.1', 'scipy==1.18.1']
+    if bert:
+        requirements += BERT_REQUIREMENTS
     install = ('import subprocess, sys\n'
                f'REQUIREMENTS = {requirements!r}\n'
                'subprocess.check_call([sys.executable, "-m", "pip", "install", *REQUIREMENTS])\n')
@@ -108,6 +113,9 @@ if hashlib.sha256((INPUT_PATH / "manifest.json").read_bytes()).hexdigest() != EX
 OUTPUT_PATH = Path.cwd() / "results" / JOB_ID
 print("Experiment:", INPUT_PATH, "SHA256:", EXPECTED_INPUT_MANIFEST_SHA256)
 '''
+    if bert:
+        select += '\nimport os\nBERT_SNAPSHOT = ""  # Set to the attached BERT snapshot directory.\n'
+        execute += 'if BERT_SNAPSHOT:\n    os.environ["PHONETICS_BERT_SNAPSHOT"] = BERT_SNAPSHOT\n'
     if stage in ('acoustic', 'training'):
         execute += '''from importlib.metadata import version
 if version("torch").split("+", 1)[0] != "2.11.0":
@@ -168,9 +176,12 @@ def generate_encoder_notebooks(config):
     """Generate the input-pinned encoder geometry notebook without executing it."""
     from .bundles import content_hash
     from .encoder_jobs import encoder_inputs
+    from .evaluation.encoder_extraction import load_experiment_manifest
     from .execution import sdk_hashes
 
     refs, pins = encoder_inputs(config)
+    experiment = load_experiment_manifest(refs["experiment"], pins["experiment"])
+    bert = is_bert(experiment["identity"]["config"])
     sources = sdk_files()
     hashes = sdk_hashes(sources)
     spec = config["encoder_geometry"]
@@ -178,6 +189,8 @@ def generate_encoder_notebooks(config):
     root.mkdir(parents=True, exist_ok=True)
     requirements = ["numpy==2.1.3", "pypinyin==0.55.0", "dimsim==0.2.2",
                     "matplotlib==3.10.8", "pandas==3.1.1", "scipy==1.18.1"]
+    if bert:
+        requirements += BERT_REQUIREMENTS
     installation = f"REQUIREMENTS = {requirements!r}\n"
     if config["notebooks"]["install_dependencies"]:
         installation += 'import subprocess, sys\nsubprocess.check_call([sys.executable, "-m", "pip", "install", *REQUIREMENTS])\n'
@@ -217,8 +230,13 @@ ALLOW_EXTRACTION = False
 FONT_FILES = []
 # FONT_FILES = ["/kaggle/input/your-fonts/arial.ttf", "/kaggle/input/your-fonts/arialbd.ttf"]
 """
-    execution = """from matplotlib import font_manager
-from phonetics.encoder_jobs import run_encoder_workflow
+    if bert:
+        settings += '\nimport os\nBERT_SNAPSHOT = ""  # Set to the attached BERT snapshot directory.\n'
+    execution = 'if BERT_SNAPSHOT:\n    os.environ["PHONETICS_BERT_SNAPSHOT"] = BERT_SNAPSHOT\n' if bert else ''
+    execution += """from matplotlib import font_manager
+from phonetics.encoder_jobs import run_encoder_workflow, locate_exports
+from phonetics.bundles import validate_bundle
+from phonetics.artifacts import sha256_file
 import json
 
 for filename in FONT_FILES:
@@ -228,24 +246,33 @@ for filename in FONT_FILES:
     font_manager.fontManager.addfont(str(font_file))
 
 representations = RESULTS_ROOT / "hidden-states"
+spec = {**SPEC, "representations_root": representations}
 result = run_encoder_workflow(
-    refs=REFERENCES, pins=PINS, spec={**SPEC, "representations_root": representations},
+    refs=REFERENCES, pins=PINS, spec=spec,
     reports_root=RESULTS_ROOT / "reports", source_sha256=SOURCE_SHA256,
     allow_execution=ALLOW_EXTRACTION, mount=INPUT_ROOT,
 )
+identity = json.loads((result / "manifest.json").read_text(encoding="utf-8"))["identity"]
+exports = locate_exports(spec, PINS, identity["models"], INPUT_ROOT)
+with tempfile.TemporaryDirectory(dir=RESULTS_ROOT) as folder:
+    for model in identity["models"]:
+        copied = Path(folder) / model
+        shutil.copytree(exports[model], copied)
+        if sha256_file(copied / "manifest.json") != identity["exports"][model]:
+            raise ValueError(f"Export differs from report input: {model}")
+        validate_bundle(copied, "encoder_prehead_export")
+    print(shutil.make_archive(str(RESULTS_ROOT / (SPEC["id"] + "-hidden-states")), "zip", root_dir=folder))
 print(shutil.make_archive(str(result), "zip", root_dir=result))
-for model in json.loads((result / "manifest.json").read_text(encoding="utf-8"))["identity"]["models"]:
-    export = representations / model
-    if (export / "manifest.json").is_file():
-        print(shutil.make_archive(str(export), "zip", root_dir=export))
 """
     instructions = (
         "Attach the pinned evaluation, experiment and training bundles. Attach any existing "
         "hidden-state exports to reuse. To extract missing exports, enable ALLOW_EXTRACTION "
         "after reviewing the device and inputs. Extraction requires Torch 2.11.0. "
         "Set FONT_FILES when Arial is supplied as an input dataset. The report and new "
-        "hidden-state exports are saved separately."
+        "hidden-state exports are saved as two ZIP archives."
     )
+    if bert:
+        instructions += " Attach the pinned BERT snapshot and set BERT_SNAPSHOT before running."
     document = {
         "nbformat": 4, "nbformat_minor": 5,
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},

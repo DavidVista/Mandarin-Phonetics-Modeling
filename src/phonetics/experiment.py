@@ -60,6 +60,16 @@ def _validate_config(value, acoustic_dim):
         elif key == 'learning_rate':
             if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                 raise ValueError('learning_rate must be finite and positive')
+        elif architecture['encoder']['type'] == 'bert' and key in ('optimizer', 'weight_decay', 'scheduler'):
+            if key == 'optimizer' and value not in ('Adam', 'AdamW'):
+                raise ValueError('BERT optimizer must be Adam or AdamW')
+            if key == 'weight_decay' and (type(value) not in (int, float) or not math.isfinite(value) or value < 0):
+                raise ValueError('weight_decay must be finite and nonnegative')
+            if key == 'scheduler' and value is not None:
+                if (not isinstance(value, dict) or set(value) != {'type', 'warmup_ratio'}
+                        or value['type'] != 'linear' or type(value['warmup_ratio']) not in (int, float)
+                        or not 0 <= value['warmup_ratio'] < 1):
+                    raise ValueError('scheduler requires type linear and warmup_ratio in [0, 1)')
         elif content_hash(value) != content_hash(default):
             raise ValueError(f'training.{key} conflicts with the experiment protocol')
     ids = cfg['model_ids']

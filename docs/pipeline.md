@@ -16,7 +16,7 @@
 | `analysis` | Local research workflows, including the example reference geometry report |
 | `visualization` | Existing local or notebook visualization workflows; empty by default |
 
-The current encoder is `experiment.architecture.encoder.type: char_bilstm`. Its embedding dimension, hidden units per direction and number of layers are validated positive integers. Context dimension is derived as twice the hidden dimension. Head settings specify classification hidden dimension and dropout. Acoustic output dimension must match the actual targets. Unknown encoder types, including `bert`, fail before execution. A future BERT adapter must implement character alignment and its own validated config; selecting a name alone cannot supply that implementation.
+The default encoder is `experiment.architecture.encoder.type: char_bilstm`. Its embedding dimension, hidden units per direction and number of layers are validated positive integers. Context dimension is derived as twice the hidden dimension. Head settings specify classification hidden dimension and dropout. Acoustic output dimension must match the actual targets.
 
 Supported training changes are `epochs`, `batch_size` and `learning_rate`; all must be positive and finite with integer epochs/batch size. Other optimizer, scheduler, selection and loss settings retain the current protocol and are validated rather than silently ignored. Old flat architecture configs inside existing bundles remain readable without rewriting those bundles.
 
@@ -34,6 +34,31 @@ For a new experiment with 90,000 train and 10,000 validation sentences per seed 
 In this example, the other objectives train for 20 epochs. Each run records its effective limit as `epoch_limit` in the training manifest. The selected checkpoint for each seed still minimizes its validation objective. Changing these settings requires a new experiment ID.
 
 ## Preparation and execution modes
+
+### Chinese BERT
+
+For a new experiment, replace `experiment.architecture.encoder` with the following object.
+
+```json
+{
+  "type": "bert",
+  "model_id": "google-bert/bert-base-chinese",
+  "revision": "8f23c25b06e129b6c986331a13d8d025a92cf0ea",
+  "files": {
+    "config.json": "88af762cfb15fa9ce183c84dcbfdc9d635196ba635dfe81f265fdd21d67f4c4c",
+    "model.safetensors": "3404a1ffd8da507042e8161013ba2a4fc49858b4e3f8fbf5ce5724f94883aec3",
+    "tokenizer.json": "55c5edcfb8936895e019b2d8f97dcb547734f25b29f95009155f4c8c15649aae",
+    "tokenizer_config.json": "0f6d13e6f4da6f9e24f22ada6bc3be571123d858d7c0c05a8a7cd55a9c23c2e8",
+    "vocab.txt": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"
+  }
+}
+```
+
+Download those files from the [pinned snapshot](https://huggingface.co/google-bert/bert-base-chinese/tree/8f23c25b06e129b6c986331a13d8d025a92cf0ea). Use the `bert` dependency extra for local training, set `PHONETICS_BERT_SNAPSHOT` to the snapshot directory, or attach the snapshot as an input and set `BERT_SNAPSHOT` in the generated notebook. Evaluation and checkpoint restoration need the model config and tokenizer files. Fine-tuning also needs the original weights.
+
+The BERT adapter validates a one-to-one token mapping for every selected character before training. It rejects unalignable sentences and sequences beyond the model limit. Special tokens participate in attention and are excluded from the position-aligned outputs for the heads and evaluation. Unknown target positions are determined by the pinned BERT tokenizer.
+
+BERT supports `Adam` or `AdamW`, nonnegative `weight_decay`, and an optional scheduler such as `{"type": "linear", "warmup_ratio": 0.05}`. Select the learning rate, epoch budget and objectives in the experiment config. Give the BERT experiment a distinct ID and state file. Compare architectures using matching split hashes and explicit common evaluation coverage.
 
 The example imports existing acoustic embeddings. Set `acoustic.existing_bundle` and `acoustic.manifest_sha256` to null to compute new ones. Select `execution.acoustic: notebook` to prepare a portable inference job after the decoded inventory, or `local` and explicitly supply `--allow-inference`. The acoustic device belongs to `model.device`; the trained encoder device belongs to `execution.training_device`.
 
@@ -194,7 +219,7 @@ compatible hidden-state exports. The notebook verifies the selected checkpoint
 SHA256 and epoch per model and seed. After approval, set `ALLOW_EXTRACTION` in
 the notebook configuration to extract any missing exports on the configured
 device. Extraction requires Torch 2.11.0. The notebook writes a report ZIP and
-separate ZIPs for locally saved model exports. Each export retains occurrence
+one hidden-state ZIP containing every model export used by the report. Each export retains occurrence
 IDs, raw pre-head vectors, and target-position UNK flags.
 
 To import a saved export for local use:

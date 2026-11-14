@@ -51,7 +51,8 @@ def collate_experiment(samples):
     }
 
 
-def create_loaders(experiment: dict, seed: int, batch_size: int | None = None, num_workers: int = 0):
+def create_loaders(experiment: dict, seed: int, batch_size: int | None = None, num_workers: int = 0, *,
+                   bert_inputs=None, bert_rows=None):
     manifest = experiment.get("manifest", {})
     if manifest.get("bundle_type") != "character_experiment" or experiment.get("seed") != seed:
         raise ValueError("training loaders require a validated seed-specific character experiment")
@@ -61,9 +62,14 @@ def create_loaders(experiment: dict, seed: int, batch_size: int | None = None, n
     if type(batch) is not int or batch <= 0 or type(num_workers) is not int or num_workers < 0:
         raise ValueError("batch_size must be positive and num_workers nonnegative")
     result = {}
+    def collate_bert(samples):
+        batch = collate_experiment(samples)
+        batch.update(bert_inputs.batch([bert_rows[sample["sample_id"]] for sample in samples], batch["char_mask"]))
+        return batch
+
     for stream, split in enumerate(("train", "validation", "test"), start=1):
         dataset = ExperimentDataset(experiment["splits"][split], experiment["samples"])
         result[split] = DataLoader(dataset, batch_size=batch, shuffle=split == "train",
                                    generator=make_generator(seed, stream), num_workers=num_workers,
-                                   collate_fn=collate_experiment)
+                                   collate_fn=collate_bert if bert_inputs is not None else collate_experiment)
     return result
