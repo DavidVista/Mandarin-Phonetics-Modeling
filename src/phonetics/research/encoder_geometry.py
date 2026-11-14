@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+from functools import partial
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -9,24 +10,20 @@ import numpy as np
 
 from ..artifacts import sha256_file, write_json
 from ..bundles import content_hash, seal_bundle, staging_directory, validate_bundle
-from ..evaluation.encoder_extraction import expected_unknown_positions, load_export, load_positions
+from ..evaluation.encoder_extraction import expected_unknown_positions, load_experiment_manifest, load_export, load_positions
 from ..evaluation.geometry_bundle import PAIRING_POLICY
 from ..evaluation.reference_geometry import component_masks, evaluate_geometry
-from ..evaluation.training_summary import TRAINING_MODELS, TRAINING_SEEDS
 from ..visualization.encoder_geometry import rank_metrics, write_view, write_page
 from ..visualization.reference_geometry import render_distance_maps
 from .reference_geometry import _read_reference
 from . import encoder_diagnostics as diagnostic
 
-SYSTEMS = ("DIMSIM", *TRAINING_MODELS)
 BASELINE = "Component mismatch count"
-CONTRASTS = (
+DEFAULT_CONTRASTS = (
     ("syllable", "components"),
     ("components", "components-acoustic-lambda-1"),
     ("components", "components-acoustic-lambda-10"),
 )
-FIGURES = tuple((f"encoder_{model.replace('-', '_')}_cosine_distances", f"{model}-cosine-distances")
-                for model in TRAINING_MODELS)
 
 
 def contextual_distances(labels, occurrences, hidden):
@@ -57,7 +54,7 @@ def contextual_distances(labels, occurrences, hidden):
     return distances
 
 
-def _summarize_seed_tables(tables):
+def _summarize_seed_tables(tables, seeds):
     dimensions = {
         "controlled_match": ("system", "from_mask", "to_mask"),
         "dimsim_agreement": ("system", "slice"), "same_mask_agreement": ("system", "mask"),
@@ -74,7 +71,7 @@ def _summarize_seed_tables(tables):
             groups[tuple(row[key] for key in keys)].append(row)
         rows = []
         for key, entries in groups.items():
-            if [row["seed"] for row in entries] != list(TRAINING_SEEDS):
+            if [row["seed"] for row in entries] != seeds:
                 raise ValueError(f"seed inventory differs for {name}")
             output = dict(zip(keys, key))
             for field in sorted(set(entries[0]) - set(keys) - {"seed"}):
@@ -87,7 +84,7 @@ def _summarize_seed_tables(tables):
     return result
 
 
-def _paired_differences(tables):
+def _paired_differences(tables, contrasts):
     rates = {(row["system"], "DIMSIM Agreement", row["slice"]): row["agreement"]
              for row in tables["dimsim_agreement"]}
     rates.update({(row["system"], "Same mask agreement", row["mask"]): row["agreement"]
@@ -97,7 +94,7 @@ def _paired_differences(tables):
     rates.update({(row["system"], "Controlled match win rate", "All"): row["win_rate"]
                   for row in tables["controlled_match"] if row["from_mask"] == "All"})
     rows = []
-    for before, after in CONTRASTS:
+    for before, after in contrasts:
         for (system, metric, population), value in rates.items():
             if system == before:
                 other = rates[after, metric, population]
@@ -117,7 +114,19 @@ def _write_tables(root, tables, suffix):
 
 
 def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, checkpoints,
-                         output, tolerance, source_sha256, diagnostics=False):
+                         output, tolerance, source_sha256, diagnostics=False, contrasts=None):
+    experiment = load_experiment_manifest(experiment_root, pins["experiment"])
+    models = experiment["identity"]["config"]["model_ids"]
+    seeds = experiment["identity"]["training_seeds"]
+    if set(exports) != set(models) or set(checkpoints) != set(models):
+        raise ValueError("encoder report input models differ from the experiment")
+    if any(list(checkpoints[model]) != seeds for model in models):
+        raise ValueError("encoder report checkpoint seeds differ from the experiment")
+    systems = ("DIMSIM", *models)
+    explicitly_configured = contrasts is not None
+    if contrasts is None:
+        contrasts = [pair for pair in DEFAULT_CONTRASTS if set(pair) <= set(models)]
+    paired_differences = partial(_paired_differences, contrasts=contrasts)
     _, occurrences = load_positions(evaluation_root, pins["evaluation"])
     labels, components, reference, identity = _read_reference(evaluation_root, pins["evaluation"])
     if identity["experiment_manifest_sha256"] != pins["experiment"]:
@@ -128,6 +137,18 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
     unknown_by_seed, experiment_hashes = expected_unknown_positions(
         experiment_root, pins["experiment"], occurrences, identity["test_ids_sha256"]
     )
+    export_pins = {model: sha256_file(Path(exports[model]) / "manifest.json") for model in models}
+    def read_export(model):
+        return load_export(exports[model], model=model, evaluation_pin=pins["evaluation"],
+                           experiment_pin=pins["experiment"], training_pin=pins[model], occurrence_ids=positions,
+                           expected_seeds=checkpoints[model], expected_unknown=unknown_by_seed,
+                           expected_input_hashes=experiment_hashes)
+
+    for model in models:
+        for _ in read_export(model):
+            pass
+    if any(sha256_file(Path(exports[model]) / "manifest.json") != export_pins[model] for model in models):
+        raise ValueError("encoder export manifests changed during validation")
     excluded = set(identity["inventory"]["excluded_by_list"])
     indices_by_seed, counts_by_seed = {}, {}
     candidate_labels = set(labels) - excluded
@@ -152,33 +173,24 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
     mask = component_masks(component_rows)
     baseline = sum((mask & bit) == 0 for bit in (4, 2, 1)).astype(np.float64)
     baseline[unavailable, unavailable] = np.nan
-    export_pins = {model: sha256_file(Path(exports[model]) / "manifest.json") for model in TRAINING_MODELS}
     report_identity = {"inputs": pins, "exports": export_pins, "tolerance": tolerance,
-                       "source_sha256": source_sha256, "diagnostics": diagnostics, "models": list(TRAINING_MODELS),
-                       "seeds": list(TRAINING_SEEDS), "unknown_policy": "exclude_target_position",
+                       "source_sha256": source_sha256, "diagnostics": diagnostics, "models": models,
+                       "seeds": seeds, "unknown_policy": "exclude_target_position",
                        "population": "common_primary_syllables_across_seeds",
                        "full_match_policy": "at_least_two_occurrences_in_every_seed",
                        "checkpoints": {model: {str(seed): item for seed, item in selections.items()}
                                        for model, selections in checkpoints.items()}}
+    if explicitly_configured:
+        report_identity["contrasts"] = [list(pair) for pair in contrasts]
     target = Path(output).resolve()
     for path in (evaluation_root, experiment_root, *exports.values()):
         root = Path(path).resolve()
         if target.is_relative_to(root) or root.is_relative_to(target):
             raise ValueError("encoder report output must be separate from inputs")
-    generators = {
-        model: load_export(exports[model], model=model, evaluation_pin=pins["evaluation"],
-                           experiment_pin=pins["experiment"], training_pin=pins[model], occurrence_ids=positions,
-                           expected_seeds=checkpoints[model])
-        for model in TRAINING_MODELS
-    }
     if target.exists():
-        for generator in generators.values():
-            for seed, _, unknown, info in generator:
-                if (info["seed_input_hashes"] != experiment_hashes[seed]
-                        or not np.array_equal(unknown, unknown_by_seed[seed])):
-                    raise ValueError("encoder export differs from the pinned seed inputs")
         validate_bundle(target, "encoder_geometry_report", identity=report_identity)
         return target
+    generators = {model: read_export(model) for model in models}
     all_tables = defaultdict(list)
     coverage = []
     matrix_sum = None
@@ -221,17 +233,14 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                 "dimsim_b": provenance_b,
                 "inventories": {"primary": labels, **{name: value[0] for name, value in populations.items()}},
             })
-        for seed in TRAINING_SEEDS:
+        for seed in seeds:
             diagnostic_distances = defaultdict(list)
             selected = [index for index in indices_by_seed[seed] if occurrences[index]["pinyin"] in common]
             retained = [occurrences[index] for index in selected]
             distances = [reference]
             primary_unknown = primary_occurrences - len(indices_by_seed[seed])
-            for model in TRAINING_MODELS:
-                index, hidden, unknown, info = next(generators[model])
-                if (index != seed or info["seed_input_hashes"] != experiment_hashes[seed]
-                        or not np.array_equal(unknown, unknown_by_seed[seed])):
-                    raise ValueError("encoder export differs from the pinned seed inputs")
+            for model in models:
+                _, hidden, _, _ = next(generators[model])
                 distance = contextual_distances(labels, retained, hidden[selected])
                 if diagnostics:
                     diagnostic_rows["full_match"].extend(
@@ -262,16 +271,16 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
             distances = np.stack(distances)
             comparisons = np.concatenate((distances, baseline[None]))
             tables, maps = evaluate_geometry(labels, component_rows, comparisons,
-                                             tolerance=tolerance, systems=(*SYSTEMS, BASELINE), contextual=True)
-            maps["controlled_values"] = maps["controlled_values"][:, :len(SYSTEMS)]
-            maps["agreement"] = maps["agreement"][:, :len(SYSTEMS)]
+                                             tolerance=tolerance, systems=(*systems, BASELINE), contextual=True)
+            maps["controlled_values"] = maps["controlled_values"][:, :len(systems)]
+            maps["agreement"] = maps["agreement"][:, :len(systems)]
             for name in ("mask_profiles", "mask_summary", "full_match_gains", "residuals_top50"):
                 tables[name] = [row for row in tables[name] if row["system"] != BASELINE]
             overlap_rates, near_far_rates = rank_metrics(comparisons, maps["neighborhood"], tolerance)
             for row, overlap, near_far in zip(tables["pairwise_spearman"], overlap_rates, near_far_rates):
                 row.update(top_overlap=overlap, near_far_win_rate=near_far)
-            rankings = (overlap_rates[:len(SYSTEMS)], near_far_rates[:len(SYSTEMS)])
-            tables["paired_differences"] = _paired_differences(tables)
+            rankings = (overlap_rates[:len(systems)], near_far_rates[:len(systems)])
+            tables["paired_differences"] = paired_differences(tables)
             if diagnostics:
                 diagnostic_rows["coverage"].append(
                     {"seed": seed, "population": "primary", "syllables": len(labels),
@@ -279,13 +288,13 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                 )
                 diagnostic.add_seed_tables(
                     diagnostic_rows, seed, populations, diagnostic_distances, all_reference,
-                    reference_b, components, (*SYSTEMS, BASELINE), tolerance, tables, _paired_differences,
+                    reference_b, components, (*systems, BASELINE), tolerance, tables, paired_differences,
                 )
             np.savez_compressed(stage / f"data/seed-{seed}.npz", distances=distances, **maps)
             for name, rows in tables.items():
                 all_tables[name].extend({"seed": seed, **row} for row in rows)
             write_view(stage / f"views/seed-{seed}.js", f"seed-{seed}", distances, maps, tables,
-                       tolerance, rankings=rankings)
+                       tolerance, systems=systems, seeds=seeds, rankings=rankings)
             if matrix_sum is None:
                 matrix_sum = distances.copy()
                 map_sum = {name: value.copy() for name, value in maps.items()}
@@ -296,12 +305,12 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                 for name in ("controlled_cells", "agreement_counts", "component_order", "neighborhood", "masks"):
                     if not np.array_equal(map_sum[name], maps[name]):
                         raise ValueError(f"shared seed comparison support differs: {name}")
-        if any(sha256_file(Path(exports[model]) / "manifest.json") != export_pins[model] for model in TRAINING_MODELS):
+        if any(sha256_file(Path(exports[model]) / "manifest.json") != export_pins[model] for model in models):
             raise ValueError("encoder export manifests changed during the report")
-        means = matrix_sum / len(TRAINING_SEEDS)
+        means = matrix_sum / len(seeds)
         for name in ("controlled_values", "agreement"):
-            map_sum[name] /= len(TRAINING_SEEDS)
-        summary = _summarize_seed_tables(all_tables)
+            map_sum[name] /= len(seeds)
+        summary = _summarize_seed_tables(all_tables, seeds)
         np.savez_compressed(stage / "data/across-seeds.npz", distances=means, **map_sum)
         _write_tables(stage / "tables", {**all_tables, "coverage": coverage}, "")
         _write_tables(stage / "tables", summary, "_across_seeds")
@@ -311,14 +320,14 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                     writer = csv.DictWriter(stream, fieldnames=fields.split())
                     writer.writeheader()
                     writer.writerows(diagnostic_rows[name])
-        rankings = tuple([row[field] for row in summary["pairwise_spearman"] if row["system"] in SYSTEMS]
+        rankings = tuple([row[field] for row in summary["pairwise_spearman"] if row["system"] in systems]
                          for field in ("top_overlap_mean", "near_far_win_rate_mean"))
         write_view(stage / "views/across-seeds.js", "across-seeds", means, map_sum, summary,
-                   tolerance, rankings=rankings)
+                   tolerance, systems=systems, seeds=seeds, rankings=rankings)
         write_page(stage / "encoder_geometry.html", labels, [components[x] for x in labels], coverage,
                    evaluation=identity["evaluation_id"], excluded=identity["excluded_pinyin"],
-                   tolerance=tolerance, diagnostics=diagnostics)
-        render_distance_maps(stage / "figures", labels, means[1:], map_sum["component_order"], figures=FIGURES,
+                   tolerance=tolerance, systems=systems, seeds=seeds, diagnostics=diagnostics)
+        render_distance_maps(stage / "figures", labels, means[1:], map_sum["component_order"], encoder_models=models,
                              provenance={"source_digest": content_hash(report_identity),
                                          "evaluation_manifest_sha256": pins["evaluation"],
                                          "hidden_export_manifests": export_pins,

@@ -205,6 +205,8 @@ sys.path.insert(0, str(SDK_ROOT))
 
     notebook_spec = {key: spec[key] for key in ("id", "device", "batch_size", "tolerance")}
     notebook_spec["diagnostics"] = spec.get("diagnostics", False)
+    if "contrasts" in spec:
+        notebook_spec["contrasts"] = spec["contrasts"]
     settings = (
         f"PINS = {pins!r}\nREFERENCES = {refs!r}\nSPEC = {notebook_spec!r}\n"
         f"SOURCE_SHA256 = {content_hash(hashes)!r}\n"
@@ -217,7 +219,7 @@ FONT_FILES = []
 """
     execution = """from matplotlib import font_manager
 from phonetics.encoder_jobs import run_encoder_workflow
-from phonetics.evaluation.training_summary import TRAINING_MODELS
+import json
 
 for filename in FONT_FILES:
     font_file = Path(filename).resolve(strict=True)
@@ -232,7 +234,7 @@ result = run_encoder_workflow(
     allow_execution=ALLOW_EXTRACTION, mount=INPUT_ROOT,
 )
 print(shutil.make_archive(str(result), "zip", root_dir=result))
-for model in TRAINING_MODELS:
+for model in json.loads((result / "manifest.json").read_text(encoding="utf-8"))["identity"]["models"]:
     export = representations / model
     if (export / "manifest.json").is_file():
         print(shutil.make_archive(str(export), "zip", root_dir=export))

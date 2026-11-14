@@ -11,11 +11,10 @@ from pathlib import Path
 import numpy as np
 
 from ..artifacts import safe_artifact, sha256_file, write_json
-from ..bundles import seal_bundle, staging_directory, validate_bundle
-from ..experiment import load_common_test
-from ..objectives import parse_model_id
+from ..bundles import content_hash, seal_bundle, staging_directory, validate_bundle
+from ..experiment import SCHEMA_VERSION, SELECTION_RULE, load_common_test
+from ..objectives import canonical_model_id, parse_model_id
 from .geometry_bundle import validate_geometry_bundle
-from .training_summary import TRAINING_MODELS, TRAINING_SEEDS, SELECTION_RULE
 
 EXTRACTION_TYPE = "encoder_prehead_export"
 SEED_TYPE = "encoder_prehead_seed"
@@ -42,16 +41,35 @@ def load_positions(root, pin):
     return manifest, rows
 
 
-def inspect_checkpoints(root, pin, model, experiment_pin):
+def load_experiment_manifest(root, pin):
+    manifest = json.loads(pinned_bytes(root, "manifest.json", pin))
+    identity = manifest["identity"]
+    config = identity["config"]
+    models, seeds = config["model_ids"], identity["training_seeds"]
+    if (manifest.get("bundle_type") != "character_experiment"
+            or content_hash(identity) != manifest.get("identity_sha256")
+            or config.get("schema_version") != SCHEMA_VERSION
+            or not isinstance(models, list) or not models
+            or [canonical_model_id(model) for model in models] != models or len(set(models)) != len(models)
+            or type(config.get("seed_count")) is not int or config["seed_count"] < 1
+            or not isinstance(seeds, list) or any(type(seed) is not int for seed in seeds)
+            or seeds != list(range(config["seed_count"]))):
+        raise ValueError("invalid encoder experiment model or seed inventory")
+    return manifest
+
+
+def inspect_checkpoints(root, pin, model, experiment_pin, experiment):
     """Check checkpoint bytes and selected epochs without loading tensors."""
-    if model not in TRAINING_MODELS:
+    config = experiment["identity"]["config"]
+    seeds = experiment["identity"]["training_seeds"]
+    if model not in config["model_ids"]:
         raise ValueError("unknown encoder model")
     manifest = json.loads(pinned_bytes(root, "manifest.json", pin))
     if (manifest.get("run_type") != "training_run" or manifest.get("schema_version") != 1
-            or manifest.get("config", {}).get("schema_version") != 4
+            or content_hash(manifest.get("config")) != content_hash(config)
             or manifest.get("model_id") != model or manifest.get("status") != "complete"
-            or manifest.get("seeds") != list(TRAINING_SEEDS)
-            or manifest.get("seed_status") != {str(seed): "complete" for seed in TRAINING_SEEDS}
+            or content_hash(manifest.get("seeds")) != content_hash(seeds)
+            or manifest.get("seed_status") != {str(seed): "complete" for seed in seeds}
             or manifest.get("selection") != SELECTION_RULE
             or manifest.get("experiment_hashes", {}).get("manifest.json") != experiment_pin):
         raise ValueError(f"incompatible character checkpoint manifest for {model}")
@@ -62,7 +80,7 @@ def inspect_checkpoints(root, pin, model, experiment_pin):
         raise ValueError(f"trained encoder source differs for {model}")
     artifacts = manifest["artifacts"]
     selections = {}
-    for seed in TRAINING_SEEDS:
+    for seed in seeds:
         prefix = f"seed-{seed}"
         selection = json.loads(pinned_bytes(root, f"{prefix}/summary.json", artifacts[f"{prefix}/summary.json"]))
         history = json.loads(pinned_bytes(root, f"{prefix}/history.json", artifacts[f"{prefix}/history.json"]))["epochs"]
@@ -79,8 +97,8 @@ def inspect_checkpoints(root, pin, model, experiment_pin):
     return manifest, selections
 
 
-def expected_checkpoint_seeds(root, pin, model, experiment_pin):
-    manifest, selections = inspect_checkpoints(root, pin, model, experiment_pin)
+def expected_checkpoint_seeds(root, pin, model, experiment_pin, experiment):
+    manifest, selections = inspect_checkpoints(root, pin, model, experiment_pin, experiment)
     return {
         seed: {
             "checkpoint_sha256": manifest["artifacts"][f"seed-{seed}/best.pt"],
@@ -92,11 +110,12 @@ def expected_checkpoint_seeds(root, pin, model, experiment_pin):
 
 
 def expected_unknown_positions(root, pin, occurrences, test_pin):
-    manifest = json.loads(pinned_bytes(root, "manifest.json", pin))
+    manifest = load_experiment_manifest(root, pin)
+    seeds = manifest["identity"]["training_seeds"]
     artifacts = manifest["artifacts"]
     unknown = {}
     hashes = {}
-    for seed in TRAINING_SEEDS:
+    for seed in seeds:
         base = f"seeds/{seed}"
         name = f"{base}/vocabulary.json"
         vocabulary = json.loads(pinned_bytes(root, name, artifacts[name]))
@@ -120,15 +139,14 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
     evaluation, rows = load_positions(evaluation_root, evaluation_pin)
     if evaluation["identity"]["experiment_manifest_sha256"] != experiment_pin:
         raise ValueError("evaluation and experiment pins differ")
-    training, selections = inspect_checkpoints(training_root, training_pin, model, experiment_pin)
+    experiment = load_experiment_manifest(experiment_root, experiment_pin)
+    training, selections = inspect_checkpoints(training_root, training_pin, model, experiment_pin, experiment)
     test_ids, samples = load_common_test(experiment_root, expected_manifest_sha256=experiment_pin)
-    from ..bundles import content_hash
     if content_hash(test_ids) != evaluation["identity"]["test_ids_sha256"]:
         raise ValueError("evaluation and experiment test identities differ")
-    experiment = json.loads(pinned_bytes(experiment_root, "manifest.json", experiment_pin))
     config = json.loads(pinned_bytes(experiment_root, "config.json", experiment["artifacts"]["config.json"]))
     labels = json.loads(pinned_bytes(experiment_root, "labels.json", experiment["artifacts"]["labels.json"]))
-    if config != training["config"]:
+    if content_hash(config) != content_hash(training["config"]):
         raise ValueError("training and experiment configurations differ")
     sample_map = {sample["sample_id"]: sample for sample in samples}
     by_sample = defaultdict(list)
@@ -153,7 +171,7 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
             raise ValueError("extraction output must be separate from inputs")
     identity = {"model": model, "evaluation_manifest_sha256": evaluation_pin,
                 "experiment_manifest_sha256": experiment_pin, "training_manifest_sha256": training_pin,
-                "seeds": list(TRAINING_SEEDS), "source_sha256": source_sha256,
+                "seeds": experiment["identity"]["training_seeds"], "source_sha256": source_sha256,
                 "device": device, "batch_size": batch_size, "torch": torch.__version__}
     with staging_directory(target) as stage:
         for seed, selected in selections.items():
@@ -218,19 +236,20 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
 
 
 def load_export(root, *, model, evaluation_pin, experiment_pin, occurrence_ids, training_pin,
-                expected_seeds):
+                expected_seeds, expected_unknown=None, expected_input_hashes=None):
+    seeds = list(expected_seeds)
     manifest = validate_bundle(root, EXTRACTION_TYPE)
     identity = manifest["identity"]
     if (identity.get("model") != model or identity.get("evaluation_manifest_sha256") != evaluation_pin
             or identity.get("experiment_manifest_sha256") != experiment_pin
-            or identity.get("seeds") != list(TRAINING_SEEDS)
+            or content_hash(identity.get("seeds")) != content_hash(seeds)
             or identity.get("training_manifest_sha256") != training_pin):
         raise ValueError(f"hidden-state export identity mismatch for {model}")
-    expected = {f"seed-{seed}/{name}" for seed in TRAINING_SEEDS
+    expected = {f"seed-{seed}/{name}" for seed in seeds
                 for name in ("manifest.json", "occurrence_ids.json", "hidden.npy", "unknown.npy")}
     if set(manifest["artifacts"]) != expected:
         raise ValueError(f"hidden-state export artifact set differs for {model}")
-    for seed in TRAINING_SEEDS:
+    for seed in seeds:
         seed_root = Path(root) / f"seed-{seed}"
         child = validate_bundle(seed_root, SEED_TYPE)
         child_pin = manifest["artifacts"][f"seed-{seed}/manifest.json"]
@@ -258,4 +277,7 @@ def load_export(root, *, model, evaluation_pin, experiment_pin, occurrence_ids, 
                 or np.any(np.linalg.norm(hidden.astype(np.float64), axis=1) == 0)
                 or unknown.shape != (len(ids),) or unknown.dtype != np.bool_):
             raise ValueError(f"hidden-state occurrence alignment differs for {model}/{seed}")
+        if ((expected_unknown is not None and not np.array_equal(unknown, expected_unknown[seed]))
+                or (expected_input_hashes is not None and seed_hashes != expected_input_hashes[seed])):
+            raise ValueError("encoder export differs from the pinned seed inputs")
         yield seed, hidden, unknown, info

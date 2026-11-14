@@ -404,3 +404,22 @@ scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
 colormap = "Greys"
+
+[semantics.encoder]
+label = "Encoder"
+color = "#171717"
+linestyle = "-"
+marker = "o"
+
+[figures.encoder_cosine_distances]
+status = "approved"
+kind = "distance_map"
+name = "Encoder cosine distances"
+xlabel = "Candidate"
+ylabel = "Anchor"
+series = ["encoder"]
+order = ["encoder"]
+scale = "linear"
+colorbar_label = "Cosine distance"
+color_scale_group = "encoder_cosine"
+colormap = "Greys"

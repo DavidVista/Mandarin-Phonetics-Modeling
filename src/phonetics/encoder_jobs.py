@@ -5,20 +5,30 @@ import json
 from pathlib import Path
 
 from .artifacts import sha256_file
-from .evaluation.encoder_extraction import EXTRACTION_TYPE, extract_hidden_states
-from .evaluation.training_summary import TRAINING_MODELS
+from .evaluation.encoder_extraction import EXTRACTION_TYPE, extract_hidden_states, load_experiment_manifest
+from .objectives import canonical_model_id
 from .execution import safe_id
 
 
 def resolve_encoder_config(spec, resolve):
     required = {"id", "training_runs", "representations_root", "device", "batch_size", "tolerance"}
-    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics"}:
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics", "contrasts"}:
         raise ValueError("encoder_geometry requires id, training_runs, representations_root, device, batch_size and tolerance")
     if type(spec.get("diagnostics", False)) is not bool:
         raise ValueError("encoder diagnostics must be a boolean")
     safe_id(spec["id"])
-    if not isinstance(spec["training_runs"], dict) or set(spec["training_runs"]) != set(TRAINING_MODELS):
-        raise ValueError("select exactly one training run for each encoder model")
+    runs = spec["training_runs"]
+    if (not isinstance(runs, dict) or not runs
+            or any(canonical_model_id(model) != model for model in runs)):
+        raise ValueError("training_runs requires canonical model IDs")
+    if "contrasts" in spec:
+        contrasts = spec["contrasts"]
+        if (not isinstance(contrasts, list)
+                or any(not isinstance(pair, list) or len(pair) != 2
+                       or any(not isinstance(model, str) or model not in runs for model in pair)
+                       or pair[0] == pair[1] for pair in contrasts)
+                or len({tuple(pair) for pair in contrasts}) != len(contrasts)):
+            raise ValueError("contrasts must contain unique pairs of distinct configured models")
     if not isinstance(spec["device"], str) or not spec["device"].strip():
         raise ValueError("encoder extraction device must be explicit")
     if type(spec["batch_size"]) is not int or spec["batch_size"] < 1:
@@ -38,10 +48,20 @@ def encoder_inputs(config):
         "evaluation": str(Path(evaluation["output_root"]) / evaluation["id"]),
         "experiment": evaluation["experiment_root"], **spec["training_runs"],
     }
+    experiment = load_experiment_manifest(refs["experiment"], evaluation["experiment_manifest_sha256"])
+    validate_run_inventory(refs, experiment)
     pins = {key: sha256_file(Path(path) / "manifest.json") for key, path in refs.items()}
     if pins["experiment"] != evaluation["experiment_manifest_sha256"]:
         raise ValueError("configured experiment manifest changed")
     return refs, pins
+
+
+def validate_run_inventory(refs, experiment):
+    models = experiment["identity"]["config"]["model_ids"]
+    required = {"experiment", "evaluation", *models}
+    if set(refs) != required:
+        raise ValueError("select exactly one training run for each experiment model")
+    return models
 
 
 def locate_manifests(refs, pins, mount):
@@ -62,12 +82,12 @@ def locate_manifests(refs, pins, mount):
     return roots
 
 
-def locate_exports(spec, pins, mount=None):
+def locate_exports(spec, pins, models, mount=None):
     preferred = Path(spec["representations_root"])
-    manifests = {preferred / model / "manifest.json" for model in TRAINING_MODELS}
+    manifests = {preferred / model / "manifest.json" for model in models}
     if mount is not None and Path(mount).is_dir():
         manifests.update(Path(mount).rglob("manifest.json"))
-    result = {model: set() for model in TRAINING_MODELS}
+    result = {model: set() for model in models}
     for path in sorted(manifests):
         if not path.is_file():
             continue
@@ -89,12 +109,12 @@ def locate_exports(spec, pins, mount=None):
 def extract_configured(config, model, *, allow_execution):
     if not allow_execution:
         raise PermissionError("use --allow-execution after reviewing extraction inputs and device")
-    if model not in TRAINING_MODELS:
-        raise ValueError("unknown encoder model")
     from .bundles import content_hash
     from .execution import sdk_hashes
 
     refs, pins = encoder_inputs(config)
+    if model not in config["encoder_geometry"]["training_runs"]:
+        raise ValueError("unknown encoder model")
     spec = config["encoder_geometry"]
     return extract_hidden_states(
         evaluation_root=refs["evaluation"], evaluation_pin=pins["evaluation"],
@@ -108,13 +128,18 @@ def extract_configured(config, model, *, allow_execution):
 def import_hidden_states(config, model, result):
     import shutil
     from .bundles import staging_directory
-    from .evaluation.encoder_extraction import expected_checkpoint_seeds, load_export, load_positions
+    from .evaluation.encoder_extraction import expected_checkpoint_seeds, expected_unknown_positions, load_export, load_positions
 
-    if model not in TRAINING_MODELS:
-        raise ValueError("unknown encoder model")
     refs, pins = encoder_inputs(config)
-    _, rows = load_positions(refs["evaluation"], pins["evaluation"])
-    expected_seeds = expected_checkpoint_seeds(refs[model], pins[model], model, pins["experiment"])
+    if model not in config["encoder_geometry"]["training_runs"]:
+        raise ValueError("unknown encoder model")
+    evaluation, rows = load_positions(refs["evaluation"], pins["evaluation"])
+    if evaluation["identity"]["experiment_manifest_sha256"] != pins["experiment"]:
+        raise ValueError("evaluation and experiment pins differ")
+    experiment = load_experiment_manifest(refs["experiment"], pins["experiment"])
+    expected_seeds = expected_checkpoint_seeds(refs[model], pins[model], model, pins["experiment"], experiment)
+    unknown, hashes = expected_unknown_positions(
+        refs["experiment"], pins["experiment"], rows, evaluation["identity"]["test_ids_sha256"])
     positions = [row["occurrence_id"] for row in rows]
     target = (Path(config["encoder_geometry"]["representations_root"]) / model).resolve()
     result = Path(result).resolve()
@@ -123,7 +148,7 @@ def import_hidden_states(config, model, result):
     def validate(root):
         for _ in load_export(root, model=model, evaluation_pin=pins["evaluation"],
                              experiment_pin=pins["experiment"], training_pin=pins[model], occurrence_ids=positions,
-                             expected_seeds=expected_seeds):
+                             expected_seeds=expected_seeds, expected_unknown=unknown, expected_input_hashes=hashes):
             pass
     validate(result)
     with staging_directory(target) as stage:
@@ -143,25 +168,37 @@ def run_configured_report(config, *, allow_execution=False):
 
 
 def run_encoder_workflow(*, refs, pins, spec, reports_root, source_sha256, allow_execution=False, mount=None):
-    from .evaluation.encoder_extraction import expected_checkpoint_seeds, load_positions
+    from .evaluation.encoder_extraction import expected_checkpoint_seeds, expected_unknown_positions, load_export, load_positions
     from .evaluation.geometry_bundle import PAIRING_POLICY
     from .research.encoder_geometry import run_encoder_geometry
     from .visualization.core import require_arial
 
     roots = (locate_manifests(refs, pins, mount) if mount is not None
              else {key: Path(refs[key]) for key in pins})
-    evaluation, _ = load_positions(roots["evaluation"], pins["evaluation"])
+    evaluation, occurrences = load_positions(roots["evaluation"], pins["evaluation"])
     if evaluation["identity"]["pairing_policy"] != PAIRING_POLICY:
         raise ValueError("encoder geometry requires the complete nonzero-initial evaluation bundle")
     if evaluation["identity"]["experiment_manifest_sha256"] != pins["experiment"]:
         raise ValueError("evaluation and experiment pins differ")
-    exports = locate_exports(spec, pins, mount)
-    missing = [model for model in TRAINING_MODELS if model not in exports]
+    experiment = load_experiment_manifest(roots["experiment"], pins["experiment"])
+    models = validate_run_inventory(refs, experiment)
+    validate_run_inventory(pins, experiment)
+    exports = locate_exports(spec, pins, models, mount)
+    missing = [model for model in models if model not in exports]
     if missing and not allow_execution:
         raise PermissionError(f"missing compatible exports for {', '.join(missing)}; authorize extraction first")
     require_arial()
-    checkpoints = {model: expected_checkpoint_seeds(roots[model], pins[model], model, pins["experiment"])
-                   for model in TRAINING_MODELS}
+    checkpoints = {model: expected_checkpoint_seeds(roots[model], pins[model], model, pins["experiment"], experiment)
+                   for model in models}
+    if missing and exports:
+        positions = [row["occurrence_id"] for row in occurrences]
+        unknown, hashes = expected_unknown_positions(
+            roots["experiment"], pins["experiment"], occurrences, evaluation["identity"]["test_ids_sha256"])
+        for model, root in exports.items():
+            for _ in load_export(root, model=model, evaluation_pin=pins["evaluation"],
+                                 experiment_pin=pins["experiment"], training_pin=pins[model], occurrence_ids=positions,
+                                 expected_seeds=checkpoints[model], expected_unknown=unknown, expected_input_hashes=hashes):
+                pass
     for model in missing:
         exports[model] = extract_hidden_states(
             evaluation_root=roots["evaluation"], evaluation_pin=pins["evaluation"],
@@ -174,4 +211,4 @@ def run_encoder_workflow(*, refs, pins, spec, reports_root, source_sha256, allow
                                 pins=pins, exports=exports, checkpoints=checkpoints,
                                 output=Path(reports_root) / spec["id"],
                                 tolerance=spec["tolerance"], source_sha256=source_sha256,
-                                diagnostics=spec.get("diagnostics", False))
+                                diagnostics=spec.get("diagnostics", False), contrasts=spec.get("contrasts"))

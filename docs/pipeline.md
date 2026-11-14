@@ -171,11 +171,18 @@ requires full partner coverage. Use a new run ID for each audit.
 
 ## Encoder geometry
 
-The optional `encoder_geometry` section selects the five training runs, the
+The optional `encoder_geometry` section selects one training run per model in
+the pinned experiment, the
 hidden-state output root, an extraction device and batch size, and the report
 ID and tie tolerance. Its input is the sealed evaluation bundle selected by
 `evaluation`. The example uses CPU as a configuration value. Review the device
 and exact input dataset versions before extraction.
+
+The pinned experiment defines model order and seed IDs. Set optional
+`encoder_geometry.contrasts` to a list of ordered pairs of distinct model IDs,
+for example `[["components", "components-acoustic-lambda-3"]]`. The report
+subtracts the first model from the second within each seed. When omitted, it
+uses the original contrasts whose models are present.
 
 ```sh
 phonetics generate-notebooks --config configs/experiment.example.json --stage encoder-geometry

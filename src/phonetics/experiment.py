@@ -20,6 +20,7 @@ from .pinyin import INITIALS, FINALS, TONES, decompose, validate_canonical_label
 from .architecture import default_architecture, normalize_architecture
 
 SCHEMA_VERSION = 4
+SELECTION_RULE = "minimum per-seed validation objective; strict improvement keeps earliest tie"
 DEFAULT_MODEL_IDS = ['syllable', 'components', 'acoustic', 'components-acoustic-lambda-1', 'components-acoustic-lambda-10']
 _TRAIN = {'optimizer': 'Adam', 'learning_rate': 0.001, 'weight_decay': 0.0, 'batch_size': 32,
           'epochs': 20, 'scheduler': None, 'early_stopping': False, 'gradient_clipping': None, 'cosine_epsilon': 1e-8}

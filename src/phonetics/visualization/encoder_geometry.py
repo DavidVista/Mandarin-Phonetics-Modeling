@@ -8,12 +8,15 @@ from pathlib import Path
 import numpy as np
 
 from ..evaluation.reference_geometry import TRANSITIONS
-from ..evaluation.training_summary import TRAINING_MODELS, TRAINING_SEEDS
+from ..objectives import parse_model_id
 from .reference_geometry import _encode
 from .reference_geometry_template import PAGE
 
-NAMES = ("DIMSIM", "Syllable", "Components", "Acoustic", "Components + Acoustic (λ=1)", "Components + Acoustic (λ=10)")
-SYSTEMS = ("DIMSIM", *TRAINING_MODELS)
+def _system_name(system):
+    if system == "DIMSIM":
+        return system
+    family, weight = parse_model_id(system)
+    return f"Components + Acoustic (λ={weight:g})" if weight is not None else family.capitalize()
 
 
 def _json(value):
@@ -24,11 +27,12 @@ def _encode_models(values, dtype):
     return [_encode(row, dtype) for row in values]
 
 
-def _view_profiles(tables, across):
+def _view_profiles(tables, across, systems):
     def get(row, key):
         return row[key + "_mean" if across else key]
     profiles, residuals = [], []
-    for system, label in zip(SYSTEMS, NAMES):
+    for system in systems:
+        label = _system_name(system)
         means = [get(row, "mean_similarity") for row in tables["mask_profiles"] if row["system"] == system]
         r2 = [get(row, "r_squared") for row in tables["mask_summary"] if row["system"] == system]
         steps = []
@@ -67,9 +71,9 @@ def rank_metrics(distances, neighborhood, tolerance):
     return overlaps, near_far
 
 
-def write_view(path, key, distances, maps, tables, tolerance, *, rankings=None):
+def write_view(path, key, distances, maps, tables, tolerance, *, systems, seeds, rankings=None):
     order = maps["component_order"]
-    if 2 * len(TRAINING_SEEDS) * (len(order) - 1) > np.iinfo(np.uint16).max:
+    if 2 * len(seeds) * (len(order) - 1) > np.iinfo(np.uint16).max:
         raise ValueError("encoder view exceeds its 16-bit comparison credit encoding")
     inverse = np.argsort(order)
     ordered = distances[:, order][:, :, order]
@@ -81,11 +85,11 @@ def write_view(path, key, distances, maps, tables, tolerance, *, rankings=None):
     support = maps["agreement_counts"][:, order][:, :, order]
     projections = maps["agreement"][:, :, order][:, :, :, order]
     across = key == "across-seeds"
-    factor = len(TRAINING_SEEDS) if across else 1
+    factor = len(seeds) if across else 1
     points = np.rint(np.nan_to_num(projections) * support[:, None] * 2 * factor)
     ties = {row["slice"]: row["dimsim_ties_mean" if across else "dimsim_ties"]
             for row in tables["dimsim_agreement"] if row["system"] == "DIMSIM"}
-    profiles, residuals = _view_profiles(tables, across)
+    profiles, residuals = _view_profiles(tables, across, systems)
     overlap, near_far = rankings if rankings is not None else rank_metrics(distances, maps["neighborhood"], tolerance)
     keys = ("controlled_match", "dimsim_agreement", "same_mask_agreement", "pairwise_spearman",
             "paired_differences", "mask_summary", "full_match_gains")
@@ -94,7 +98,7 @@ def write_view(path, key, distances, maps, tables, tolerance, *, rankings=None):
         "maxima": [float(np.nanmax(ordered[0])), float(np.nanmax(ordered[1:]))],
         "rank": _encode(inverse[maps["neighborhood"][order]], "<u2"),
         "rankStats": [overlap, [row["spearman_mean" if across else "spearman"]
-                                for row in tables["pairwise_spearman"] if row["system"] in SYSTEMS], near_far],
+                                for row in tables["pairwise_spearman"] if row["system"] in systems], near_far],
         "rankGroupSize": (len(order) - 1) // 10,
         "prepared": {
             "factor": factor, "cells": _encode(cells, "<u2"),
@@ -111,7 +115,7 @@ def write_view(path, key, distances, maps, tables, tolerance, *, rankings=None):
     Path(path).write_text(f"window.encoderViews[{_json(key)}]={_json(view)};\n", encoding="utf-8")
 
 
-def _encoder_template():
+def _encoder_template(models):
     page = PAGE
     replacements = {
         "REFERENCE GEOMETRY": "ENCODER GEOMETRY",
@@ -148,7 +152,7 @@ def _encoder_template():
     start = page.index("<a href='figures/dimsim-distances.png'>")
     end = page.index("</p>", start)
     links = " · ".join(f"<a href='figures/{model}-cosine-distances.png'>{name} cosine distances</a>"
-                       for model, name in zip(TRAINING_MODELS, NAMES[1:]))
+                       for model, name in ((model, _system_name(model)) for model in models))
     page = page[:start] + links + page[end:]
     return page
 
@@ -176,7 +180,7 @@ const settings=@@SETTINGS@@, template=@@TEMPLATE@@;
 window.encoderViews={};
 const $=id=>document.getElementById(id);
 for(const id of ['left','right'])for(let i=1;i<settings.names.length;i++)$(id).add(new Option(settings.names[i],i));
-$('right').selectedIndex=1;
+$('right').selectedIndex=Math.min(1,settings.names.length-2);
 $('seed').add(new Option('Across seeds','across-seeds'));
 for(const seed of settings.seeds)$('seed').add(new Option('Seed '+seed,'seed-'+seed));
 let revision=0;
@@ -205,7 +209,7 @@ function selectedTables(view, models){
 }
 async function render(){
  const key=$('seed').value, l=+$('left').value,r=+$('right').value,token=++revision;
- if(l===r){$('status').textContent='Choose two different encoder models.';return;}
+ if(l===r&&settings.names.length>2){$('status').textContent='Choose two different encoder models.';return;}
  $('status').textContent='Loading selected view…';
  try{
   const view=await load(key);
@@ -234,7 +238,7 @@ render();
 </script></html>"""
 
 
-def write_page(path, labels, components, coverage, *, evaluation, excluded, tolerance, diagnostics=False):
+def write_page(path, labels, components, coverage, *, evaluation, excluded, tolerance, systems, seeds, diagnostics=False):
     order = sorted(range(len(labels)), key=lambda index: (tuple(components[index]), labels[index]))
     rows = "".join(
         f"<tr><th>{html.escape(row['system'])} · Seed {row['seed']}</th>"
@@ -244,9 +248,9 @@ def write_page(path, labels, components, coverage, *, evaluation, excluded, tole
         for row in coverage
     )
     settings = {"labels": [labels[i] for i in order], "components": np.asarray(components)[order].T.tolist(),
-                "names": NAMES, "systems": SYSTEMS, "seeds": TRAINING_SEEDS, "coverage": rows,
+                "names": [_system_name(system) for system in systems], "systems": systems, "seeds": seeds, "coverage": rows,
                 "evaluation": html.escape(evaluation), "excluded": len(excluded), "tolerance": f"{tolerance:g}"}
-    page = _SHELL.replace("@@SETTINGS@@", _json(settings)).replace("@@TEMPLATE@@", _json(_encoder_template()))
+    page = _SHELL.replace("@@SETTINGS@@", _json(settings)).replace("@@TEMPLATE@@", _json(_encoder_template(systems[1:])))
     links = ""
     if diagnostics:
         from ..research.encoder_diagnostics import TABLE_FIELDS

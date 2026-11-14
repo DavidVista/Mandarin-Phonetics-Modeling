@@ -10,13 +10,13 @@ import numpy as np
 
 from .evaluation_outputs import _finite_json, _is_sha, _evaluation_run, _write, _verify_inventory
 from ..research.artifacts import file_sha256
-from ..experiment import training_epoch_limit
+from ..experiment import SELECTION_RULE, training_epoch_limit
+from ..objectives import parse_model_id
 
 TRAINING_MODELS = ('syllable','components','acoustic','components-acoustic-lambda-1','components-acoustic-lambda-10')
 TRAINING_SEEDS = (0,1,2,3,4)
 METRICS_SOURCE_SHA256 = '10d41722970c5472cfe9c3f09346ae977d95dab520fc8d72a4f26d3e7f935fbc'
 CHARACTER_METRICS_SOURCE_SHA256 = '39f5ec037ac66e59fd338ce5d4efe99abc71ed059294fca5e03a145ed0f9fd84'
-SELECTION_RULE = 'minimum per-seed validation objective; strict improvement keeps earliest tie'
 TRAINING_CONFIG = {'seed_ids':list(TRAINING_SEEDS), 'selection':'minimum validation objective; earliest exact tie',
     'dispersion':'sample SD across training seeds; not SE or CI', 'classification_component':'mean of initial/final/tone CE',
     'acoustic_component':'unweighted 1 - cosine', 'invalid_if_scope':'components validation only',
@@ -49,7 +49,9 @@ def _training_metrics(metrics, model, diagnostics, location):
             raise ValueError(f'invalid-IF definition mismatch: {location}')
     terms = ['syllable_ce'] if model=='syllable' else ['component_ce'] if model=='components' else ['cosine'] if model=='acoustic' else ['component_ce','cosine']
     if all(k in metrics for k in terms):
-        weight=10. if model.endswith('lambda-10') else 1.
+        _, weight = parse_model_id(model)
+        if weight is None:
+            weight = 1.
         expected=metrics[terms[0]] if len(terms)==1 else metrics['component_ce']+weight*metrics['cosine']
         if not close(metrics['objective'],expected): raise ValueError(f'objective definition mismatch: {location}')
         if 'weighted_cosine' in metrics and 'cosine' in metrics and not close(metrics['weighted_cosine'],weight*metrics['cosine']):
@@ -109,7 +111,7 @@ def load_training_runs(training_runs):
                 or m.get('seed_status')!={str(s):'complete' for s in TRAINING_SEEDS}
                 or m.get('selection')!=SELECTION_RULE or metrics_source not in allowed_metrics):
             raise ValueError(f'incompatible training manifest/metric definitions: {model}')
-        expected_weight=10. if model.endswith('lambda-10') else 1. if model.endswith('lambda-1') else None
+        _, expected_weight = parse_model_id(model)
         if m.get('lambda_cosine')!=expected_weight: raise ValueError('training lambda identity mismatch')
         signature=(m['experiment_id'],m['experiment_hashes'],m['config'],metrics_source)
         if shared is None: shared=signature

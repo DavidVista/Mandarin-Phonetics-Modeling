@@ -121,12 +121,19 @@ REFERENCE_MAPS = (
 )
 
 
-def render_distance_maps(root, labels, distances, order, *, provenance, figures=REFERENCE_MAPS):
+def render_distance_maps(root, labels, distances, order, *, provenance, figures=REFERENCE_MAPS, encoder_models=None):
     from matplotlib import pyplot as plt
     from matplotlib.ticker import MaxNLocator
 
     protocol = load_protocol()
     apply_style(protocol)
+    if encoder_models is not None:
+        figures = []
+        for model in encoder_models:
+            figure_id = f"encoder_{model.replace('-', '_')}_cosine_distances"
+            if figure_id not in protocol.registry["figures"]:
+                figure_id = "encoder_cosine_distances"
+            figures.append((figure_id, f"{model}-cosine-distances"))
     specs = [protocol.figure(figure_id) for figure_id, _ in figures]
     maxima = {}
     for spec, matrix in zip(specs, distances):

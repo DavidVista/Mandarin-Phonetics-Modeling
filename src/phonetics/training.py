@@ -20,7 +20,7 @@ import torch
 
 from .artifacts import sha256_file, write_json
 from .data import create_loaders
-from .experiment import load_experiment, select_seed, training_epoch_limit
+from .experiment import SELECTION_RULE, load_experiment, select_seed, training_epoch_limit
 from .metrics import batch_objective, finalize_epoch
 from .model import build_encoder, shared_encoder_sha256
 from .objectives import canonical_model_id, parse_model_id
@@ -195,7 +195,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
     manifest = {
         "schema_version": 1, "run_type": "training_run", "status": "running", "run_id": run_id,
         "experiment_id": experiment_id, "model_id": model_id, "lambda_cosine": lambda_cosine, "device": str(target_device), "seeds": seeds,
-        "selection": "minimum per-seed validation objective; strict improvement keeps earliest tie",
+        "selection": SELECTION_RULE,
         "experiment_hashes": {name: sha256_file(experiment_root / name) for name in
                                ("manifest.json", "config.json", "labels.json", "corpus.jsonl", "splits.json", "targets.npy")},
         "config": config, "epoch_limit": epoch_limit,
