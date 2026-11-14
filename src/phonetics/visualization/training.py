@@ -58,7 +58,7 @@ def _training_model_handle(model,p):
 
 
 def _training_finish(fig,axes,data,p,fid,*,shared_y=False):
-    n=len(data['models'][TRAINING_MODELS[0]]['epochs'])
+    n=max(len(model['epochs']) for model in data['models'].values())
     for ax in axes:
         ax.set_xlabel('Epoch');ax.set_xlim((1,n) if n>1 else (.5,1.5))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=p.style['axes']['major_target'],integer=True))

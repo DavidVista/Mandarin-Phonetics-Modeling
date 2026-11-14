@@ -20,15 +20,16 @@ def write_json(path,data):
     path.write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
 
 
-def make_training_fixture(root, *, character=False):
+def make_training_fixture(root, *, character=False, epochs_by_model=None):
     runs={}
     for model in TRAINING_MODELS:
         run=root/'runs'/model/'exact-run';artifacts={};results=[]
         def save(name,value):
             path=run/name;write_json(path,value);artifacts[name]=file_sha256(path)
+        epoch_limit = (epochs_by_model or {}).get(model, 3)
         for seed in range(5):
             history=[]
-            for epoch in range(1,4):
+            for epoch in range(1,epoch_limit+1):
                 row={'epoch':epoch}
                 for split in ('train','validation'):
                     base=([1.,.4,.4][epoch-1] if split=='validation' else [1.2,.6,.5][epoch-1])+.01*seed
@@ -71,6 +72,9 @@ def make_training_fixture(root, *, character=False):
         if character:
             manifest['config'] = {'schema_version': 4, 'training': {'epochs': 3}, 'seed_count': 5}
             manifest['code_sha256']['metrics.py'] = CHARACTER_METRICS_SOURCE_SHA256
+        if epochs_by_model is not None:
+            manifest['config']['training']['epochs_by_model'] = epochs_by_model
+            manifest['epoch_limit'] = epoch_limit
         write_json(run/'manifest.json',manifest)
         runs[model]={'path':run,'manifest_sha256':file_sha256(run/'manifest.json')}
     return runs

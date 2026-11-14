@@ -24,6 +24,15 @@ Supported training changes are `epochs`, `batch_size` and `learning_rate`; all m
 
 For a new experiment with 90,000 train and 10,000 validation sentences per seed and a shared test of 100,000 sentences, set `experiment.sample_size` and `experiment.test_size` to `100000` and select a new `experiment_id`.
 
+`experiment.training.epochs` sets the default epoch limit. To override it for individual objectives, add `epochs_by_model` inside `experiment.training`. Keys must appear in `experiment.model_ids` and limits must be positive integers.
+
+```json
+"epochs": 20,
+"epochs_by_model": {"components": 10, "acoustic": 40}
+```
+
+In this example, the other objectives train for 20 epochs. Each run records its effective limit as `epoch_limit` in the training manifest. The selected checkpoint for each seed still minimizes its validation objective. Changing these settings requires a new experiment ID.
+
 ## Preparation and execution modes
 
 The example imports existing acoustic embeddings. Set `acoustic.existing_bundle` and `acoustic.manifest_sha256` to null to compute new ones. Select `execution.acoustic: notebook` to prepare a portable inference job after the decoded inventory, or `local` and explicitly supply `--allow-inference`. The acoustic device belongs to `model.device`; the trained encoder device belongs to `execution.training_device`.

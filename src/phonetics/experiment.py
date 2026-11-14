@@ -49,7 +49,7 @@ def _validate_config(value, acoustic_dim):
     if architecture['acoustic_dim'] != acoustic_dim:
         raise ValueError('architecture acoustic_dim disagrees with acoustic targets')
     training = cfg['training']
-    if not isinstance(training, dict) or set(training) != set(_TRAIN):
+    if not isinstance(training, dict) or set(training) - {'epochs_by_model'} != set(_TRAIN):
         raise ValueError('invalid training parameters')
     for key, default in _TRAIN.items():
         value = training[key]
@@ -64,9 +64,20 @@ def _validate_config(value, acoustic_dim):
     ids = cfg['model_ids']
     if not isinstance(ids, list) or not ids or [canonical_model_id(x) for x in ids] != ids or len(set(ids)) != len(ids):
         raise ValueError('model_ids must be unique canonical identifiers')
+    if 'epochs_by_model' in training:
+        overrides = training['epochs_by_model']
+        if not isinstance(overrides, dict) or not overrides.keys() <= set(ids):
+            raise ValueError('epochs_by_model must map configured model IDs to epoch limits')
+        if any(type(epochs) is not int or epochs <= 0 for epochs in overrides.values()):
+            raise ValueError('epochs_by_model limits must be positive integers')
     if cfg['sample_size'] // 10 < 1:
         raise ValueError('sample_size must allow nonempty validation')
     return cfg
+
+
+def training_epoch_limit(config, model_id):
+    training = config['training']
+    return training.get('epochs_by_model', {}).get(model_id, training['epochs'])
 
 
 def stream_seed(seed, stream):

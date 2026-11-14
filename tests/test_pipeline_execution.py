@@ -42,7 +42,7 @@ class ExecutionTests(unittest.TestCase):
     def mock_stage(self, config, stage, **kwargs):
         return self.acoustic if stage == 'prepare-embeddings' else self.experiment
 
-    def make_result(self, pending, *, run_tree=False):
+    def make_result(self, pending, *, run_tree=False, epoch_limit=None):
         from phonetics.execution import validate_job
         job = validate_job(pending['path'])
         root = self.root / 'download'
@@ -66,6 +66,8 @@ class ExecutionTests(unittest.TestCase):
                     'code_sha256': {n: job['sources'][n] for n in ('training.py','model.py','metrics.py','architecture.py','experiment.py')},
                     'runtime': {'torch':'2.11.0'},
                     'artifacts': {p.relative_to(payload).as_posix(): sha256_file(p) for p in payload.rglob('*') if p.is_file()}}
+        if epoch_limit is not None:
+            manifest['epoch_limit'] = epoch_limit
         write_json(payload / 'manifest.json', manifest)
         write_json(root / 'receipt.json', {'job_id': job['job_id'], 'stage': 'training',
                                           'input_manifest_sha256': job['input_manifest_sha256']})
@@ -82,6 +84,36 @@ class ExecutionTests(unittest.TestCase):
             self.assertIsNone(load_state(self.config)['waiting'])
             self.assertEqual(run_pipeline(self.config)['model_id'], 'components')
         self.assertNotIn('torch', sys.modules)
+
+    def test_import_checks_epoch_limit_for_model_override(self):
+        self.fixture.config['training']['epochs_by_model'] = {'syllable': 4}
+        self.experiment = self.fixture.build('epoch-overrides')
+        self.config['experiment_id'] = self.experiment.name
+        with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
+            pending = run_pipeline(self.config)
+        waiting = load_state(self.config)['waiting']
+        for epoch_limit in (None, 20, 4.0):
+            with self.subTest(epoch_limit=epoch_limit):
+                result = self.make_result(pending, epoch_limit=epoch_limit)
+                with self.assertRaisesRegex(ValueError, 'epoch limit'):
+                    import_result(self.config, result)
+                self.assertEqual(load_state(self.config)['waiting'], waiting)
+                self.assertFalse(Path(self.config['paths']['runs']).exists())
+                shutil.rmtree(result)
+        result = self.make_result(pending, epoch_limit=4)
+        manifest_path = result / 'payload' / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest['config']['training']['epochs_by_model']['syllable'] = 4.0
+        write_json(manifest_path, manifest)
+        seal_bundle(result, 'pipeline_result', {'job_id': pending['job_id']})
+        with self.assertRaisesRegex(ValueError, 'config or seeds'):
+            import_result(self.config, result)
+        self.assertEqual(load_state(self.config)['waiting'], waiting)
+        self.assertFalse(Path(self.config['paths']['runs']).exists())
+        shutil.rmtree(result)
+        imported = import_result(self.config, self.make_result(pending, epoch_limit=4))
+        self.assertTrue((imported / 'manifest.json').exists())
+        self.assertIsNone(load_state(self.config)['waiting'])
 
     def test_import_legacy_training_payload_after_sdk_upgrade(self):
         from phonetics.execution import sdk_files

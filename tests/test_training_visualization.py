@@ -28,6 +28,20 @@ def source(cell):return ''.join(cell['source'])
 
 
 class TrainingVisualizationTests(unittest.TestCase):
+    def test_curves_keep_distinct_epoch_budgets_on_shared_axis(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runs = make_training_fixture(Path(folder), character=True, epochs_by_model={'syllable': 2})
+            figures = build_training_figures(load_training_runs(runs))
+            try:
+                syllable, components = figures[0].axes[:2]
+                self.assertEqual(list(syllable.lines[0].get_xdata()), [1, 2])
+                self.assertEqual(list(components.lines[0].get_xdata()), [1, 2, 3])
+                self.assertEqual(syllable.get_xlim(), (1, 3))
+                self.assertEqual(components.get_xlim(), (1, 3))
+            finally:
+                for figure in figures:
+                    plt.close(figure)
+
     def test_panel_semantics_legends_bands_and_centering(self):
         with tempfile.TemporaryDirectory() as folder:
             data=load_training_runs(make_training_fixture(Path(folder)))

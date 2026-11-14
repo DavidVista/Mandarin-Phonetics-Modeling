@@ -20,7 +20,7 @@ import torch
 
 from .artifacts import sha256_file, write_json
 from .data import create_loaders
-from .experiment import load_experiment, select_seed
+from .experiment import load_experiment, select_seed, training_epoch_limit
 from .metrics import batch_objective, finalize_epoch
 from .model import build_encoder, shared_encoder_sha256
 from .objectives import canonical_model_id, parse_model_id
@@ -175,6 +175,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
     config = experiment["config"]
     if model_id not in config["model_ids"]:
         raise ValueError("selected model_id is not configured in the experiment")
+    epoch_limit = training_epoch_limit(config, model_id)
     seeds = experiment["manifest"]["identity"]["training_seeds"]
     requested_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     target_device = torch.device(requested_device)
@@ -197,7 +198,8 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
         "selection": "minimum per-seed validation objective; strict improvement keeps earliest tie",
         "experiment_hashes": {name: sha256_file(experiment_root / name) for name in
                                ("manifest.json", "config.json", "labels.json", "corpus.jsonl", "splits.json", "targets.npy")},
-        "config": config, "code_sha256": {name: sha256_file(Path(__file__).with_name(name)) for name in CODE_FILES},
+        "config": config, "epoch_limit": epoch_limit,
+        "code_sha256": {name: sha256_file(Path(__file__).with_name(name)) for name in CODE_FILES},
         "runtime": {"python": platform.python_version(), "torch": torch.__version__, "numpy": np.__version__,
                     "cuda_available": torch.cuda.is_available(), "cuda_version": torch.version.cuda},
         "seed_results": [], "summary": None, "artifacts": {},
@@ -235,7 +237,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
             best_epoch = None
             best_validation = None
             epoch_history = []
-            for epoch_num in range(1, config["training"]["epochs"] + 1):
+            for epoch_num in range(1, epoch_limit + 1):
                 train_metrics, global_step = _epoch(model, loaders["train"], acoustic, model_id, target_device,
                                                     optimizer=optimizer, event_writer=log_event,
                                                     epoch_number=epoch_num, step_start=global_step)

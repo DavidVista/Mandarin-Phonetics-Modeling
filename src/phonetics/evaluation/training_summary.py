@@ -10,6 +10,7 @@ import numpy as np
 
 from .evaluation_outputs import _finite_json, _is_sha, _evaluation_run, _write, _verify_inventory
 from ..research.artifacts import file_sha256
+from ..experiment import training_epoch_limit
 
 TRAINING_MODELS = ('syllable','components','acoustic','components-acoustic-lambda-1','components-acoustic-lambda-10')
 TRAINING_SEEDS = (0,1,2,3,4)
@@ -113,8 +114,12 @@ def load_training_runs(training_runs):
         signature=(m['experiment_id'],m['experiment_hashes'],m['config'],metrics_source)
         if shared is None: shared=signature
         if signature!=shared: raise ValueError('training experiments/splits/configs differ')
-        epochs=m['config']['training']['epochs']
+        epochs=training_epoch_limit(m['config'], model)
         if type(epochs) is not int or epochs<1: raise ValueError('invalid epoch count')
+        if 'epoch_limit' in m or 'epochs_by_model' in m['config']['training']:
+            recorded_limit = m.get('epoch_limit')
+            if type(recorded_limit) is not int or recorded_limit != epochs:
+                raise ValueError(f'training manifest epoch limit differs from config: {model}')
         if character:
             if type(m['config'].get('seed_count')) is not int or m['config']['seed_count'] != len(TRAINING_SEEDS):
                 raise ValueError('config seed count differs')

@@ -3,7 +3,7 @@ import math
 import unittest
 
 from phonetics.objectives import canonical_model_id, combined_model_id, parse_model_id
-from phonetics.experiment import _validate_config, default_experiment_config
+from phonetics.experiment import _validate_config, default_experiment_config, training_epoch_limit
 
 
 class ObjectiveIdentifierTests(unittest.TestCase):
@@ -34,6 +34,20 @@ class ObjectiveIdentifierTests(unittest.TestCase):
         cfg["model_ids"] = ["components-acoustic-lambda-2.5", "components-acoustic-lambda-2.50"]
         with self.assertRaises(ValueError):
             _validate_config(cfg, 1024)
+
+
+    def test_epoch_overrides_are_optional_and_only_target_configured_models(self):
+        cfg = default_experiment_config()
+        self.assertEqual(training_epoch_limit(_validate_config(cfg, 1024), "acoustic"), 20)
+        cfg["training"]["epochs_by_model"] = {"acoustic": 40}
+        self.assertEqual(_validate_config(cfg, 1024), cfg)
+        self.assertEqual(training_epoch_limit(cfg, "acoustic"), 40)
+        self.assertEqual(training_epoch_limit(cfg, "components"), 20)
+        for overrides in (None, [], {"unknown": 10}, {"acoustic": 0}, {"acoustic": -1},
+                          {"acoustic": True}, {"acoustic": 20.0}, {"acoustic": "20"}):
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, "epochs_by_model"):
+                cfg["training"]["epochs_by_model"] = overrides
+                _validate_config(cfg, 1024)
 
 
 if __name__ == "__main__":

@@ -256,6 +256,13 @@ def validate_training_result(root, job):
             or manifest.get('model_id') != params['model_id'] or manifest.get('run_id') != params['run_id']
             or manifest.get('experiment_hashes', {}).get('manifest.json') != job['input_manifest_sha256']):
         raise ValueError('training result does not match the job')
+    training = manifest.get('config', {}).get('training', {})
+    if 'epoch_limit' in manifest or 'epochs_by_model' in training:
+        from .experiment import training_epoch_limit
+        epoch_limit = manifest.get('epoch_limit')
+        if (type(epoch_limit) is not int or epoch_limit <= 0
+                or epoch_limit != training_epoch_limit(manifest['config'], params['model_id'])):
+            raise ValueError('training result epoch limit differs from the experiment')
     seeds = manifest.get('seeds')
     if not isinstance(seeds, list) or not seeds or manifest.get('seed_status') != {str(s): 'complete' for s in seeds}:
         raise ValueError('training seeds are incomplete')
@@ -313,7 +320,8 @@ def import_result(config, result_path):
             for part in parts:
                 payload = payload / safe_id(part)
         manifest = validate_training_result(payload, job)
-        if (manifest['config'] != expected_config or manifest['seeds'] != list(range(expected_config['seed_count']))
+        if (content_hash(manifest['config']) != content_hash(expected_config)
+                or manifest['seeds'] != list(range(expected_config['seed_count']))
                 or manifest['experiment_id'] != experiment_id):
             raise ValueError('training result config or seeds differ from the experiment')
         target = Path(config['paths']['runs']) / manifest['experiment_id'] / manifest['model_id'] / manifest['run_id']
