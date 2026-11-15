@@ -99,14 +99,22 @@ Activate on Linux/macOS:
 source .venv/bin/activate
 ```
 
-Copy `configs/experiment.example.json` to `configs/experiment.json`, review it once, then run:
+The example computes acoustic embeddings locally. Add the inference dependencies before running it:
 
 ```sh
-phonetics run --config configs/experiment.json --through experiment
-phonetics run --config configs/experiment.json
+uv sync --frozen --extra sources --extra audio --extra analysis --extra test --extra inference
 ```
 
-The first command stops after experiment preparation. The second continues through the configured training and report stages. Paths resolve relative to the config file. Source and model revisions, encoder and head parameters, training settings, devices, execution modes and analysis jobs are defined in one config. Acoustic targets can be imported from a selected bundle or computed from the configured model. Input hashes are computed automatically and recorded in bundles, jobs and run state; an explicit expected acoustic manifest hash can also be supplied.
+Copy `configs/experiment.example.json` to `configs/experiment.json` and review the settings. If you are switching from an earlier config that imported an acoustic bundle, choose fresh values for `paths.acoustic`, `paths.prepared`, `experiment_id`, and `paths.state`. This gives the generated embeddings, prepared dataset, experiment, and pipeline state their own locations.
+
+Then run:
+
+```sh
+phonetics run --config configs/experiment.json --through experiment --allow-inference
+phonetics run --config configs/experiment.json --allow-inference
+```
+
+The first command stops after experiment preparation. With the example settings, the second prepares the first training notebook and waits for its result. To generate reports, add the desired jobs to the empty `analysis` or `visualization` sections. Paths resolve relative to the config file. Source and model revisions, encoder and head parameters, training settings, devices, execution modes and analysis jobs are defined in one config. Acoustic targets can be imported from a selected bundle or computed from the configured model. Input hashes are computed automatically and recorded in bundles, jobs and run state. You can also supply an expected acoustic manifest hash.
 
 Preparation order: download sounds → decode inventory → export and clean corpus → import or infer acoustic targets → assemble prepared data → assemble experiment. Each stage also has an individual CLI command. Computing acoustic targets locally requires the `inference` dependency extra and `--allow-inference`; local training requires `training` and `--allow-training`. Install the Torch 2.11.0 CPU/CUDA build for the selected environment separately. Torch is loaded for model execution.
 

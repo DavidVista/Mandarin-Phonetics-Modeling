@@ -21,12 +21,13 @@ class GeometryEvaluationTests(unittest.TestCase):
         fixture.setUp()
         experiment = fixture.build()
         config = json.loads((Path(__file__).parents[1] / "configs/experiment.example.json").read_text(encoding="utf-8"))
-        config["evaluation"].update(
-            experiment_root=experiment.name,
-            experiment_manifest_sha256=sha256_file(experiment / "manifest.json"),
-            output_root="evaluations", excluded_pinyin=["gu1", "qu1"],
-            exclusion_confirmation={"run_id": "fixture-audit", "manifest_sha256": "a" * 64},
-        )
+        config["evaluation"] = {
+            "id": "fixture-geometry", "experiment_root": experiment.name,
+            "experiment_manifest_sha256": sha256_file(experiment / "manifest.json"),
+            "output_root": "evaluations", "excluded_pinyin": ["gu1", "qu1"],
+            "exclusion_source": {"run_id": "fixture-source", "manifest_sha256": "b" * 64},
+            "exclusion_confirmation": {"run_id": "fixture-audit", "manifest_sha256": "a" * 64},
+        }
         config_path = fixture.root / "config.json"
         config_path.write_text(json.dumps(config), encoding="utf-8")
         with contextlib.redirect_stdout(io.StringIO()):

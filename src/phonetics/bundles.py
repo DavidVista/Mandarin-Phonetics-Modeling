@@ -62,7 +62,8 @@ def staging_directory(destination):
     if target.exists() or target.is_symlink():
         raise FileExistsError(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
+    # Keep nested staging paths short even when the target name is a SHA-256 hash.
+    temporary = Path(tempfile.mkdtemp(prefix=".stage-", dir=target.parent))
     try:
         yield temporary
         if target.exists() or target.is_symlink():

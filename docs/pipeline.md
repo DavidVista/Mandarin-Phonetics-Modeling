@@ -13,7 +13,7 @@
 | `evaluation` | Optional pinned character experiment, output root and ID, excluded tone-labelled Pinyin forms and their source audit |
 | `execution` | Local/notebook mode by eligible stage, explicit training device and run ID |
 | `notebooks` | Whether the first code cell installs supplementary dependencies |
-| `analysis` | Local research workflows, including the example reference geometry report |
+| `analysis` | Local research workflows, empty by default |
 | `visualization` | Existing local or notebook visualization workflows; empty by default |
 
 The default encoder is `experiment.architecture.encoder.type: char_bilstm`. Its embedding dimension, hidden units per direction and number of layers are validated positive integers. Context dimension is derived as twice the hidden dimension. Head settings specify classification hidden dimension and dropout. Acoustic output dimension must match the actual targets.
@@ -60,10 +60,10 @@ The BERT adapter validates a one-to-one token mapping for every selected charact
 
 BERT supports `Adam` or `AdamW`, nonnegative `weight_decay`, and an optional scheduler such as `{"type": "linear", "warmup_ratio": 0.05}`. Select the learning rate, epoch budget and objectives in the experiment config. Give the BERT experiment a distinct ID and state file. Compare architectures using matching split hashes and explicit common evaluation coverage.
 
-The example imports existing acoustic embeddings. Set `acoustic.existing_bundle` and `acoustic.manifest_sha256` to null to compute new ones. Select `execution.acoustic: notebook` to prepare a portable inference job after the decoded inventory, or `local` and explicitly supply `--allow-inference`. The acoustic device belongs to `model.device`; the trained encoder device belongs to `execution.training_device`.
+The example generates acoustic embeddings from the decoded inventory and writes them to `paths.acoustic`. Both `acoustic.existing_bundle` and `acoustic.manifest_sha256` are null. Select `execution.acoustic: notebook` to prepare a portable inference job, or `local` and supply `--allow-inference` for local inference. The acoustic device belongs to `model.device`; the trained encoder device belongs to `execution.training_device`.
 
 ```sh
-phonetics run --config configs/experiment.json --through experiment
+phonetics run --config configs/experiment.json --through experiment --allow-inference
 phonetics run --config configs/experiment.json --allow-inference --allow-training
 ```
 
@@ -83,6 +83,11 @@ Import verifies outer and nested inventories, the pending job, original input ma
 `paths.state` is generated progress, separate from the editable config. Config/source changes reject stale state; select a new state path and run ID, and new output IDs for stages whose scientific inputs changed. Repeated runs revalidate upstream inputs and completed outputs. State is written atomically. There is no concurrent-writer scheduler; run only one CLI writer for a config/state file.
 
 ## Syllable geometry evaluation bundle
+
+After preparing the experiment, add an `evaluation` section with `id`,
+`experiment_root`, `experiment_manifest_sha256`, `output_root`,
+`excluded_pinyin` and `exclusion_source` (the audit run ID and manifest SHA256).
+Configure report jobs once their pinned inputs are available.
 
 ```sh
 phonetics prepare-evaluation --config configs/experiment.json
@@ -210,7 +215,7 @@ subtracts the first model from the second within each seed. When omitted, it
 uses the original contrasts whose models are present.
 
 ```sh
-phonetics generate-notebooks --config configs/experiment.example.json --stage encoder-geometry
+phonetics generate-notebooks --config configs/experiment.json --stage encoder-geometry
 ```
 
 This creates one notebook with pinned evaluation, experiment, and training
@@ -225,7 +230,7 @@ IDs, raw pre-head vectors, and target-position UNK flags.
 To import a saved export for local use:
 
 ```sh
-phonetics import-hidden-states --config configs/experiment.example.json --model syllable --result PATH
+phonetics import-hidden-states --config configs/experiment.json --model syllable --result PATH
 ```
 
 The local workflow uses the same implementation and supports verified exports
@@ -234,7 +239,7 @@ exports. The standalone `extract-hidden-states` command can still produce one
 model's export independently.
 
 ```sh
-phonetics workflow --config configs/experiment.example.json --id char-zh-cn-encoder-geometry-v2
+phonetics workflow --config configs/experiment.json --id ENCODER_GEOMETRY_ID
 ```
 
 If Arial is supplied as a Kaggle input dataset, set `FONT_FILES` in the
