@@ -224,9 +224,9 @@ sys.path.insert(0, str(SDK_ROOT))
         f"PINS = {pins!r}\nREFERENCES = {refs!r}\nSPEC = {notebook_spec!r}\n"
         f"SOURCE_SHA256 = {content_hash(hashes)!r}\n"
     )
-    settings += """RESULTS_ROOT = Path.cwd() / "results"
+    settings += f"""RESULTS_ROOT = Path.cwd() / "results"
 INPUT_ROOT = Path("/kaggle/input")
-ALLOW_EXTRACTION = False
+ALLOW_EXTRACTION = {spec.get("allow_extraction", False)!r}
 FONT_FILES = []
 # FONT_FILES = ["/kaggle/input/your-fonts/arial.ttf", "/kaggle/input/your-fonts/arialbd.ttf"]
 """

@@ -99,26 +99,28 @@ Activate on Linux/macOS:
 source .venv/bin/activate
 ```
 
-The example computes acoustic embeddings locally. Add the inference dependencies before running it:
+For a local smoke run, install the training extra and run the mock config:
 
 ```sh
-uv sync --frozen --extra sources --extra audio --extra analysis --extra test --extra inference
+uv sync --frozen --extra training
+phonetics run --config configs/experiment.mock.json --allow-training
 ```
 
-Copy `configs/experiment.example.json` to `configs/experiment.json` and review the settings. If you are switching from an earlier config that imported an acoustic bundle, choose fresh values for `paths.acoustic`, `paths.prepared`, `experiment_id`, and `paths.state`. This gives the generated embeddings, prepared dataset, experiment, and pipeline state their own locations.
+The mock uses synthetic sentences and acoustic targets. It trains four BiLSTM objectives on CPU with one seed and one epoch each, using 900 training, 100 validation, and 100 test sentences. It writes its report to `generated/mock/reports/training-report/report.md`.
 
-Then run:
+For research runs, choose the BiLSTM or BERT config under `configs/local/` or `configs/notebook/`. Use the same config to import a notebook result and resume. For example:
 
 ```sh
-phonetics run --config configs/experiment.json --through experiment --allow-inference
-phonetics run --config configs/experiment.json --allow-inference
+uv sync --frozen --extra sources --extra audio --extra analysis --extra test --extra inference --extra training
+phonetics run --config configs/local/experiment.bilstm.json --allow-inference --allow-training
+phonetics run --config configs/notebook/experiment.bilstm.json
 ```
 
-The first command stops after experiment preparation. With the example settings, the second prepares the first training notebook and waits for its result. To generate reports, add the desired jobs to the empty `analysis` or `visualization` sections. Paths resolve relative to the config file. Source and model revisions, encoder and head parameters, training settings, devices, execution modes and analysis jobs are defined in one config. Acoustic targets can be imported from a selected bundle or computed from the configured model. Input hashes are computed automatically and recorded in bundles, jobs and run state. You can also supply an expected acoustic manifest hash.
+The notebook profile hands off acoustic inference and training. For research reports, add jobs to the empty `analysis` or `visualization` sections. Paths resolve relative to the config file. Acoustic targets can be imported from a selected bundle or computed from the configured model. Input hashes are recorded in bundles, jobs and run state.
 
 Preparation order: download sounds → decode inventory → export and clean corpus → import or infer acoustic targets → assemble prepared data → assemble experiment. Each stage also has an individual CLI command. Computing acoustic targets locally requires the `inference` dependency extra and `--allow-inference`; local training requires `training` and `--allow-training`. Install the Torch 2.11.0 CPU/CUDA build for the selected environment separately. Torch is loaded for model execution.
 
-Each seed samples 100000 train+validation sentences by default: 90000 train and 10000 validation, with one additional shared 10000-sentence test. Five seeds build independent train-only character vocabularies. Test sentences are removed before seed sampling. The default encoder uses 64-dimensional character embeddings and a bidirectional sentence LSTM with 64 units per direction. Data splits and vocabularies are deterministic; GPU outputs need not match bitwise between systems.
+The research profiles sample 90000 training and 10000 validation sentences per seed and share a separate 100000-sentence test split. Each BiLSTM seed builds its own train-only character vocabulary. Test sentences are removed before seed sampling. Data splits and vocabularies are deterministic; GPU outputs need not match bitwise between systems.
 
 The source stage downloads the pinned official Chinese Lessons archive and records attribution and license provenance. Stage results are reused after validation of their inputs, parameters and content. Changed inputs or parameters require distinct output IDs.
 
@@ -131,8 +133,8 @@ At a notebook stage, `run` prints `status: waiting` and the notebook and job pat
 Download and extract the result ZIP. A training archive contains `runs/<experiment_id>/<model_id>/<run_id>/`. For manual transfer, merge the contents of the archive's `runs/` into the configured runs directory. To verify and register a pending job, pass the extracted archive root to the importer:
 
 ```sh
-phonetics import-result --config configs/experiment.json --result path/to/extracted-result
-phonetics run --config configs/experiment.json
+phonetics import-result --config configs/notebook/experiment.bilstm.json --result path/to/extracted-result
+phonetics run --config configs/notebook/experiment.bilstm.json
 ```
 
 The CLI checks the pending job identity, source snapshot, input pins, result inventory, parameters and completed seeds before publication. Checkpoint bytes are authenticated by hashes; result import does not deserialize them. Each objective has a separate notebook job; resume advances to the next configured objective.
@@ -140,7 +142,7 @@ The CLI checks the pending job identity, source snapshot, input pins, result inv
 Generate optional notebooks separately with the same generator:
 
 ```sh
-phonetics generate-notebooks --config configs/experiment.json --stage training
+phonetics generate-notebooks --config configs/notebook/experiment.bilstm.json --stage training
 ```
 
 Stages are `acoustic`, `training`, `visualization` or `ready` (all whose inputs are available). Generated notebooks, execution jobs and run state are written to the configured paths. The default `generated/` directory is ignored by Git.

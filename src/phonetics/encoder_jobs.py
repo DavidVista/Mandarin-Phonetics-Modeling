@@ -12,10 +12,12 @@ from .execution import safe_id
 
 def resolve_encoder_config(spec, resolve):
     required = {"id", "training_runs", "representations_root", "device", "batch_size", "tolerance"}
-    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics", "contrasts"}:
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics", "contrasts", "allow_extraction"}:
         raise ValueError("encoder_geometry requires id, training_runs, representations_root, device, batch_size and tolerance")
     if type(spec.get("diagnostics", False)) is not bool:
         raise ValueError("encoder diagnostics must be a boolean")
+    if type(spec.get("allow_extraction", False)) is not bool:
+        raise ValueError("encoder allow_extraction must be a boolean")
     safe_id(spec["id"])
     runs = spec["training_runs"]
     if (not isinstance(runs, dict) or not runs

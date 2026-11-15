@@ -177,7 +177,7 @@ class EncoderGeometryTests(unittest.TestCase):
             refs = {"experiment": str(experiment), "evaluation": str(evaluation), **runs}
             spec = {"id": "report", "training_runs": runs, "contrasts": contrasts,
                     "representations_root": str(fixture.root / "exports"), "device": "cpu",
-                    "batch_size": 8, "tolerance": 1e-12}
+                    "batch_size": 8, "tolerance": 1e-12, "allow_extraction": True}
             config = {"encoder_geometry": spec, "paths": {"generated": str(fixture.root / "generated")},
                       "notebooks": {"install_dependencies": False},
                       "evaluation": {"experiment_root": str(experiment), "id": evaluation.name,
@@ -186,6 +186,7 @@ class EncoderGeometryTests(unittest.TestCase):
             notebook = generate_encoder_notebooks(config)[0]["notebook"]
             cells = json.loads(Path(notebook).read_text(encoding="utf-8"))["cells"]
             self.assertIn("contrasts", "".join(cells[-2]["source"]))
+            self.assertIn("ALLOW_EXTRACTION = True", "".join(cells[-2]["source"]))
             self.assertNotIn("TRAINING_MODELS", "".join(cells[-1]["source"]))
             with self.assertRaisesRegex(ValueError, "one training run"):
                 run_encoder_workflow(refs={**refs, "extra": str(experiment)}, pins=pins, spec=spec,

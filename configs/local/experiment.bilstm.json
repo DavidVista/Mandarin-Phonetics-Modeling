@@ -1,0 +1,100 @@
+{
+  "schema_version": 2,
+  "paths": {
+    "source": "../../datasets/source-data/raw",
+    "export": "../../datasets/source-data/corpus-export",
+    "inventory": "../../datasets/source-data/sound-inventory",
+    "corpus": "../../datasets/processed-corpus/characters",
+    "acoustic": "../../datasets/pinyin-embeddings/acoustic-targets/local",
+    "prepared": "../../datasets/prepared/characters/local",
+    "experiments": "../../datasets/experiments/local",
+    "cache": "../../datasets/source-data/acoustic-cache",
+    "runs": "../../runs/local",
+    "generated": "../../generated/local",
+    "reports": "../../outputs/local",
+    "state": "../../generated/local/state/bilstm.json"
+  },
+  "corpus": {
+    "revision": "9961d7d05910be7006f2dcfae21f4fc5ce4d560a",
+    "split": "train",
+    "columns": {
+      "text": "我们试试看！",
+      "pinyin": "wo3 men shi4 shi4 kan4 ！"
+    },
+    "tone_convention": "neutral_unmarked"
+  },
+  "model": {
+    "id": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "processor": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "revision": "99ccb2737be22b8bb50dcfcc39ad4d567fb90cfd",
+    "device": "cpu",
+    "dtype": "float32",
+    "layer": -1,
+    "sample_rate": 16000,
+    "mono": true,
+    "padding": "none",
+    "pooling": "mean_all"
+  },
+  "acoustic": {
+    "existing_bundle": null,
+    "manifest_sha256": null
+  },
+  "experiment_id": "bilstm",
+  "experiment": {
+    "schema_version": 4,
+    "sample_size": 100000,
+    "seed_count": 5,
+    "test_seed": 0,
+    "test_fraction": 0.1,
+    "validation_fraction": 0.1,
+    "architecture": {
+      "encoder": {
+        "type": "char_bilstm",
+        "embedding_dim": 64,
+        "hidden_per_direction": 64,
+        "layers": 1
+      },
+      "heads": {
+        "classification_hidden_dim": 64,
+        "classification_dropout": 0.5
+      },
+      "acoustic_dim": 1024
+    },
+    "training": {
+      "optimizer": "Adam",
+      "learning_rate": 0.001,
+      "weight_decay": 0.0,
+      "batch_size": 32,
+      "epochs": 20,
+      "scheduler": null,
+      "early_stopping": false,
+      "gradient_clipping": null,
+      "cosine_epsilon": 1e-08,
+      "epochs_by_model": {
+        "components": 10,
+        "acoustic": 60
+      }
+    },
+    "model_ids": [
+      "syllable",
+      "components",
+      "acoustic",
+      "components-acoustic-lambda-1",
+      "components-acoustic-lambda-3",
+      "components-acoustic-lambda-10"
+    ],
+    "test_size": 100000
+  },
+  "execution": {
+    "acoustic": "local",
+    "training": "local",
+    "visualization": "local",
+    "training_device": "cuda",
+    "run_id": "run-1"
+  },
+  "analysis": [],
+  "visualization": [],
+  "notebooks": {
+    "install_dependencies": true
+  }
+}

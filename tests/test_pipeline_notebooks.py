@@ -19,7 +19,7 @@ class PipelineNotebookTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.root = self.fixture.root
         self.experiment = self.fixture.build()
-        self.config = load_config(PROJECT / 'configs/experiment.example.json')
+        self.config = load_config(PROJECT / 'configs/notebook/experiment.bilstm.json')
         self.config['experiment'] = self.fixture.config
         self.config['experiment_id'] = self.experiment.name
         self.config['paths']['generated'] = str(self.root / 'generated')

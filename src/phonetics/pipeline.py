@@ -116,6 +116,9 @@ def run_stage(config, stage, *, allow_inference=False):
                                         cache_root=paths["cache"], existing_bundle=spec["existing_bundle"],
                                         existing_manifest_sha256=spec["manifest_sha256"])
     if stage == "prepare-data":
+        if config.get("execution", {}).get("preparation") == "mock":
+            from .mock_data import prepare_mock_data
+            return prepare_mock_data(config["experiment"], paths)
         from .acoustic import assemble_character_data
         return assemble_character_data(paths["corpus"], paths["acoustic"], paths["prepared"])
     if stage == "prepare-experiment":
@@ -123,6 +126,9 @@ def run_stage(config, stage, *, allow_inference=False):
         return prepare_experiment(config["experiment_id"], prepared_root=paths["prepared"],
                                   config=config["experiment"], output_root=paths["experiments"])
     if stage == "prepare":
+        if config.get("execution", {}).get("preparation") == "mock":
+            run_stage(config, "prepare-data")
+            return run_stage(config, "prepare-experiment")
         if config["acoustic"]["existing_bundle"] is None and not allow_inference:
             raise PermissionError("preparation would require inference; select an existing bundle or --allow-inference")
         result = None

@@ -20,7 +20,7 @@ class GeometryEvaluationTests(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         fixture.setUp()
         experiment = fixture.build()
-        config = json.loads((Path(__file__).parents[1] / "configs/experiment.example.json").read_text(encoding="utf-8"))
+        config = json.loads((Path(__file__).parents[1] / "configs/notebook/experiment.bilstm.json").read_text(encoding="utf-8"))
         config["evaluation"] = {
             "id": "fixture-geometry", "experiment_root": experiment.name,
             "experiment_manifest_sha256": sha256_file(experiment / "manifest.json"),

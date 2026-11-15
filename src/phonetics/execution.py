@@ -13,7 +13,7 @@ from .bundles import content_hash, seal_bundle, staging_directory, validate_bund
 PREPARATION = ('download-sounds', 'prepare-inventory', 'prepare-corpus',
                'prepare-embeddings', 'prepare-data', 'prepare-experiment')
 WORKFLOWS = {'dimsim-distribution', 'dimsim-parser-alignment', 'reference-geometry',
-             'training-visualization', 'evaluation-visualization'}
+             'training-visualization', 'evaluation-visualization', 'training-report'}
 
 
 def sdk_files():
@@ -29,11 +29,16 @@ def sdk_hashes(files=None):
 
 def validate_execution_config(config, resolve):
     spec = config['execution']
-    if not isinstance(spec, dict) or set(spec) != {'acoustic', 'training', 'visualization', 'training_device', 'run_id'}:
+    required = {'acoustic', 'training', 'visualization', 'training_device', 'run_id'}
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {'preparation'}:
         raise ValueError('execution requires acoustic, training, visualization, training_device and run_id')
     for key in ('acoustic', 'training', 'visualization'):
         if spec[key] not in ('local', 'notebook'):
             raise ValueError(f'execution.{key} must be local or notebook')
+    if spec.get('preparation', 'standard') not in ('standard', 'mock'):
+        raise ValueError('execution.preparation must be standard or mock')
+    if spec.get('preparation') == 'mock' and any(spec[key] != 'local' for key in ('acoustic', 'training', 'visualization')):
+        raise ValueError('mock preparation requires local execution')
     safe_id(spec['run_id'])
     if not isinstance(spec['training_device'], str) or not spec['training_device']:
         raise ValueError('training_device must be explicit')
@@ -375,7 +380,8 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
     for record in state['completed'].values():
         if _manifest_pin(record['path']) != record['manifest_sha256']:
             raise ValueError('a completed stage manifest changed')
-    for stage in PREPARATION:
+    preparation = PREPARATION[-2:] if config['execution'].get('preparation') == 'mock' else PREPARATION
+    for stage in preparation:
         if stage == 'prepare-embeddings' and stage in state['completed']:
             # Imported results have no historical-bundle import identity.
             from .acoustic import validate_acoustic_targets

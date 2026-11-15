@@ -9,10 +9,43 @@ import unittest
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(PROJECT/'src'), str(PROJECT/'tests')]
 from phonetics.workflows import resolve_parameters, workflow_pins, run_workflow, validate_workflow_result
+from phonetics.workflows import package_workflow, workflow_contract
+from phonetics.artifacts import sha256_file, write_json
 from test_training_summary import make_training_fixture
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_training_report_relocates_inputs_and_requires_matching_runs(self):
+        with tempfile.TemporaryDirectory(dir=PROJECT / 'tests') as directory:
+            root = Path(directory)
+            runs = {model: str(root / model) for model in ('components', 'acoustic')}
+            workflow = {'id': 'report', 'workflow': 'training-report',
+                        'parameters': {'training_runs': runs}}
+            for model, directory in runs.items():
+                run = Path(directory)
+                run.mkdir()
+                summary = run / 'summary.json'
+                write_json(summary, {'status': 'complete', 'seed_results': [{'seed': 0, 'test_metrics': {'objective': 1}}]})
+                write_json(run / 'manifest.json', {
+                    'run_type': 'training_run', 'status': 'complete', 'model_id': model,
+                    'experiment_id': 'mock', 'experiment_hashes': {'manifest.json': 'a' * 64}, 'seeds': [0],
+                    'artifacts': {'summary.json': sha256_file(summary)},
+                })
+            package_workflow(workflow, root / 'job')
+            relocated = json.loads((root / 'job' / 'workflow.json').read_text(encoding='utf-8'))
+            self.assertEqual(workflow_contract(workflow), workflow_contract(relocated))
+            result = run_workflow(workflow, root / 'reports')
+            self.assertEqual((result / 'report.md').read_text(encoding='utf-8').count('| 0 | objective | 1 |'), 2)
+
+            path = Path(runs['acoustic']) / 'manifest.json'
+            manifest = json.loads(path.read_text(encoding='utf-8'))
+            for difference in ({'experiment_hashes': {'manifest.json': 'b' * 64}}, {'seeds': [1]}):
+                with self.subTest(difference=difference):
+                    write_json(path, {**manifest, **difference})
+                    with self.assertRaisesRegex(ValueError, 'same experiment and seed set'):
+                        run_workflow({**workflow, 'id': 'mismatch'}, root / 'reports')
+                    self.assertFalse((root / 'reports' / 'mismatch').exists())
+
     def test_local_training_figures_reuse_and_input_tampering(self):
         with tempfile.TemporaryDirectory(dir=PROJECT/'tests') as directory:
             root=Path(directory)
@@ -26,7 +59,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(run_workflow(workflow,root/'reports'),output)
             from phonetics.execution import create_job
             from phonetics.pipeline import load_config
-            config = load_config(PROJECT/'configs/experiment.example.json')
+            config = load_config(PROJECT/'configs/notebook/experiment.bilstm.json')
             config['paths']['generated'] = str(root/'generated')
             job = create_job(config, 'visualization', None, workflow=workflow)
             notebook = json.loads(Path(job['notebook']).read_text(encoding='utf-8'))
@@ -88,7 +121,7 @@ class WorkflowTests(unittest.TestCase):
             workflow = {'id':'report','workflow':'training-visualization','parameters':{
                 'training_runs':{name:str(path) for name,path in zip(('syllable','components'),inputs)},
                 'summary_run_id':'summary','mode':'prepare'}}
-            config = load_config(PROJECT/'configs/experiment.example.json')
+            config = load_config(PROJECT/'configs/notebook/experiment.bilstm.json')
             # Use the second input to detect implementations checking only the first.
             before = {p.relative_to(root).as_posix():(p.is_dir(),p.read_bytes() if p.is_file() else None)
                       for p in root.rglob('*')}

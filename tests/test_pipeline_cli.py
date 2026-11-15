@@ -21,7 +21,7 @@ class PipelineCLITests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=PROJECT / "tests")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.config = json.loads((PROJECT / "configs/experiment.example.json").read_text(encoding="utf-8"))
+        self.config = json.loads((PROJECT / "configs/notebook/experiment.bilstm.json").read_text(encoding="utf-8"))
         self.path = self.root / "config.json"
         self.path.write_text(json.dumps(self.config), encoding="utf-8")
 

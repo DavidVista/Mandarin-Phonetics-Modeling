@@ -1,6 +1,8 @@
 # Configuration and local workflows
 
-`configs/experiment.example.json` is the complete editable starting configuration. Copy it before the first run. Its paths are relative to the config directory, not the shell working directory. JSON does not support comments; the sections are described below.
+Research profiles live in `configs/local/` and `configs/notebook/`. They keep separate experiment bundles, acoustic targets, prepared data, run state, notebooks, training runs, and reports. Source data and processed corpus paths are shared. Resolve paths relative to the selected JSON file. The examples below use the BiLSTM profile; adjust the config path for BERT.
+
+`configs/experiment.mock.json` uses `execution.preparation: mock` to generate a synthetic corpus and target vectors locally. Run it with `phonetics run --config configs/experiment.mock.json --allow-training`. It runs four objectives on CPU for one epoch with one seed and writes a Markdown test-metric report. Its split contains 900 training, 100 validation, and 100 test sentences. This checks training and report plumbing with generated inputs.
 
 | Section | Meaning |
 | --- | --- |
@@ -60,11 +62,11 @@ The BERT adapter validates a one-to-one token mapping for every selected charact
 
 BERT supports `Adam` or `AdamW`, nonnegative `weight_decay`, and an optional scheduler such as `{"type": "linear", "warmup_ratio": 0.05}`. Select the learning rate, epoch budget and objectives in the experiment config. Give the BERT experiment a distinct ID and state file. Compare architectures using matching split hashes and explicit common evaluation coverage.
 
-The example generates acoustic embeddings from the decoded inventory and writes them to `paths.acoustic`. Both `acoustic.existing_bundle` and `acoustic.manifest_sha256` are null. Select `execution.acoustic: notebook` to prepare a portable inference job, or `local` and supply `--allow-inference` for local inference. The acoustic device belongs to `model.device`; the trained encoder device belongs to `execution.training_device`.
+The research profiles generate acoustic embeddings from the decoded inventory and write them to `paths.acoustic`. Both `acoustic.existing_bundle` and `acoustic.manifest_sha256` are null. Select `execution.acoustic: notebook` to prepare a portable inference job, or `local` and supply `--allow-inference` for local inference. The acoustic device belongs to `model.device`; the trained encoder device belongs to `execution.training_device`.
 
 ```sh
-phonetics run --config configs/experiment.json --through experiment --allow-inference
-phonetics run --config configs/experiment.json --allow-inference --allow-training
+phonetics run --config configs/local/experiment.bilstm.json --through experiment --allow-inference
+phonetics run --config configs/local/experiment.bilstm.json --allow-inference --allow-training
 ```
 
 The last command executes ML stages only when their modes select local computation and their dependencies are installed. It does not install them. `--through` accepts `experiment`, `training`, `analysis`, `visualization`.
@@ -74,8 +76,8 @@ Notebook generation never executes an ML stage. Training generation validates th
 The dependency cell runs before project imports and installs supplementary packages only. Torch 2.11.0 must already be installed with the appropriate CPU/CUDA build for ML jobs. The final cell executes the stage and exports a result ZIP. Training archives preserve `runs/<experiment_id>/<model_id>/<run_id>/`, and the cell prints that path. For manual transfer, merge the contents of the archive's `runs/` directory into `paths.runs`. Keep the archive root with its receipt and manifest when importing a pending job. The importer accepts both the run tree and the legacy `payload/` layout. After an SDK upgrade, import a pending training result with the original config, state and job directory. The importer verifies the job against its recorded SDK and updates the state to the current SDK after successful import.
 
 ```sh
-phonetics import-result --config configs/experiment.json --result downloaded/result
-phonetics run --config configs/experiment.json
+phonetics import-result --config configs/notebook/experiment.bilstm.json --result downloaded/result
+phonetics run --config configs/notebook/experiment.bilstm.json
 ```
 
 Import verifies outer and nested inventories, the pending job, original input manifest, source hashes, acoustic extraction parameters or training objective/config/seed completion, and checkpoint/log file hashes. It does not load checkpoint tensors. A wrong or incomplete result leaves the pending state intact. Existing different destination data is never overwritten. Imported acoustic targets continue directly into prepared/experiment assembly.
@@ -205,8 +207,8 @@ The optional `encoder_geometry` section selects one training run per model in
 the pinned experiment, the
 hidden-state output root, an extraction device and batch size, and the report
 ID and tie tolerance. Its input is the sealed evaluation bundle selected by
-`evaluation`. The example uses CPU as a configuration value. Review the device
-and exact input dataset versions before extraction.
+`evaluation`. Set `encoder_geometry.device` explicitly and review the input
+dataset versions before extraction.
 
 The pinned experiment defines model order and seed IDs. Set optional
 `encoder_geometry.contrasts` to a list of ordered pairs of distinct model IDs,
@@ -221,9 +223,11 @@ phonetics generate-notebooks --config configs/experiment.json --stage encoder-ge
 This creates one notebook with pinned evaluation, experiment, and training
 manifests and an embedded SDK and plot style. Attach these bundles and any
 compatible hidden-state exports. The notebook verifies the selected checkpoint
-SHA256 and epoch per model and seed. After approval, set `ALLOW_EXTRACTION` in
-the notebook configuration to extract any missing exports on the configured
-device. Extraction requires Torch 2.11.0. The notebook writes a report ZIP and
+SHA256 and epoch per model and seed. Set `encoder_geometry.allow_extraction`
+to `true` to generate the notebook with `ALLOW_EXTRACTION = True`. The
+default is `false`, which limits the notebook to existing exports. The CLI
+uses its own `--allow-execution` flag. Extraction requires Torch 2.11.0.
+The notebook writes a report ZIP and
 one hidden-state ZIP containing every model export used by the report. Each export retains occurrence
 IDs, raw pre-head vectors, and target-position UNK flags.
 

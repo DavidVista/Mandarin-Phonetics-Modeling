@@ -31,7 +31,7 @@ class ExecutionTests(unittest.TestCase):
         for name in ('labels.json', 'targets.npy', 'inventory.jsonl', 'inference.json'):
             shutil.copyfile(self.fixture.prepared / name, self.acoustic / name)
         seal_bundle(self.acoustic, 'acoustic_targets', {'inventory_manifest_sha256': 'a' * 64})
-        self.config = load_config(PROJECT / 'configs/experiment.example.json')
+        self.config = load_config(PROJECT / 'configs/notebook/experiment.bilstm.json')
         self.config['acoustic'] = {'existing_bundle': str(self.acoustic),
                                    'manifest_sha256': sha256_file(self.acoustic / 'manifest.json')}
         self.config['experiment_id'] = self.experiment.name

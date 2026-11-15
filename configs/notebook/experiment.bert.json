@@ -1,0 +1,101 @@
+{
+  "schema_version": 2,
+  "paths": {
+    "source": "../../datasets/source-data/raw",
+    "export": "../../datasets/source-data/corpus-export",
+    "inventory": "../../datasets/source-data/sound-inventory",
+    "corpus": "../../datasets/processed-corpus/characters",
+    "acoustic": "../../datasets/pinyin-embeddings/acoustic-targets/notebook",
+    "prepared": "../../datasets/prepared/characters/notebook",
+    "experiments": "../../datasets/experiments/notebook",
+    "cache": "../../datasets/source-data/acoustic-cache",
+    "runs": "../../runs/notebook",
+    "generated": "../../generated/notebook",
+    "reports": "../../outputs/notebook",
+    "state": "../../generated/notebook/state/bert.json"
+  },
+  "corpus": {
+    "revision": "9961d7d05910be7006f2dcfae21f4fc5ce4d560a",
+    "split": "train",
+    "columns": {
+      "text": "我们试试看！",
+      "pinyin": "wo3 men shi4 shi4 kan4 ！"
+    },
+    "tone_convention": "neutral_unmarked"
+  },
+  "model": {
+    "id": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "processor": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "revision": "99ccb2737be22b8bb50dcfcc39ad4d567fb90cfd",
+    "device": "cuda",
+    "dtype": "float32",
+    "layer": -1,
+    "sample_rate": 16000,
+    "mono": true,
+    "padding": "none",
+    "pooling": "mean_all"
+  },
+  "acoustic": {
+    "existing_bundle": null,
+    "manifest_sha256": null
+  },
+  "experiment_id": "bert",
+  "experiment": {
+    "schema_version": 4,
+    "sample_size": 100000,
+    "seed_count": 3,
+    "test_seed": 0,
+    "test_fraction": 0.1,
+    "validation_fraction": 0.1,
+    "architecture": {
+      "encoder": {
+        "type": "bert",
+        "model_id": "google-bert/bert-base-chinese",
+        "revision": "8f23c25b06e129b6c986331a13d8d025a92cf0ea",
+        "files": {
+          "config.json": "88af762cfb15fa9ce183c84dcbfdc9d635196ba635dfe81f265fdd21d67f4c4c",
+          "model.safetensors": "3404a1ffd8da507042e8161013ba2a4fc49858b4e3f8fbf5ce5724f94883aec3",
+          "tokenizer.json": "55c5edcfb8936895e019b2d8f97dcb547734f25b29f95009155f4c8c15649aae",
+          "tokenizer_config.json": "0f6d13e6f4da6f9e24f22ada6bc3be571123d858d7c0c05a8a7cd55a9c23c2e8",
+          "vocab.txt": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"
+        }
+      },
+      "heads": {
+        "classification_hidden_dim": 64,
+        "classification_dropout": 0.5
+      },
+      "acoustic_dim": 1024
+    },
+    "training": {
+      "optimizer": "AdamW",
+      "learning_rate": 2e-05,
+      "weight_decay": 0.01,
+      "batch_size": 32,
+      "epochs": 4,
+      "scheduler": {
+        "type": "linear",
+        "warmup_ratio": 0.05
+      },
+      "early_stopping": false,
+      "gradient_clipping": null,
+      "cosine_epsilon": 1e-08
+    },
+    "model_ids": [
+      "components",
+      "components-acoustic-lambda-1"
+    ],
+    "test_size": 100000
+  },
+  "execution": {
+    "acoustic": "notebook",
+    "training": "notebook",
+    "visualization": "local",
+    "training_device": "cuda",
+    "run_id": "run-1"
+  },
+  "analysis": [],
+  "visualization": [],
+  "notebooks": {
+    "install_dependencies": true
+  }
+}

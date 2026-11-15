@@ -14,6 +14,7 @@ PATH_FIELDS = {
     'dimsim-parser-alignment': {'evaluation_root'},
     'reference-geometry': {'base_root', 'zh_cn_root', 'evaluation_root'},
     'training-visualization': set(),
+    'training-report': set(),
     'evaluation-visualization': {'anchor_q_output', 'dimsim_output', 'random_control_output', 'bundle_path'},
 }
 PARAMETERS = {
@@ -21,6 +22,7 @@ PARAMETERS = {
     'dimsim-parser-alignment': {'seed', 'bootstrap_replicates', 'confidence', 'atol', 'rtol'},
     'reference-geometry': {'tolerance', 'base_manifest_sha256'},
     'training-visualization': {'training_runs', 'summary_run_id', 'mode'},
+    'training-report': {'training_runs'},
     'evaluation-visualization': {'derived_run_ids', 'derived_mode'},
 }
 
@@ -40,9 +42,15 @@ def resolve_parameters(name, parameters, resolve):
             raise ValueError('config-driven training visualization currently supports prepare; use the SDK for explicit summary reuse')
         from .execution import safe_id
         safe_id(result['summary_run_id'])
-        if not isinstance(result['training_runs'], dict):
+    if name in ('training-visualization', 'training-report'):
+        runs = result.get('training_runs')
+        if not isinstance(runs, dict):
             raise ValueError('training_runs must map model IDs to explicit run directories')
-        result['training_runs'] = {key: resolve(value) for key, value in result['training_runs'].items()}
+        if name == 'training-report':
+            from .objectives import canonical_model_id
+            if not runs or any(canonical_model_id(model) != model for model in runs):
+                raise ValueError('training report requires canonical model IDs')
+        result['training_runs'] = {key: resolve(value) for key, value in runs.items()}
     if name == 'evaluation-visualization':
         if not {'derived_run_ids', 'derived_mode'} <= set(result) or result['derived_mode'] != 'prepare':
             raise ValueError('config-driven evaluation visualization requires explicit derived_run_ids and prepare mode')
@@ -57,7 +65,7 @@ def resolve_parameters(name, parameters, resolve):
 def _inputs(workflow):
     params = workflow['parameters']
     result = {k: params[k] for k in sorted(PATH_FIELDS[workflow['workflow']])}
-    if workflow['workflow'] == 'training-visualization':
+    if workflow['workflow'] in ('training-visualization', 'training-report'):
         result.update({'training:' + k: p for k, p in params['training_runs'].items()})
     return result
 
@@ -72,7 +80,7 @@ def workflow_contract(workflow):
             if not isinstance(params[field], str) or not params[field]:
                 raise ValueError('workflow input locations must be nonempty strings')
             params[field] = {'input': field}
-        if name == 'training-visualization':
+        if name in ('training-visualization', 'training-report'):
             if not isinstance(params['training_runs'], dict) or any(not isinstance(p, str) or not p for p in params['training_runs'].values()):
                 raise ValueError('training input locations must be a path mapping')
             params['training_runs'] = {model: {'input': 'training:' + model} for model in params['training_runs']}
@@ -143,6 +151,41 @@ def _dispatch(workflow, project_root):
     from .execution import sdk_hashes
     name = workflow['workflow']
     params = copy.deepcopy(workflow['parameters'])
+    if name == 'training-report':
+        lines = ['# Training smoke report', '']
+        expected_population = None
+        for model, directory in params['training_runs'].items():
+            root = Path(directory)
+            manifest = _verify_files(root)
+            if (manifest.get('run_type'), manifest.get('status'), manifest.get('model_id')) != ('training_run', 'complete', model):
+                raise ValueError(f'invalid completed training run for {model}')
+            experiment = manifest.get('experiment_id')
+            experiment_pin = manifest.get('experiment_hashes', {}).get('manifest.json')
+            seeds = manifest.get('seeds')
+            if (not isinstance(experiment, str) or not experiment or not isinstance(experiment_pin, str)
+                    or not experiment_pin or not isinstance(seeds, list) or not seeds
+                    or any(type(seed) is not int for seed in seeds) or len(set(seeds)) != len(seeds)):
+                raise ValueError(f'invalid training experiment or seeds for {model}')
+            population = (experiment, experiment_pin, frozenset(seeds))
+            if expected_population is None:
+                expected_population = population
+            elif population != expected_population:
+                raise ValueError('training report requires the same experiment and seed set across runs')
+            if 'summary.json' not in manifest['artifacts']:
+                raise ValueError(f'invalid training summary for {model}')
+            summary = json.loads(safe_artifact(root, 'summary.json').read_text(encoding='utf-8'))
+            results = summary.get('seed_results')
+            if (summary.get('status') != 'complete' or not isinstance(results, list)
+                    or sorted(row['seed'] for row in results) != sorted(seeds)):
+                raise ValueError(f'invalid training summary for {model}')
+            lines.extend([f'## {model}', '', '| Seed | Metric | Test value |', '| ---: | --- | ---: |'])
+            for seed in results:
+                lines.extend(f'| {seed["seed"]} | {metric} | {value:.6g} |'
+                             for metric, value in sorted(seed['test_metrics'].items()))
+            lines.append('')
+        report = project_root / 'report.md'
+        report.write_text('\n'.join(lines), encoding='utf-8')
+        return report
     if name in ('dimsim-distribution', 'dimsim-parser-alignment'):
         for key in PATH_FIELDS[name]:
             params[key] = Path(params[key])
