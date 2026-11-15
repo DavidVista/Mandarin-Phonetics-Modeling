@@ -146,8 +146,8 @@ def assemble_character_data(corpus_path, acoustic_path, destination):
             shutil.copyfile(corpus_path / name, temporary / name)
         for name in ("labels.json", "targets.npy", "inference.json"):
             shutil.copyfile(acoustic_path / name, temporary / name)
-        write_json(temporary / "corpus_manifest.json", cm)
-        write_json(temporary / "acoustic_manifest.json", am)
+        shutil.copyfile(corpus_path / "manifest.json", temporary / "corpus_manifest.json")
+        shutil.copyfile(acoustic_path / "manifest.json", temporary / "acoustic_manifest.json")
         seal_bundle(temporary, "character_prepared", identity)
         validate_character_data(temporary)
     return target

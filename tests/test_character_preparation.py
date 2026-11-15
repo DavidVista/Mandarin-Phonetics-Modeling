@@ -68,7 +68,13 @@ class PreparationTests(unittest.TestCase):
             return [1.0, 2.0] if row["label"] == "ma1" else [2.0, 1.0]
         acoustic = prepare_acoustic_targets(self.inventory, self.root / "acoustic", model=MODEL,
                                            cache_root=self.root / "cache", backend=backend)
+        corpus_manifest = corpus / "manifest.json"
+        acoustic_manifest = acoustic / "manifest.json"
+        corpus_manifest.write_bytes(corpus_manifest.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        acoustic_manifest.write_bytes(acoustic_manifest.read_bytes().replace(b"\r\n", b"\n"))
         prepared = assemble_character_data(corpus, acoustic, self.root / "prepared")
+        self.assertEqual((prepared / "corpus_manifest.json").read_bytes(), corpus_manifest.read_bytes())
+        self.assertEqual((prepared / "acoustic_manifest.json").read_bytes(), acoustic_manifest.read_bytes())
         self.assertEqual((prepared / "corpus.jsonl").read_bytes(), (corpus / "corpus.jsonl").read_bytes())
         self.assertEqual(assemble_character_data(corpus, acoustic, prepared), prepared)
         (prepared / "targets.npy").write_bytes(b"corrupt")
