@@ -33,6 +33,17 @@ class Tests(unittest.TestCase):
         p=protocol();fig,axes=viz.layout(3,p);self.assertEqual(len(fig.axes),3);self.assertAlmostEqual(axes[0].get_position().width,axes[2].get_position().width)
         x,y=viz.ecdf([2,1,2]);np.testing.assert_array_equal(x,[1,2,2]);np.testing.assert_allclose(y,[1/3,2/3,1])
         fig,axes=viz.layout(1,p);self.assertRaises(viz.VisualizationError,viz.plot_histogram,axes[0],{"base":[0],"zh_cn":[1]},p.figure("pilot_histogram"),p,edges=[0,1,np.inf])
+    def test_configured_font_is_used_without_fallback(self):
+        with tempfile.TemporaryDirectory() as folder, matplotlib.rc_context():
+            style = Path(folder) / "style.toml"
+            source = (PKG / "style.toml").read_text(encoding="utf-8")
+            style.write_text(source.replace('"DejaVu Sans"', '"DejaVu Serif"'), encoding="utf-8")
+            viz.apply_style(viz.load_protocol(style, PKG / "registry.toml"))
+            self.assertEqual(matplotlib.rcParams["font.family"], ["DejaVu Serif"])
+            style.write_text(source.replace('"DejaVu Sans"', '"Unavailable Test Family"'), encoding="utf-8")
+            with self.assertRaisesRegex(viz.VisualizationError, "Unavailable Test Family"):
+                viz.apply_style(viz.load_protocol(style, PKG / "registry.toml"))
+
     def test_kind_schema_counterexamples(self):
         with tempfile.TemporaryDirectory() as x:
             d=Path(x);s=d/"s";s.write_bytes((PKG/"style.toml").read_bytes());base=(PKG/"registry.toml").read_text()

@@ -186,7 +186,7 @@ def run_encoder_workflow(*, refs, pins, spec, reports_root, source_sha256, allow
     from .evaluation.encoder_extraction import expected_checkpoint_seeds, expected_unknown_positions, load_export, load_positions
     from .evaluation.geometry_bundle import PAIRING_POLICY
     from .research.encoder_geometry import run_encoder_geometry
-    from .visualization.core import require_arial
+    from .visualization.core import load_protocol, require_font
 
     roots = (locate_manifests(refs, pins, mount) if mount is not None
              else {key: Path(refs[key]) for key in pins})
@@ -202,7 +202,7 @@ def run_encoder_workflow(*, refs, pins, spec, reports_root, source_sha256, allow
     missing = [model for model in models if model not in exports]
     if missing and not allow_execution:
         raise PermissionError(f"missing compatible exports for {', '.join(missing)}; authorize extraction first")
-    require_arial()
+    require_font(load_protocol().style["font"]["family"])
     checkpoints = {model: expected_checkpoint_seeds(roots[model], pins[model], model, pins["experiment"], experiment)
                    for model in models}
     if missing and exports:

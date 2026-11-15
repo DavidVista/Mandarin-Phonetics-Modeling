@@ -1,12 +1,16 @@
 """Standalone interactive reference geometry report template."""
 
+import json
+
+from .core import DISTANCE_COLORS
+
 PAGE = r"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandarin syllable distance maps</title>
 <style>
-*{box-sizing:border-box}body{font:15px Arial,sans-serif;color:#181818;margin:24px}h1{font-size:23px}h2{font-size:17px;margin:10px 0}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{font:inherit;padding:7px 12px;background:white;border:1px solid #aaa;border-radius:6px;cursor:pointer}button[aria-pressed=true]{background:#222;color:white}.scroll{overflow-x:auto}.panels{display:grid;grid-template-columns:repeat(3,minmax(250px,1fr));gap:14px;min-width:780px}canvas{display:block;width:100%;aspect-ratio:1;border:1px solid #aaa;touch-action:none;cursor:grab;image-rendering:pixelated}canvas:active{cursor:grabbing}.legend{height:9px;background:linear-gradient(90deg,white,black);border:1px solid #bbb;margin-top:8px}.limits{display:flex;justify-content:space-between;font-size:12px}.hint,#readout{color:#444}#readout{min-height:2em;font-variant-numeric:tabular-nums}.extent{font-size:12px;color:#444;min-height:30px}
+*{box-sizing:border-box}body{font:15px system-ui,sans-serif;color:#181818;margin:24px}h1{font-size:23px}h2{font-size:17px;margin:10px 0}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button{font:inherit;padding:7px 12px;background:white;border:1px solid #aaa;border-radius:6px;cursor:pointer}button[aria-pressed=true]{background:#222;color:white}.scroll{overflow-x:auto}.panels{display:grid;grid-template-columns:repeat(3,minmax(250px,1fr));gap:14px;min-width:780px}canvas{display:block;width:100%;aspect-ratio:1;border:1px solid #aaa;touch-action:none;cursor:grab;image-rendering:pixelated}canvas:active{cursor:grabbing}.legend{height:9px;border:1px solid #bbb;margin-top:8px}.limits{display:flex;justify-content:space-between;font-size:12px}.hint,#readout{color:#444}#readout{min-height:2em;font-variant-numeric:tabular-nums}.extent{font-size:12px;color:#444;min-height:30px}
 table{border-collapse:collapse;margin:8px 0 18px;font-variant-numeric:tabular-nums}th,td{padding:6px 12px;border-bottom:1px solid #ddd;text-align:right}th:first-child{text-align:left}caption{text-align:left;font-weight:bold}#stats-note{color:#444;font-size:13px}
-:root{--surface:#fff;--ink:#182631;--muted:#51606d;--line:#dbe2e8;--accent:#234b6b;--soft:#edf3f8}
-body{margin:0 auto;padding:30px clamp(14px,3vw,44px) 40px;max-width:1740px;background:#f5f7f9;color:var(--ink);line-height:1.5}
+:root{--surface:#fff;--ink:#292330;--muted:#51606d;--line:#dbe2e8;--accent:#234b6b;--soft:#EFE8F5}
+body{margin:0 auto;padding:30px clamp(14px,3vw,44px) 40px;max-width:1740px;background:#F5F1F7;color:var(--ink);line-height:1.5}
 .report-head{padding:22px 26px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
 .eyebrow{margin:0;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.11em}
 h1{font-size:clamp(24px,3vw,34px);margin:5px 0 10px;line-height:1.15}
@@ -16,23 +20,23 @@ h2{font-size:17px;color:var(--ink)}
 .hint,#stats-note{color:var(--muted);max-width:105ch}
 .toolbar{gap:7px;margin:12px 0;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:var(--surface)}
 .toolbar>span:first-child{font-size:12px;color:var(--muted);font-weight:700}
-button,select{font:inherit;font-size:13px;color:var(--accent);background:#f8fafc;border:1px solid #cbd7e0;border-radius:7px;padding:7px 11px;min-height:34px}
-button:hover,select:hover{background:var(--soft);border-color:#95aabd}
+button,select{font:inherit;font-size:13px;color:var(--accent);background:#FAF7FC;border:1px solid #D6CCDE;border-radius:7px;padding:7px 11px;min-height:34px}
+button:hover,select:hover{background:var(--soft);border-color:#A391B6}
 button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:white}
-:focus-visible{outline:3px solid #79b6e5;outline-offset:2px}
+:focus-visible{outline:3px solid #9B7DB7;outline-offset:2px}
 button:disabled{opacity:.55;cursor:default}
 fieldset{border:1px solid var(--line)!important;background:var(--surface);border-radius:9px;padding:7px 13px 10px}
 fieldset legend{color:var(--muted);font-weight:700;font-size:12px;padding:0 4px}
 fieldset label{display:inline-flex;gap:5px;align-items:center;font-size:13px}
 input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
 .panels{gap:12px}.panels>section{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:12px}
-.panels>section h2{margin:0 0 7px}canvas{border-color:#cbd7e0;touch-action:none}
+.panels>section h2{margin:0 0 7px}canvas{border-color:#D6CCDE;touch-action:none}
 #readout{background:var(--soft);border-radius:8px;padding:8px 12px;min-height:40px;overflow-wrap:anywhere}
 #map-results>section,#profile-results,details{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:12px 17px;margin-top:12px}
 #map-results>section{overflow-x:auto}
 #profile-results>h2:not(:first-child){margin-top:22px}
-table{max-width:100%;width:100%;font-size:13px}thead th{background:#edf3f8;color:var(--accent)}
-tbody tr:nth-child(even){background:#f8fafc}summary{color:var(--accent);font-weight:700;cursor:pointer}
+table{max-width:100%;width:100%;font-size:13px}thead th{background:#EFE8F5;color:var(--accent)}
+tbody tr:nth-child(even){background:#FAF7FC}summary{color:var(--accent);font-weight:700;cursor:pointer}
 #agreement-filter{margin:10px 0 14px} [hidden]{display:none!important}
 @media(max-width:700px){body{padding:12px}.report-head{padding:15px}.toolbar{gap:5px}button{padding:6px 8px}}
 </style>
@@ -42,9 +46,21 @@ tbody tr:nth-child(even){background:#f8fafc}summary{color:var(--accent);font-wei
 <div class="toolbar"><span>Analysis</span><button id="hier" aria-pressed="true">Component structure</button><button id="rank" aria-pressed="false">DIMSIM neighborhood</button><button id="agreement" aria-pressed="false">Agreement with DIMSIM</button><button id="mask-profile" aria-pressed="false">Mask profile</button><button id="minus" aria-label="Zoom out">−</button><button id="plus" aria-label="Zoom in">+</button><button id="reset">Reset view</button><span id="zoom"></span></div>
 <p class="hint">Scroll to zoom, drag to pan, hover for distances. All panels share the view. Rows are anchors. In hierarchical order, checked components must all match. Other cells, including self-pairs, are shown in light gray. Highlighted distances use the 2nd–98th percentile color range when it has nonzero width.</p>
 <fieldset id="filters" style="margin:0 0 14px;border:1px solid #bbb;display:flex;gap:16px;flex-wrap:wrap"><legend>Highlight matching pairs</legend><label><input type="checkbox"> Same initial</label><label><input type="checkbox"> Same final</label><label><input type="checkbox"> Same tone</label></fieldset><fieldset id="win-tests" hidden style="margin:0 0 14px;border:1px solid #bbb;gap:16px;flex-wrap:wrap"><legend>Components allowed to change</legend><label><input type="checkbox" value="0"> Initial</label> <label><input type="checkbox" value="1" checked> Final</label> <label><input type="checkbox" value="2"> Tone</label></fieldset><fieldset id="transition-groups" hidden style="margin:0 0 14px;border:1px solid #bbb;gap:16px;flex-wrap:wrap"><legend>Transition groups</legend><label><input type="checkbox" checked> One component</label><label><input type="checkbox"> Two components</label><label><input type="checkbox"> Full match (111)</label></fieldset><div class="toolbar" id="color-mode" style="margin-bottom:12px"><span>Cell color</span><button id="distance-color" aria-pressed="true">Distance</button><button id="final-color" aria-pressed="false">Mean effect</button><button id="win-color" aria-pressed="false">Win rate</button></div><div id="agreement-filter" hidden><p class="hint">Agreement compares model and DIMSIM order on the selected triples. DIMSIM supplies the reference direction; ties in DIMSIM are excluded. Controlled match selects triples using component labels, independently of DIMSIM values. These scores describe agreement with this reference.</p><label>Comparisons <select id="agreement-slice"><option value="same">Same mask</option><option value="trade">Trade-off</option><option value="controlled">Controlled match</option></select></label></div><div id="map-results"><div class="scroll"><div id="panels" class="panels"></div></div><p id="readout" aria-live="off"></p><section aria-label="Summary statistics"><p id="stats-note"></p><table id="stats"></table><div id="anchor-distribution" hidden></div></section>
-<p class="hint" id="effect-note" hidden>Blue indicates a positive effect or a majority of comparisons satisfying the specified component-matching criterion. Orange indicates a negative effect or a win rate below 50%. White marks zero mean difference or 50% win rate. Gray marks cells outside the comparison. Mean effect colors clip at the 98th percentile of absolute effects. Ties count as half a win. Each transition requires all its changing components to be checked. Each comparison is displayed in the candidate cell predicted to be nearer by the component-matching criterion. Each cell shows its lowest available mean effect or win rate. Self-distances are zero for the current matrices. Full-match comparisons are reported separately by transition. The criterion is a declared structural hypothesis; additivity is not required.</p></div><section id="profile-results" hidden><h2>Mean similarity by overlap mask</h2><p class="hint">Masks are ordered by mean negative DIMSIM distance for display. Mask means, centered R², J and residuals describe each system independently. The two scales use independent units.</p><div class="toolbar" id="profile-legend"></div><div id="profile-chart"></div><h2>Explained variance</h2><table id="profile-r2"></table><h2>Component gains and the final step</h2><p class="hint">Each gain is a descriptive difference between means of different pair populations. Absolute J is the final gain minus the mean of the three ordinary gains. Mask 111 uses self-pairs, with cosine 1 and DIMSIM distance 0.</p><label>Model <select id="profile-step-model"><option value="0">DIMSIM</option><option value="1" selected>wav2vec2 zh-cn</option><option value="2">wav2vec2 base</option></select></label><div id="profile-steps"></div><h2>Top positive residual pairs</h2><p class="hint">Top 50 distinct unordered syllable pairs per system. Residual equals similarity minus its overlap-mask mean. Similarity is negative distance for DIMSIM and cosine for wav2vec2. Ranks are independent across columns; residuals use different units.</p><div class="scroll"><table id="profile-residuals"></table></div></section><details><summary>Coverage and report files</summary><div class='scroll'><table><thead><tr><th>Population</th><th>Count</th></tr></thead><tbody>@@coverage@@</tbody></table></div><p><a href='manifest.json'>Manifest</a> · <a href='tables/controlled_match.csv'>Controlled match</a> · <a href='tables/dimsim_agreement.csv'>Agreement</a> · <a href='tables/mask_profiles.csv'>Mask profiles</a> · <a href='figures/dimsim-distances.png'>DIMSIM distances</a> · <a href='figures/base-cosine-distances.png'>Base cosine distances</a> · <a href='figures/zh-cn-cosine-distances.png'>Zh-cn cosine distances</a></p></details>
+<p class="hint" id="effect-note" hidden>Lilac indicates a positive effect or a majority of comparisons satisfying the specified component-matching criterion. Coral indicates a negative effect or a win rate below 50%. White marks zero mean difference or 50% win rate. Gray marks cells outside the comparison. Mean effect colors clip at the 98th percentile of absolute effects. Ties count as half a win. Each transition requires all its changing components to be checked. Each comparison is displayed in the candidate cell predicted to be nearer by the component-matching criterion. Each cell shows its lowest available mean effect or win rate. Self-distances are zero for the current matrices. Full-match comparisons are reported separately by transition. The criterion is a declared structural hypothesis; additivity is not required.</p></div><section id="profile-results" hidden><h2>Mean similarity by overlap mask</h2><p class="hint">Masks are ordered by mean negative DIMSIM distance for display. Mask means, centered R², J and residuals describe each system independently. The two scales use independent units.</p><div class="toolbar" id="profile-legend"></div><div id="profile-chart"></div><h2>Explained variance</h2><table id="profile-r2"></table><h2>Component gains and the final step</h2><p class="hint">Each gain is a descriptive difference between means of different pair populations. Absolute J is the final gain minus the mean of the three ordinary gains. Mask 111 uses self-pairs, with cosine 1 and DIMSIM distance 0.</p><label>Model <select id="profile-step-model"><option value="0">DIMSIM</option><option value="1" selected>wav2vec2 zh-cn</option><option value="2">wav2vec2 base</option></select></label><div id="profile-steps"></div><h2>Top positive residual pairs</h2><p class="hint">Top 50 distinct unordered syllable pairs per system. Residual equals similarity minus its overlap-mask mean. Similarity is negative distance for DIMSIM and cosine for wav2vec2. Ranks are independent across columns; residuals use different units.</p><div class="scroll"><table id="profile-residuals"></table></div></section><details><summary>Coverage and report files</summary><div class='scroll'><table><thead><tr><th>Population</th><th>Count</th></tr></thead><tbody>@@coverage@@</tbody></table></div><p><a href='manifest.json'>Manifest</a> · <a href='tables/controlled_match.csv'>Controlled match</a> · <a href='tables/dimsim_agreement.csv'>Agreement</a> · <a href='tables/mask_profiles.csv'>Mask profiles</a> · <a href='figures/dimsim-distances.png'>DIMSIM distances</a> · <a href='figures/base-cosine-distances.png'>Base cosine distances</a> · <a href='figures/zh-cn-cosine-distances.png'>Zh-cn cosine distances</a></p></details>
 <details><summary>Protocol and sources</summary><p>Evaluation input <code>@@evaluation_id@@</code>. The inventory uses the shared test split with strict nonempty initials and @@excluded@@ configured exclusions. The report uses the original DIMSIM reference and cosine distances from matching audio for both wav2vec2 systems. Comparison tolerance is @@tolerance@@.</p><p>Component matching predicts that replacing selected components with the anchor values, while holding all other candidate components fixed, does not increase dissimilarity. This structural criterion motivates controlled comparisons; it is not an empirically established universal law of Mandarin perception. One-step, two-step and full-match transitions remain separately selectable. Main summaries weight each unique triple equally. Anchor histograms summarize within-anchor win rates.</p><p>Sources: <a href="https://doi.org/10.1037/0033-295X.84.4.327">Tversky (1977), Features of Similarity</a> motivates feature-based monotonicity. <a href="https://doi.org/10.1080/01690960701728261">Tong, Francis &amp; Gandour (2008)</a> documents interactions among Mandarin segmental and tonal processing. <a href="https://aclanthology.org/K18-1043/">Li et al. (2018), DIMSIM</a> supplies the computational reference.</p><p>The exploratory protocol was developed while inspecting these wav2vec2 systems. Interpretation is conditional on the selected inventory, stored representations and reference implementation.</p></details><p class="hint">@@syllables@@ shared tone-marked syllables after applying the evaluation inventory filter. In Distance mode, lighter cells indicate smaller distances. The two wav2vec2 panels share a cosine distance scale.</p>
 <script>
+const distanceColors=__DISTANCE_COLORS__;
+const signedColors=['#B65245','#FFFFFF','#68518E'];
+const gradient=colors=>'linear-gradient(90deg,'+colors.join(',')+')';
+function paletteLookup(colors){
+ const stops=colors.map(hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)));
+ return Array.from({length:257},(_,i)=>{
+  const t=i/128, segment=Math.min(1,Math.floor(t));
+  return stops[segment].map((v,c)=>Math.round(v+(stops[segment+1][c]-v)*(t-segment)));
+ });
+}
+const distancePalette=paletteLookup(distanceColors), signedPalette=paletteLookup(signedColors);
+const unavailable=[226,226,226];
 
 const residualTopPairs=@@residualTopPairs@@;
 
@@ -149,15 +165,14 @@ function rebuildEffect(){
  const {delta,counts,scores,limits}=effectData;
  views.forEach(({source,legend,limits:labels},k)=>{
   const cap=limits[k===0?0:1],ctx=source.getContext('2d'),img=ctx.createImageData(N,N);
-  legend.style.background='linear-gradient(90deg,#bc4b16,#fff,#175ca5)';
+  legend.style.background=gradient(signedColors);
   labels.firstElementChild.textContent=winMode?'0%':(-cap).toPrecision(4);
   labels.children[1].textContent=winMode?'Criterion win rate · midpoint 50%':k?'Cosine distance difference':'DIMSIM distance difference';
   labels.lastElementChild.textContent=winMode?'100%':'+'+cap.toPrecision(4);
   for(let j=0;j<counts.length;j++){
    const signed=counts[j]?(winMode?2*scores[k][j]-1:delta[k][j]/cap):0;
-   const rgb=counts[j]?(signed>=0?[23,92,165]:[188,75,22]):[226,226,226];
-   const t=counts[j]?Math.min(1,Math.abs(signed)):1;
-   for(let c=0;c<3;c++)img.data[4*j+c]=255+(rgb[c]-255)*t;
+   const rgb=counts[j]&&Number.isFinite(signed)?signedPalette[Math.round(128*(1+clamp(signed,-1,1)))]:unavailable;
+   img.data.set(rgb,4*j);
    img.data[4*j+3]=255;
   }
   ctx.putImageData(img,0,0);
@@ -172,7 +187,7 @@ function renderAnchorDistribution(wins,counts,names){
  const bins=values.map(v=>{
   const b=Array(10).fill(0);for(const x of v)b[Math.min(9,Math.floor(x*10))]++;return b;
  });
- const max=Math.max(1,...bins.flat()),colors=['#333','#175ca5','#bc4b16'];
+ const max=Math.max(1,...bins.flat()),colors=['#292330',signedColors[0],signedColors[2]];
  const text=(x,y,t,anchor='middle')=>'<text x="'+x+'" y="'+y+'" text-anchor="'+anchor+'" font-size="12">'+t+'</text>';
  const bars=bins.map((b,k)=>b.map((n,j)=>{
   const x=65+j*65+k*(48/names.length),height=150*n/max;
@@ -283,12 +298,11 @@ function rebuildAgreement(){
  agreementMaps=maps;agreementSupport=support;
  views.slice(1).forEach(({source,legend,limits},k)=>{
   const ctx=source.getContext('2d'),img=ctx.createImageData(N,N);
-  legend.style.background='linear-gradient(90deg,#bc4b16,#fff,#175ca5)';
+  legend.style.background=gradient(signedColors);
   limits.firstElementChild.textContent='0%';limits.children[1].textContent='Order agreement · midpoint 50%';limits.lastElementChild.textContent='100%';
   agreementMaps[k].forEach((v,j)=>{
-   const rgb=!Number.isFinite(v)?[226,226,226]:v>=.5?[23,92,165]:[188,75,22];
-   const t=Number.isFinite(v)?Math.abs(2*v-1):1;
-   for(let c=0;c<3;c++)img.data[4*j+c]=255+(rgb[c]-255)*t;
+   const rgb=Number.isFinite(v)?signedPalette[Math.round(256*clamp(v,0,1))]:unavailable;
+   img.data.set(rgb,4*j);
    img.data[4*j+3]=255;
   });
   ctx.putImageData(img,0,0);
@@ -320,14 +334,18 @@ function rebuild(){
   if(!count)return [0,maxima[keys[0]]];
   const values=new Float32Array(count*keys.length);
   let n=0;
-  for(const k of keys)for(let j=0;j<mask.length;j++)if(mask[j])values[n++]=mat[k][j];
-  values.sort();
-  const lo=values[Math.floor((n-1)*.02)],hi=values[Math.ceil((n-1)*.98)];
+  for(const k of keys)for(let j=0;j<mask.length;j++){
+   const value=mat[k][j];
+   if(mask[j]&&Number.isFinite(value))values[n++]=value;
+  }
+  if(!n)return [0,maxima[keys[0]]];
+  const sorted=values.subarray(0,n).sort();
+  const lo=sorted[Math.floor((n-1)*.02)],hi=sorted[Math.ceil((n-1)*.98)];
   return hi>lo?[lo,hi]:[0,maxima[keys[0]]];
  }
  const acoustic=bounds([1,2]), scales=[bounds([0]),acoustic,acoustic];
  views.forEach(({source,limits,legend},k)=>{
-  legend.style.background='linear-gradient(90deg,white,black)';
+  legend.style.background=gradient(distanceColors);
   limits.children[1].textContent=k?'Cosine distance':'DIMSIM distance';
   const [lo,hi]=scales[k];
   const format=v=>Number(v.toPrecision(4)).toString();
@@ -336,9 +354,11 @@ function rebuild(){
   const ctx=source.getContext('2d'),img=ctx.createImageData(N,N);
   for(let row=0;row<N;row++)for(let col=0;col<N;col++){
    const p=4*(row*N+col),j=candidate(row,col);
-   const match=!active.length||mask[row*N+j];
-   const v=match?255-Math.round(255*clamp((mat[k][row*N+j]-lo)/(hi-lo),0,1)):238;
-   img.data[p]=img.data[p+1]=img.data[p+2]=v;img.data[p+3]=255;
+   const value=mat[k][row*N+j];
+   const match=Number.isFinite(value)&&(!active.length||mask[row*N+j]);
+   const t=match&&hi>lo?clamp((value-lo)/(hi-lo),0,1):0;
+   img.data.set(match?distancePalette[Math.round(256*t)]:unavailable,p);
+   img.data[p+3]=255;
   }
   ctx.putImageData(img,0,0);
  });draw();updateStats(active);
@@ -443,7 +463,7 @@ document.querySelector('#agreement-slice').onchange=()=>{syncControls();clear();
 document.querySelector('#minus').onclick=()=>zoom(1.4);
 document.querySelector('#plus').onclick=()=>zoom(1/1.4);
 document.querySelector('#reset').onclick=()=>{x=y=0;span=N;clear();draw();};
-const profileColors=['#333','#175ca5','#bc4b16'],profileVisible=[true,true,true];
+const profileColors=['#292330',signedColors[0],signedColors[2]],profileVisible=[true,true,true];
 const maskOrder=profileData[0].beta.map((_,k)=>k).sort((a,b)=>(profileData[0].beta[a]??Infinity)-(profileData[0].beta[b]??Infinity));
 function renderProfile(){
  const x=j=>70+95*j, y=v=>220-175*v;
@@ -494,4 +514,4 @@ function renderProfileSteps(){
 }
 document.querySelector('#profile-step-model').onchange=renderProfileSteps;
 window.addEventListener('resize',draw);rebuild();
-</script></html>"""
+</script></html>""".replace("__DISTANCE_COLORS__", json.dumps(DISTANCE_COLORS))

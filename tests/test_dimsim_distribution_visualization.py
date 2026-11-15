@@ -10,10 +10,11 @@ PROJECT=Path(__file__).parents[1]
 HAS_MATPLOTLIB=importlib.util.find_spec("matplotlib") is not None
 
 class DimsimDistributionVisualizationTests(unittest.TestCase):
-    def test_distribution_palette_is_grayscale(self):
-        registry=tomllib.loads((PROJECT/"src/phonetics/visualization/registry.toml").read_text(encoding="utf-8"))
-        for key in ("000","001","010","011","100","101","110","111","initial","final","tone"):
-            color=registry["semantics"][key]["color"].lstrip("#"); rgb=tuple(int(color[i:i+2],16) for i in (0,2,4)); self.assertEqual(rgb,(rgb[0],)*3,key)
+    def test_overlap_palette_distinguishes_masks_in_each_panel(self):
+        registry = tomllib.loads((PROJECT / "src/phonetics/visualization/registry.toml").read_text(encoding="utf-8"))
+        semantics = registry["semantics"]
+        for masks in (("001", "010", "100"), ("011", "101", "110")):
+            self.assertEqual(len({semantics[mask]["color"] for mask in masks}), len(masks))
 
     @unittest.skipUnless(HAS_MATPLOTLIB,"matplotlib unavailable")
     def test_wide_layout_aspect_labels_and_all_exports(self):
@@ -32,5 +33,9 @@ class DimsimDistributionVisualizationTests(unittest.TestCase):
             np.savez_compressed(root/"data/distribution_plot_data.npz",distance=d,overlap_mask=masks,detail_values=d[d<10],full_histogram_edges=np.r_[np.arange(0.,121.,10.),125.000001],initial_contribution=d*.3,final_contribution=d*.6,tone_contribution=d*.1)
             rows=[{"bin":f"[{i},{i+10})" if i<120 else "[120,+inf)","count":1,"mean_distance":1.,"mean_initial":.3,"mean_final":.6,"mean_tone":.1,"initial_share":.3,"final_share":.6,"tone_share":.1} for i in range(0,121,10)]; (root/"data/component_shares.json").write_text(json.dumps(rows),encoding="utf-8")
             exported=render_distribution(root/"data",root/"figures","a"*64); self.assertEqual(len(exported),6); self.assertEqual(len(list((root/"figures").iterdir())),9); self.assertEqual(plt.get_fignums(),[])
+            meta = json.loads((root / "figures/component-overlap-distributions.metadata.json").read_text())
+            panels = meta["resolved_data"]["panels"]
+            self.assertEqual([panel["matches"] for panel in panels], [0, 1, 2, 3])
+            self.assertEqual([mask for panel in panels for mask in panel["masks"] if mask == "111"], ["111"])
 
 if __name__=="__main__": unittest.main()

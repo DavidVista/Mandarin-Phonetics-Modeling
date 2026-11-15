@@ -24,10 +24,10 @@ from phonetics.workflows import run_workflow, validate_workflow_result, workflow
 
 class GeometryEvaluationTests(unittest.TestCase):
     def test_research_reports_accept_current_acoustic_and_evaluation_bundles(self):
-        from phonetics.visualization.core import VisualizationError, require_arial
+        from phonetics.visualization.core import VisualizationError, load_protocol, require_font
 
         try:
-            require_arial()
+            require_font(load_protocol().style["font"]["family"])
         except VisualizationError as error:
             self.skipTest(str(error))
         fixture = character_experiment.CharacterExperimentTests()

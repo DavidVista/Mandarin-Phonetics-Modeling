@@ -2,7 +2,7 @@
 version = 1
 
 [font]
-family = "Arial"
+family = "DejaVu Sans"
 axis_label_pt = 9.0
 tick_pt = 8.0
 legend_pt = 8.0

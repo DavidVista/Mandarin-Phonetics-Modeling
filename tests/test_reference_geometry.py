@@ -71,10 +71,10 @@ class ReferenceGeometryTests(unittest.TestCase):
             self.assertEqual(maps["agreement_counts"][index].sum(), 2 * len(agreed[category][0]))
 
     def test_workflow_publishes_sealed_tables_and_rendered_artifacts(self):
-        from phonetics.visualization.core import VisualizationError, require_arial
+        from phonetics.visualization.core import VisualizationError, load_protocol, require_font
 
         try:
-            require_arial()
+            require_font(load_protocol().style["font"]["family"])
         except VisualizationError as error:
             self.skipTest(str(error))
         fixture = character_experiment.CharacterExperimentTests()

@@ -25,8 +25,8 @@ TRAINING_STEMS = ('training-objectives','validation-accuracy','validation-loss-c
 
 
 def _training_shade(color):
-    # Preblend the approved 0.15 gray ribbon onto white: EPS has no alpha channel.
-    return tuple(.15*v+.85 for v in to_rgb(color))
+    # Preblend the ribbon onto white for opaque EPS export.
+    return tuple(.25*v+.75 for v in to_rgb(color))
 
 
 def _training_curve(ax,data,model,metric,p,*,split='validation',semantic=None,scale=1.,band=True,linestyle=None):
@@ -71,36 +71,39 @@ def _training_finish(fig,axes,data,p,fid,*,shared_y=False):
             lo=min(v[0] for v in limits);hi=max(v[1] for v in limits)
             for ax in axes:ax.set_ylim(lo,hi)
     fig._phonetics_resolution={'kind':fid,'dispersion':'pointwise sample SD across five training seeds',
-        'seed_ids':[0,1,2,3,4],'confidence_interval':False,'band_encoding':'opaque preblended gray for EPS',
+        'seed_ids':[0,1,2,3,4],'confidence_interval':False,'band_encoding':'opaque preblended color for EPS',
         'missing_metrics':[m for ax in axes for m in getattr(ax,'_training_missing',[])],
         'axis_limits':[{'x':list(ax.get_xlim()),'y':list(ax.get_ylim())} for ax in axes]}
 
 
 def build_training_figures(data,protocol=None):
     p=protocol or load_protocol();figures=[]
-    sd_patch=Patch(facecolor=_training_shade('#171717'),label='± SD across seeds')
+    objective_color=p.registry['semantics']['syllable']['color']
+    sd_patch=Patch(facecolor=_training_shade(objective_color),label='± SD across seeds')
     try:
         fig,axes=layout(5,p,columns=3,legend_rows=1,width_mm=180);figures.append(fig)
         for ax,model in zip(axes,TRAINING_MODELS):
-            semantic={'color':p.registry['semantics'][model]['color'],'linestyle':'solid','marker':'None'}
+            semantic={'color':objective_color,'linestyle':'solid','marker':'None'}
             _training_curve(ax,data,model,'objective',p,semantic=semantic,linestyle='solid')
             _training_curve(ax,data,model,'objective',p,split='train',semantic=semantic,band=False,linestyle='dashed')
             rows=data['models'][model]['selected']
             ax.plot([r['best_epoch'] for r in rows],[r['validation_objective'] for r in rows],
                     ls='none',marker='o',mfc='white',mec=semantic['color'],ms=p.style['marker']['size_pt'],zorder=3)
             ax.set(title=p.registry['semantics'][model]['label'],ylabel='Objective')
-        _training_legend(fig,[Line2D([],[],color='#171717',label='Validation'),
-            Line2D([],[],color='#171717',ls='--',label='Training'),
-            Patch(facecolor=_training_shade('#171717'),label='Validation ± SD'),
-            Line2D([],[],color='#171717',ls='none',marker='o',mfc='white',label='Selected epoch')],p)
+        _training_legend(fig,[Line2D([],[],color=objective_color,label='Validation'),
+            Line2D([],[],color=objective_color,ls='--',label='Training'),
+            Patch(facecolor=_training_shade(objective_color),label='Validation ± SD'),
+            Line2D([],[],color=objective_color,ls='none',marker='o',mfc='white',label='Selected epoch')],p)
         _training_finish(fig,axes,data,p,'training_objectives')
 
         fig,axes=layout(4,p,columns=2,legend_rows=1,width_mm=180);figures.append(fig)
         models=[m for m in TRAINING_MODELS if m!='acoustic']
+        validation_style = {'color': objective_color, 'linestyle': 'solid', 'marker': 'None'}
         for ax,model in zip(axes,models):
-            _training_curve(ax,data,model,'syllable_accuracy' if model=='syllable' else 'joint_ift_accuracy',p)
+            metric = 'syllable_accuracy' if model == 'syllable' else 'joint_ift_accuracy'
+            _training_curve(ax, data, model, metric, p, semantic=validation_style)
             ax.set(title=p.registry['semantics'][model]['label'],ylabel='Accuracy')
-        _training_legend(fig,[Line2D([],[],color='#171717',label='Validation'),sd_patch],p)
+        _training_legend(fig,[Line2D([],[],color=objective_color,label='Validation'),sd_patch],p)
         _training_finish(fig,axes,data,p,'validation_accuracy',shared_y=True)
 
         fig,axes=layout(2,p,columns=2,legend_rows=2,width_mm=180);figures.append(fig)
@@ -122,7 +125,10 @@ def build_training_figures(data,protocol=None):
         fig,axes=layout(1,p,columns=1,legend_rows=1,width_mm=90);figures.append(fig)
         _training_curve(axes[0],data,'components','invalid_if_rate',p,scale=100.)
         axes[0].set(title='Components',ylabel='Invalid predictions (%)')
-        _training_legend(fig,[Line2D([],[],color=p.registry['semantics']['components']['color'],label='Validation'),sd_patch],p)
+        validation = _training_model_handle('components', p)
+        validation.set_label('Validation')
+        interval = Patch(facecolor=_training_shade(validation.get_color()), label='± SD across seeds')
+        _training_legend(fig, [validation, interval], p)
         _training_finish(fig,axes,data,p,'invalid_if_predictions')
         return figures
     except BaseException:

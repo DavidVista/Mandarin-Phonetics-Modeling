@@ -9,10 +9,24 @@ VALIDATION_FIGURES = {
 
 
 def render_training_curves(histories, destination, selected_epochs):
+    from matplotlib import rc_context
+
+    from .core import apply_style, load_protocol
+
+    protocol = load_protocol()
+    with rc_context():
+        apply_style(protocol)
+        return _render_training_curves(histories, destination, selected_epochs, protocol)
+
+
+def _render_training_curves(histories, destination, selected_epochs, protocol):
     import numpy as np
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
     from matplotlib.ticker import MaxNLocator
+
+    semantics = protocol.registry["semantics"]
+    colors = [semantics[key]["color"] for key in ("syllable", "components", "acoustic")]
 
     def panel_figure(count, columns):
         rows = (count + columns - 1) // columns
@@ -21,6 +35,8 @@ def render_training_curves(histories, destination, selected_epochs):
         panels = figure.subplots(rows, columns, squeeze=False).ravel()
         for axes in panels[count:]:
             axes.remove()
+        for axes in panels[:count]:
+            axes.set_prop_cycle(color=colors)
         return figure, panels[:count]
 
     def draw(axes, model, split, metric, label=None):
@@ -30,7 +46,8 @@ def render_training_curves(histories, destination, selected_epochs):
         if not np.isfinite(values).all():
             raise ValueError(f"nonfinite {metric} history for {model}")
         mean = values.mean(axis=0)
-        line, = axes.plot(epochs, mean, label=label, marker="." if len(epochs) == 1 else None)
+        line, = axes.plot(epochs, mean, label=label, marker="." if len(epochs) == 1 else None,
+                          linestyle="--" if split == "train" else "-")
         if len(seeds) > 1:
             sd = values.std(axis=0, ddof=1)
             axes.fill_between(epochs, mean - sd, mean + sd, color=line.get_color(), alpha=0.2)

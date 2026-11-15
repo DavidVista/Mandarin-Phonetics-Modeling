@@ -145,7 +145,6 @@ def _encoder_template(models):
             "support=new Uint32Array(N*N);points=[new Float64Array(N*N),new Float64Array(N*N)]",
         "prepared.points[index].map(value=>decode(value,Uint16Array))":
             "prepared.points[index].map(value=>Float64Array.from(decode(value,Uint16Array),v=>v/prepared.factor))",
-        "const match=!active.length||mask[row*N+j];": "const match=(!active.length||mask[row*N+j])&&Number.isFinite(mat[k][row*N+j]);",
     }
     for before, after in replacements.items():
         page = page.replace(before, after)
@@ -160,11 +159,11 @@ def _encoder_template(models):
 _SHELL = r"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Encoder geometry</title>
 <style>
-body{margin:0 auto;max-width:1740px;background:#f5f7f9;color:#182631;font:15px Arial,sans-serif}
+body{margin:0 auto;max-width:1740px;background:#F5F1F7;color:#292330;font:15px system-ui,sans-serif}
 header,details{padding:16px 24px;background:white;border:1px solid #dbe2e8;border-radius:12px;margin:12px}
-label{display:inline-block;margin:5px 16px 5px 0}select{font:inherit;padding:7px;border:1px solid #cbd7e0;border-radius:7px;background:#f8fafc}
+label{display:inline-block;margin:5px 16px 5px 0}select{font:inherit;padding:7px;border:1px solid #D6CCDE;border-radius:7px;background:#FAF7FC}
 iframe{border:0;width:100%;height:78vh;min-height:680px;display:block}summary{cursor:pointer;font-weight:bold}
-table{border-collapse:collapse}th,td{padding:6px 10px;border-bottom:1px solid #dbe2e8;text-align:left}th{background:#edf3f8}
+table{border-collapse:collapse}th,td{padding:6px 10px;border-bottom:1px solid #dbe2e8;text-align:left}th{background:#EFE8F5}
 </style>
 <header><h1>Encoder geometry</h1><label>Seed <select id="seed"></select></label>
 <label>Left model <select id="left"></select></label><label>Right model <select id="right"></select></label>

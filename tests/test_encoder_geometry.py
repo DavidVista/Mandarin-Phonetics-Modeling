@@ -57,9 +57,9 @@ class EncoderGeometryTests(unittest.TestCase):
         self.check_report(models, (0, 1, 2), contrasts=[["components", models[-1]]])
 
     def check_report(self, models, seeds, contrasts=None):
-        from phonetics.visualization.core import VisualizationError, require_arial
+        from phonetics.visualization.core import VisualizationError, load_protocol, require_font
         try:
-            require_arial()
+            require_font(load_protocol().style["font"]["family"])
         except VisualizationError as error:
             self.skipTest(str(error))
         fixture = character_experiment.CharacterExperimentTests()

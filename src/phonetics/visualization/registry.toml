@@ -44,19 +44,19 @@ ylim = [0.0]
 
 [semantics.base]
 label = "Base"
-color = "#171717"
+color = "#68518E"
 linestyle = "solid"
 marker = "o"
 
 [semantics.zh_cn]
 label = "Zh-cn"
-color = "#666666"
+color = "#B65245"
 linestyle = "dashed"
 marker = "s"
 
 [semantics.delta]
 label = "Zh-cn \u2212 Base"
-color = "#171717"
+color = "#68518E"
 linestyle = "solid"
 marker = "o"
 
@@ -93,63 +93,63 @@ scale = "linear"
 
 [semantics.population]
 label = "All pairs"
-color = "#171717"
+color = "#68518E"
 linestyle = "solid"
 marker = "o"
 
 [semantics.000]
 label = "000"
-color = "#171717"
+color = "#68518E"
 linestyle = "solid"
 marker = "o"
 [semantics.001]
 label = "001"
-color = "#444444"
+color = "#68518E"
 linestyle = "dashed"
 marker = "s"
 [semantics.010]
 label = "010"
-color = "#666666"
+color = "#B65245"
 linestyle = "dotted"
 marker = "^"
 [semantics.011]
 label = "011"
-color = "#888888"
+color = "#68518E"
 linestyle = "dashdot"
 marker = "v"
 [semantics.100]
 label = "100"
-color = "#303030"
+color = "#A13F60"
 linestyle = "solid"
 marker = "D"
 [semantics.101]
 label = "101"
-color = "#606060"
+color = "#B65245"
 linestyle = "dashed"
 marker = "P"
 [semantics.110]
 label = "110"
-color = "#909090"
+color = "#A13F60"
 linestyle = "dotted"
 marker = "X"
 [semantics.111]
 label = "111"
-color = "#c0c0c0"
+color = "#68518E"
 linestyle = "dashdot"
 marker = "*"
 [semantics.initial]
 label = "Initial"
-color = "#303030"
+color = "#68518E"
 linestyle = "solid"
 marker = "o"
 [semantics.final]
 label = "Final"
-color = "#888888"
+color = "#B65245"
 linestyle = "solid"
 marker = "s"
 [semantics.tone]
 label = "Tone"
-color = "#d0d0d0"
+color = "#A13F60"
 linestyle = "solid"
 marker = "^"
 
@@ -205,27 +205,27 @@ scale = "linear"
 
 [semantics.syllable]
 label = "Syllable"
-color = "#171717"
+color = "#68518E"
 linestyle = "solid"
 marker = "o"
 [semantics.components]
 label = "Components"
-color = "#444444"
+color = "#B65245"
 linestyle = "dashed"
 marker = "s"
 [semantics.acoustic]
 label = "Acoustic"
-color = "#707070"
+color = "#A13F60"
 linestyle = "dotted"
 marker = "^"
 [semantics."components-acoustic-lambda-1"]
 label = "Combined \u03bb1"
-color = "#999999"
+color = "#7B668F"
 linestyle = "dashdot"
 marker = "D"
 [semantics."components-acoustic-lambda-10"]
 label = "Combined \u03bb10"
-color = "#c5c5c5"
+color = "#8D5947"
 linestyle = "solid"
 marker = "v"
 
@@ -242,7 +242,7 @@ scale = "linear"
 
 [semantics.dimsim]
 label = "DIMSIM"
-color = "#171717"
+color = "#292330"
 linestyle = "solid"
 marker = "o"
 
@@ -312,7 +312,7 @@ order = ["dimsim"]
 scale = "linear"
 colorbar_label = "DIMSIM distance"
 color_scale_group = "dimsim"
-colormap = "Greys"
+colormap = "lilac"
 
 [figures.reference_base_cosine_distances]
 status = "approved"
@@ -325,7 +325,7 @@ order = ["base"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "wav2vec2"
-colormap = "Greys"
+colormap = "lilac"
 
 [figures.reference_zh_cn_cosine_distances]
 status = "approved"
@@ -338,7 +338,7 @@ order = ["zh_cn"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "wav2vec2"
-colormap = "Greys"
+colormap = "lilac"
 
 [figures.encoder_syllable_cosine_distances]
 status = "approved"
@@ -351,7 +351,7 @@ order = ["syllable"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
-colormap = "Greys"
+colormap = "lilac"
 
 [figures.encoder_components_cosine_distances]
 status = "approved"
@@ -364,7 +364,7 @@ order = ["components"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
-colormap = "Greys"
+colormap = "lilac"
 
 [figures.encoder_acoustic_cosine_distances]
 status = "approved"
@@ -377,7 +377,7 @@ order = ["acoustic"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
-colormap = "Greys"
+colormap = "lilac"
 
 [figures.encoder_components_acoustic_lambda_1_cosine_distances]
 status = "approved"
@@ -390,7 +390,7 @@ order = ["components-acoustic-lambda-1"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
-colormap = "Greys"
+colormap = "lilac"
 
 [figures.encoder_components_acoustic_lambda_10_cosine_distances]
 status = "approved"
@@ -403,11 +403,11 @@ order = ["components-acoustic-lambda-10"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
-colormap = "Greys"
+colormap = "lilac"
 
 [semantics.encoder]
 label = "Encoder"
-color = "#171717"
+color = "#68518E"
 linestyle = "-"
 marker = "o"
 
@@ -422,4 +422,4 @@ order = ["encoder"]
 scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
-colormap = "Greys"
+colormap = "lilac"

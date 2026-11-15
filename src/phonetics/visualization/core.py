@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 import numpy as np
 ROOT=Path(__file__).resolve().parent; STYLE_PATH=ROOT/"style.toml"; REGISTRY_PATH=ROOT/"registry.toml"; MM_PER_INCH=25.4
+DISTANCE_COLORS = ("#F8F5FC", "#C7B8E6", "#50346F")
+COMPONENT_FILLS = {"initial": DISTANCE_COLORS[1], "final": "#F8B89E", "tone": "#D5697F"}
 class VisualizationError(ValueError): """An actionable protocol violation."""
 STYLE_KEYS={"schema":{"version"},"font":{"family","axis_label_pt","tick_pt","legend_pt","panel_heading_pt","panel_letter_pt","annotation_pt","normal_weight","panel_letter_weight"},"color":{"background","foreground","secondary","tertiary","quaternary"},"line":{"data_pt","axes_pt","reference_pt","interval_pt","caps_pt"},"marker":{"size_pt","edge_pt","face","markevery_target"},"layout":{"single_width_mm","multi_width_mm","panel_aspect","left_mm","right_mm","bottom_mm","top_mm","hgap_mm","vgap_mm","legend_row_mm","legend_gap_mm","default_columns"},"axes":{"grid","minor_ticks","tick_direction","major_length_pt","major_width_pt","major_pad_pt","major_target","panel_label_x_mm","panel_label_y_mm"},"legend":{"max_per_row","handle_length_em","column_spacing_em","location"},"histogram":{"density","fill","bootstrap_bins"},"export":{"formats","dpi","transparent","overwrite"},"backend":{"rcparams"}}
 FIGURE_KEYS={"status","kind","name","xlabel","ylabel","series","order","scale","bin_rule","bins","density","columns","xlim","ylim","edges_start","edges_stop","edges_count","colorbar_label","color_scale_group","colormap"};SEMANTIC_KEYS={"label","color","linestyle","marker"};ALLOWED_RCPARAMS={"pdf.fonttype","ps.fonttype","svg.fonttype"}
@@ -29,7 +31,7 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
   _unknown(s[sec],keys,f"style.{sec}");missing=keys-set(s[sec])
   if missing:raise VisualizationError(f"Missing key(s) in style.{sec}: {', '.join(sorted(missing))}")
  if s["schema"]["version"]!=1:raise VisualizationError("Unsupported style schema version")
- if s["font"]["family"]!="Arial":raise VisualizationError("The protocol requires Arial")
+ if not isinstance(s["font"]["family"],str) or not s["font"]["family"].strip():raise VisualizationError("font.family must be a nonempty family name")
  for k,v in s["font"].items():
   if k.endswith("_pt"):_positive(v,f"font.{k}")
  if (s["font"]["normal_weight"],s["font"]["panel_letter_weight"])!=("normal","bold"):raise VisualizationError("Font weights must be normal and bold")
@@ -54,7 +56,7 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
   map_fields={"colorbar_label","color_scale_group","colormap"}
   if f["kind"]=="distance_map":
    if (not all(isinstance(f.get(key),str) and f[key].strip() for key in map_fields)
-       or len(f["series"])!=1 or f["scale"]!="linear" or f["colormap"]!="Greys"):raise VisualizationError(f"Invalid distance map specification for {fid}")
+       or len(f["series"])!=1 or f["scale"]!="linear" or f["colormap"] not in {"Greys","lilac"}):raise VisualizationError(f"Invalid distance map specification for {fid}")
   elif map_fields&set(f):raise VisualizationError(f"Distance map settings require a distance map for {fid}")
   if "bin_rule" in f and f["bin_rule"]!="pooled_fd_sturges":raise VisualizationError(f"Invalid bin_rule for {fid}")
   if "bins" in f and (isinstance(f["bins"],bool) or not isinstance(f["bins"],int) or f["bins"]<1):raise VisualizationError(f"Invalid bins for {fid}")
@@ -74,12 +76,16 @@ def load_protocol(style_path=STYLE_PATH,registry_path=REGISTRY_PATH):
 def _integrity(p):
  if sha256(p.style_path.read_bytes()).hexdigest()!=p.style_hash or sha256(p.registry_path.read_bytes()).hexdigest()!=p.registry_hash:raise VisualizationError("Protocol files changed; reload")
  if tomllib.loads(p.style_path.read_text(encoding="utf-8"))!=p.style or tomllib.loads(p.registry_path.read_text(encoding="utf-8"))!=p.registry:raise VisualizationError("Protocol mappings were mutated; reload")
-def require_arial():
+def require_font(family):
  from matplotlib import font_manager
- if not any(f.name=="Arial" for f in font_manager.fontManager.ttflist):raise VisualizationError("Arial is not installed; font fallback is prohibited")
+ if not any(f.name.casefold()==family.casefold() for f in font_manager.fontManager.ttflist):
+  raise VisualizationError(f"{family} is not installed; font fallback is prohibited")
+
+def require_arial():
+ require_font("Arial")
 def apply_style(p):
  import matplotlib as mpl
- require_arial();s=p.style;f=s["font"];a=s["axes"];c=s["color"]
+ s=p.style;f=s["font"];a=s["axes"];c=s["color"];require_font(f["family"])
  rc={"font.family":f["family"],"font.weight":f["normal_weight"],"font.size":f["tick_pt"],"axes.labelsize":f["axis_label_pt"],"axes.titlesize":f["panel_heading_pt"],"axes.labelweight":f["normal_weight"],"axes.titleweight":f["normal_weight"],"xtick.labelsize":f["tick_pt"],"ytick.labelsize":f["tick_pt"],"legend.fontsize":f["legend_pt"],"axes.linewidth":s["line"]["axes_pt"],"lines.linewidth":s["line"]["data_pt"],"lines.markersize":s["marker"]["size_pt"],"lines.markeredgewidth":s["marker"]["edge_pt"],"lines.markerfacecolor":s["marker"]["face"],"axes.edgecolor":c["foreground"],"axes.labelcolor":c["foreground"],"text.color":c["foreground"],"xtick.color":c["foreground"],"ytick.color":c["foreground"],"figure.facecolor":c["background"],"axes.facecolor":c["background"],"axes.grid":a["grid"],"xtick.direction":a["tick_direction"],"ytick.direction":a["tick_direction"],"xtick.top":False,"ytick.right":False,"xtick.minor.visible":False,"ytick.minor.visible":False,"xtick.major.size":a["major_length_pt"],"ytick.major.size":a["major_length_pt"],"xtick.major.width":a["major_width_pt"],"ytick.major.width":a["major_width_pt"],"xtick.major.pad":a["major_pad_pt"],"ytick.major.pad":a["major_pad_pt"],"axes.spines.left":True,"axes.spines.right":True,"axes.spines.top":True,"axes.spines.bottom":True};rc.update(s["backend"]["rcparams"]);mpl.rcParams.update(rc)
 def layout(n,p,*,columns=None,legend_rows=0,width_mm=None):
  import matplotlib.pyplot as plt
@@ -128,7 +134,7 @@ def export_figure(fig,output_dir,stem,figure_id,p,*,scientific_provenance,overwr
  if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*",stem) or stem in {".",".."}:raise VisualizationError("Unsafe export stem")
  prov=dict(scientific_provenance)
  if not re.fullmatch(r"[0-9a-fA-F]{64}",str(prov.get("source_digest",""))):raise VisualizationError("source_digest must be SHA-256 hex")
- require_arial();out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
+ require_font(p.style["font"]["family"]);out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
  if not out.is_dir():raise VisualizationError("Export target is not a directory")
  paths=[out/f"{stem}.{x}" for x in p.style["export"]["formats"]];mp=out/f"{stem}.metadata.json";allow=p.style["export"]["overwrite"] if overwrite is None else overwrite
  if not allow and any(x.exists() for x in paths+[mp]):raise FileExistsError("Refusing to overwrite export or metadata")

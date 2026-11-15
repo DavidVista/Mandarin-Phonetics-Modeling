@@ -46,6 +46,8 @@ def _check_paired_outputs(aq,ds):
 
 def build_figures(anchor_plot, dimsim_plot, protocol=None):
     """Build figures from the two persisted report plot_data objects."""
+    from .core import COMPONENT_FILLS
+
     p=protocol or load_protocol(); figs=[]
     models=list(MODEL_LABELS)
     try:
@@ -67,14 +69,14 @@ def build_figures(anchor_plot, dimsim_plot, protocol=None):
                     bottom=0.0
                     for ei,(name,val) in enumerate(zip(names,vals)):
                         component=name.split(":",1)[0]
-                        shade=("#555555","#999999","#cccccc")[("initial","final","tone").index(component)]
+                        shade=COMPONENT_FILLS[component]
                         hatch=("","/","\\","x")[ei%4]
                         ax.bar(mi,val,bottom=bottom,width=.68,color=shade,hatch=hatch,edgecolor="black",linewidth=.25,label=f"{component.title()} {name.split(':',1)[1]}" if model==first_valid else None)
                         bottom+=val
                 else:
                     b=0
                     for ci,val in enumerate(vals):
-                        ax.bar(mi,val,bottom=b,width=.65,color=("#444444","#888888","#c5c5c5")[ci],hatch=("","//","xx")[ci],edgecolor="black",linewidth=.3,label=components[ci] if mi==0 else None);b+=val
+                        ax.bar(mi,val,bottom=b,width=.65,color=COMPONENT_FILLS[components[ci]],hatch=("","//","xx")[ci],edgecolor="black",linewidth=.3,label=components[ci] if mi==0 else None);b+=val
             ax.set_ylim(0,1);ax.set_ylabel("Q share");ax.set_xticks(np.arange(5));ax.set_xticklabels([MODEL_LABELS[m] for m in models],rotation=25,ha="right")
             if n==12:
                 for mi,model in enumerate(models):
@@ -91,7 +93,7 @@ def build_figures(anchor_plot, dimsim_plot, protocol=None):
                 ax.text(mi,.5,"undefined",rotation=90,ha="center",va="center");continue
             bottom=0.0
             for ci,(comp,val) in enumerate(zip(components,vals)):
-                ax.bar(mi,val,bottom=bottom,width=.65,color=("#444444","#888888","#c5c5c5")[ci],hatch=("","//","xx")[ci],edgecolor="black",linewidth=.3,label=comp.title() if model==first_component_valid else None);bottom+=val
+                ax.bar(mi,val,bottom=bottom,width=.65,color=COMPONENT_FILLS[components[ci]],hatch=("","//","xx")[ci],edgecolor="black",linewidth=.3,label=comp.title() if model==first_component_valid else None);bottom+=val
         ax.set(ylim=(0,1),ylabel="Q share",xticks=range(5),xticklabels=[MODEL_LABELS[m] for m in models]);shared_legend(fig,axs,p)
         fig._phonetics_resolution={"kind":"anchor_q_component_shares","undefined_zero_total":"shown as absent bars"}
 

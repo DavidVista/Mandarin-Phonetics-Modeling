@@ -60,6 +60,14 @@ class TrainingVisualizationTests(unittest.TestCase):
                 self.assertAlmostEqual(np.mean([center(a) for a in figs[0].axes[3:]]),np.mean([center(a) for a in figs[0].axes[:3]]))
                 np.testing.assert_allclose(figs[4].axes[0].lines[0].get_ydata(),np.array(data['models']['components']['curves']['validation']['invalid_if_rate']['mean'])*100)
                 self.assertAlmostEqual(figs[4].get_size_inches()[0]*25.4,90.)
+                for fig in (figs[1], figs[4]):
+                    line, band = fig.legends[0].legend_handles
+                    for ax in fig.axes:
+                        curve = ax.lines[0]
+                        self.assertEqual(line.get_color(), curve.get_color())
+                        self.assertEqual(line.get_linestyle(), curve.get_linestyle())
+                        self.assertEqual(line.get_marker(), curve.get_marker())
+                        np.testing.assert_allclose(band.get_facecolor(), ax.collections[0].get_facecolor()[0])
                 for f in figs:
                     for ax in f.axes:
                         self.assertTrue(ax.collections)

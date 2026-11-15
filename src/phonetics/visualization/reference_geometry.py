@@ -10,7 +10,7 @@ import re
 import numpy as np
 
 from ..evaluation.reference_geometry import SYSTEMS, TRANSITIONS
-from .core import apply_style, export_figure, layout, load_protocol
+from .core import DISTANCE_COLORS, apply_style, export_figure, layout, load_protocol
 from .reference_geometry_template import PAGE
 
 _PANEL_MODELS = (0, 2, 1)
@@ -123,6 +123,7 @@ REFERENCE_MAPS = (
 
 def render_distance_maps(root, labels, distances, order, *, provenance, figures=REFERENCE_MAPS, encoder_models=None):
     from matplotlib import pyplot as plt
+    from matplotlib.colors import LinearSegmentedColormap
     from matplotlib.ticker import MaxNLocator
 
     protocol = load_protocol()
@@ -143,7 +144,9 @@ def render_distance_maps(root, labels, distances, order, *, provenance, figures=
         figure, (axis,) = layout(1, protocol)
         try:
             limit = maxima[spec["color_scale_group"]] or 1.0
-            cmap = plt.get_cmap(spec["colormap"]).with_extremes(bad="#bfbfbf")
+            cmap = (LinearSegmentedColormap.from_list("lilac", DISTANCE_COLORS)
+                    if spec["colormap"] == "lilac" else plt.get_cmap(spec["colormap"]))
+            cmap = cmap.with_extremes(bad="#bfbfbf")
             image = axis.imshow(distances[index][np.ix_(order, order)], origin="upper",
                                 interpolation="nearest", cmap=cmap, vmin=0, vmax=limit)
             axis.set(xlabel=spec["xlabel"], ylabel=spec["ylabel"], xticks=[], yticks=[])
