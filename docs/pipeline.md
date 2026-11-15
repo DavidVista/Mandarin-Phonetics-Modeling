@@ -16,7 +16,7 @@ Research profiles live in `configs/local/` and `configs/notebook/`. They keep se
 | `execution` | Local/notebook mode by eligible stage, explicit training device and run ID |
 | `notebooks` | Whether the first code cell installs supplementary dependencies |
 | `analysis` | Local research workflows, empty by default |
-| `visualization` | Existing local or notebook visualization workflows; empty by default |
+| `visualization` | Optional section for archived report configurations |
 
 The default encoder is `experiment.architecture.encoder.type: char_bilstm`. Its embedding dimension, hidden units per direction and number of layers are validated positive integers. Context dimension is derived as twice the hidden dimension. Head settings specify classification hidden dimension and dropout. Acoustic output dimension must match the actual targets.
 
@@ -70,6 +70,14 @@ phonetics run --config configs/local/experiment.bilstm.json --allow-inference --
 ```
 
 The last command executes ML stages only when their modes select local computation and their dependencies are installed. It does not install them. `--through` accepts `experiment`, `training`, `analysis`, `visualization`.
+
+The research profiles use one config from preparation through evaluation and reporting. Set `evaluation.experiment_root` to the experiment's configured output directory and set `experiment_manifest_sha256` to `null` to use the experiment completed by this run. The CLI records the SHA256 of its manifest in run state and checks it before preparing the evaluation bundle. Set an explicit SHA256 to use an existing experiment through the standalone evaluation commands.
+
+When `encoder_geometry.training_runs` is omitted for a run-owned experiment, the CLI derives each path from `paths.runs`, the experiment ID, model ID, and run ID. A `training-report` configured with empty parameters uses the same run paths. The geometry workflow checks the evaluation and training manifest hashes recorded in state before it reads their contents. Repeating the local command reuses validated outputs. Set `encoder_geometry.allow_extraction` to `true` for the orchestrated local run to extract missing hidden states.
+
+The notebook profiles build evaluation locally after the acoustic and training results have been imported. At the geometry step they return `notebook-ready` and the path to the generated encoder notebook. This notebook extracts hidden states and renders geometry together, using SHA256 values from the recorded run state. Open it with the pinned input bundles attached, and adjust `REFERENCES` if needed. Its report and hidden-state ZIPs are the final outputs of that notebook.
+
+`--through training` includes the configured training report. Objective and available validation curves use the actual model and seed lists, the epoch grid of each model, and sample standard deviation for multiple seeds. The objective curves mark selected validation epochs. DIMSIM distributions use the evaluation bundle. Parser alignment uses the complete shared test inventory from the experiment bundle. Reference geometry reuses the training acoustic targets and generates Wav2Vec2 base targets from the same inventory. The notebook profiles request a separate acoustic job for these base targets when needed. DIMSIM agreement with human ratings uses the pinned bundled Li et al. source.
 
 Notebook generation never executes an ML stage. Training generation validates the original experiment once per command for all objectives, then writes small immutable reference jobs and notebooks without copying the experiment or writing a second SDK snapshot into each job. Upload the original experiment bundle once as a dataset and attach it to each training notebook. The job manifest and SDK are embedded; the input locator selects exactly one bundle by its pinned manifest SHA256 and training validates its contents. Acoustic and visualization stages retain their input packages. Training generates one job per configured objective, preserving its seed list. The pipeline hands off one job at a time; manual generation can prepare all training notebooks together.
 
@@ -148,7 +156,7 @@ Other available analysis jobs:
   "id": "alignment-1",
   "workflow": "dimsim-parser-alignment",
   "parameters": {
-    "evaluation_root": "../datasets/evaluations/selected-evaluation",
+    "experiment_root": "../datasets/experiments/local/bilstm",
     "seed": 42, "bootstrap_replicates": 1000, "confidence": 0.95,
     "atol": 1e-12, "rtol": 1e-10
   }
@@ -286,7 +294,7 @@ means and sample SD. The five static distance maps show mean distances.
 
 ## Visualization
 
-Add jobs to `visualization`. Both workflows are available locally through `workflow` and in optional generated notebooks. They render existing numerical results and preserve the approved style; the required Arial font must be installed. The training report supports historical shared-population logs and character experiment logs. It verifies matched training, validation and vocabulary hashes within each seed across models, and a common test hash across seeds. The character report includes paired test differences for shared metrics and reports sample SD across seeds.
+Archived configs can still use these `visualization` workflows through `workflow` and generated notebooks. They render saved numerical results. The required Arial font must be installed. The archived training visualization verifies matching split and vocabulary hashes and uses its original model and seed inventory.
 
 ```json
 {

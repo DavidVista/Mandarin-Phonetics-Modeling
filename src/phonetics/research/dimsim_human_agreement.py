@@ -34,15 +34,26 @@ def _write_csv(path, rows):
         writer.writerows(rows)
 
 
-def run_human_agreement(input_root, output):
+def read_human_source(root, expected_source_sha256=None):
+    metadata = (root / "source.json").read_bytes()
+    pin = hashlib.sha256(metadata).hexdigest()
+    if expected_source_sha256 is not None and pin != expected_source_sha256:
+        raise ValueError("Human ratings source SHA256 mismatch")
+    source = json.loads(metadata)
+    for name in ("readings.csv", "similarity.csv"):
+        if hashlib.sha256((root / name).read_bytes()).hexdigest() != source["files"][name]:
+            raise ValueError(f"Checksum mismatch: {name}")
+    return source, pin
+
+
+def run_human_agreement(input_root, output, *, expected_source_sha256=None):
     from scipy import __version__ as scipy_version
     from scipy.stats import spearmanr
 
     root, target = Path(input_root).resolve(), Path(output).resolve()
     if target.is_relative_to(root) or root.is_relative_to(target):
         raise ValueError("Input and output directories must be separate")
-    metadata = (root / "source.json").read_bytes()
-    source = json.loads(metadata)
+    source, pin = read_human_source(root, expected_source_sha256)
     readings = {}
     for row in _read_csv(root, source, "readings.csv", ["character", "pinyin"]):
         char, label = row["character"], row["pinyin"]
@@ -64,7 +75,7 @@ def run_human_agreement(input_root, output):
     metric = DimsimDistance()
     identity = {
         "source": source,
-        "source_metadata_sha256": hashlib.sha256(metadata).hexdigest(),
+        "source_metadata_sha256": pin,
         "metric": metric.provenance,
         "parser": PARSER_PROVENANCE,
         "scipy_version": scipy_version,

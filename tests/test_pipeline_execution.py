@@ -214,7 +214,7 @@ class ExecutionTests(unittest.TestCase):
                 execute_job(job_root,self.root/'rejected-result',allow_execution=True)
         self.assertNotIn('torch',sys.modules)
 
-    def test_acoustic_notebook_handoff_then_experiment(self):
+    def make_sound_inventory(self):
         inventory = self.root / 'inventory'
         inventory.mkdir()
         with wave.open(str(inventory / 'ma1.wav'), 'wb') as handle:
@@ -224,6 +224,40 @@ class ExecutionTests(unittest.TestCase):
         write_jsonl(inventory / 'inventory.jsonl', [{'label':'ma1','relative_path':'ma1.wav',
                     'sha256':sha256_file(inventory/'ma1.wav'),'sample_rate':16000,'channels':1,'frames':16}])
         seal_bundle(inventory, 'sound_inventory', {'source':'fixture'})
+        return inventory
+
+    def test_reference_acoustic_notebook_import_uses_separate_state_and_output(self):
+        from phonetics.execution import _prepare_reference_acoustic
+
+        self.config['paths']['inventory'] = str(self.make_sound_inventory())
+        self.config['execution']['acoustic'] = 'notebook'
+        workflow = next(job for job in self.config['analysis'] if job['workflow'] == 'reference-geometry')
+        target = self.root / 'reference-targets'
+        workflow['parameters']['base_root'] = str(target)
+        state = load_state(self.config)
+        waiting = _prepare_reference_acoustic(self.config, state, workflow, False)
+        self.assertEqual(waiting['reference_id'], workflow['id'])
+        self.assertEqual(run_pipeline(self.config), waiting)
+
+        def synthetic(inventory, destination, *, model, cache_root):
+            self.assertEqual(model, workflow['parameters']['base_model'])
+            shutil.copytree(self.acoustic, destination)
+            seal_bundle(destination, 'acoustic_targets', {
+                'inventory_manifest_sha256': sha256_file(inventory / 'manifest.json'),
+                'model': model, 'contract': 'acoustic-targets-1', 'backend': 'transformers',
+            })
+
+        with patch('phonetics.acoustic.prepare_acoustic_targets', side_effect=synthetic):
+            result = execute_job(waiting['path'], self.root / 'reference-result', allow_execution=True)
+        self.assertEqual(import_result(self.config, result), target)
+        state = load_state(self.config)
+        self.assertNotIn('prepare-embeddings', state['completed'])
+        self.assertEqual(state['completed']['reference-acoustic:' + workflow['id']]['manifest_sha256'],
+                         sha256_file(target / 'manifest.json'))
+        self.assertIsNone(_prepare_reference_acoustic(self.config, state, workflow, False))
+
+    def test_acoustic_notebook_handoff_then_experiment(self):
+        inventory = self.make_sound_inventory()
         self.config['acoustic'] = {'existing_bundle':None, 'manifest_sha256':None}
         self.config['execution']['acoustic'] = 'notebook'
         self.config['paths']['inventory'] = str(inventory)

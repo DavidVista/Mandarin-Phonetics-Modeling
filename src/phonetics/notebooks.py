@@ -130,6 +130,8 @@ if job["stage"] == "training":
     print("Run tree:", Path("runs") / job["experiment_id"] / job["parameters"]["model_id"] / job["parameters"]["run_id"])
 '''
     title = f'{stage.capitalize()} — {job["parameters"].get("model_id", job_id[:12])}'
+    if 'reference_id' in job:
+        title = f'Acoustic reference — {job["parameters"]["model"]["id"]}'
     document = {'nbformat': 4, 'nbformat_minor': 5,
                 'metadata': {'kernelspec': {'display_name': 'Python 3', 'language': 'python', 'name': 'python3'},
                              'language_info': {'name': 'python'}, 'job_id': job_id,
@@ -172,14 +174,14 @@ def generate_notebooks(config, *, stage='ready'):
     return result
 
 
-def generate_encoder_notebooks(config):
+def generate_encoder_notebooks(config, *, state=None):
     """Generate the input-pinned encoder geometry notebook without executing it."""
     from .bundles import content_hash
     from .encoder_jobs import encoder_inputs
     from .evaluation.encoder_extraction import load_experiment_manifest
     from .execution import sdk_hashes
 
-    refs, pins = encoder_inputs(config)
+    refs, pins = encoder_inputs(config, state)
     experiment = load_experiment_manifest(refs["experiment"], pins["experiment"])
     bert = is_bert(experiment["identity"]["config"])
     sources = sdk_files()
@@ -265,7 +267,8 @@ with tempfile.TemporaryDirectory(dir=RESULTS_ROOT) as folder:
 print(shutil.make_archive(str(result), "zip", root_dir=result))
 """
     instructions = (
-        "Attach the pinned evaluation, experiment and training bundles. Attach any existing "
+        "Attach the pinned evaluation, experiment and training bundles. Update REFERENCES "
+        "if needed; the input manifests must match PINS. Attach any existing "
         "hidden-state exports to reuse. To extract missing exports, enable ALLOW_EXTRACTION "
         "after reviewing the device and inputs. Extraction requires Torch 2.11.0. "
         "Set FONT_FILES when Arial is supplied as an input dataset. The report and new "

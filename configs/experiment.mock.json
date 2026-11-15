@@ -82,7 +82,6 @@
   "execution": {
     "acoustic": "local",
     "training": "local",
-    "visualization": "local",
     "training_device": "cpu",
     "run_id": "run-1",
     "preparation": "mock"
@@ -101,7 +100,6 @@
       }
     }
   ],
-  "visualization": [],
   "notebooks": {
     "install_dependencies": true
   }

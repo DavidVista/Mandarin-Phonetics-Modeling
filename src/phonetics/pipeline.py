@@ -13,8 +13,8 @@ def load_config(path):
     required = {"schema_version", "paths", "corpus", "model", "acoustic", "experiment_id", "experiment"}
     version = value.get('schema_version') if isinstance(value, dict) else None
     if version == 2:
-        required |= {'execution', 'analysis', 'visualization', 'notebooks'}
-    optional = {"evaluation", "encoder_geometry"} if version == 2 else set()
+        required |= {'execution', 'analysis', 'notebooks'}
+    optional = {"evaluation", "encoder_geometry", "visualization"} if version == 2 else set()
     if (not isinstance(value, dict) or not required <= set(value) <= required | optional
             or type(version) is not int or version not in (1, 2)):
         raise ValueError("invalid pipeline configuration schema")
@@ -43,22 +43,36 @@ def load_config(path):
         raise ValueError('manifest pin requires an existing acoustic bundle')
     if not isinstance(value["experiment"], dict) or "sample_size" not in value["experiment"]:
         raise ValueError("explicit experiment.sample_size is required")
+    from .experiment import _validate_config
+    _validate_config(value['experiment'], value['experiment']['architecture']['acoustic_dim'])
+    if "evaluation" in value:
+        from .evaluation.geometry_bundle import resolve_evaluation_config
+        evaluation = value["evaluation"] = resolve_evaluation_config(
+            value["evaluation"], resolve, allow_run_input=version == 2)
+        if evaluation["experiment_manifest_sha256"] is None:
+            from .execution import safe_id
+            experiment = Path(value["paths"]["experiments"]) / safe_id(value["experiment_id"])
+            if Path(evaluation["experiment_root"]) != experiment:
+                raise ValueError("evaluation.experiment_root must select the experiment produced by this run")
     if version == 2:
         from .execution import validate_execution_config
         validate_execution_config(value, resolve)
-    if "evaluation" in value:
-        from .evaluation.geometry_bundle import resolve_evaluation_config
-        value["evaluation"] = resolve_evaluation_config(value["evaluation"], resolve)
     if "encoder_geometry" in value:
         from .encoder_jobs import resolve_encoder_config
         if "evaluation" not in value:
             raise ValueError("encoder_geometry requires the evaluation config section")
-        value["encoder_geometry"] = resolve_encoder_config(value["encoder_geometry"], resolve)
+        geometry = value["encoder_geometry"]
+        if isinstance(geometry, dict) and "training_runs" not in geometry and evaluation["experiment_manifest_sha256"] is None:
+            from .execution import training_run_paths
+            geometry = {**geometry, "training_runs": training_run_paths(value)}
+        value["encoder_geometry"] = resolve_encoder_config(geometry, resolve)
+        if evaluation["experiment_manifest_sha256"] is None:
+            from .execution import training_run_paths
+            if value["encoder_geometry"]["training_runs"] != training_run_paths(value):
+                raise ValueError("encoder_geometry.training_runs must select the training runs produced by this run")
         if any(job["id"] == value["encoder_geometry"]["id"]
                for group in ("analysis", "visualization") for job in value[group]):
             raise ValueError("encoder_geometry requires a unique workflow ID")
-    from .experiment import _validate_config
-    _validate_config(value['experiment'], value['experiment']['architecture']['acoustic_dim'])
     return value
 
 
@@ -88,10 +102,8 @@ def export_corpus(config):
 def run_stage(config, stage, *, allow_inference=False):
     paths = config["paths"]
     if stage == "prepare-evaluation":
-        from .evaluation.geometry_bundle import prepare_geometry_bundle
-        if "evaluation" not in config:
-            raise ValueError("prepare-evaluation requires the evaluation config section")
-        return prepare_geometry_bundle(config["evaluation"])
+        from .execution import prepare_configured_evaluation
+        return prepare_configured_evaluation(config)
     if stage == "export-corpus":
         return export_corpus(config)
     if stage == "download-sounds":

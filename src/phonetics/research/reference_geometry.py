@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import itertools
 import json
 import math
@@ -13,7 +14,7 @@ import numpy as np
 from ..artifacts import safe_artifact, sha256_file, write_json
 from ..bundles import content_hash
 from ..evaluation.geometry_bundle import validate_geometry_bundle
-from ..evaluation.graduality_io import load_embedding_bundle
+from ..evaluation.graduality_io import EXTRACTION, load_embedding_bundle
 from ..evaluation.reference_geometry import SYSTEMS, SLICES, TRANSITIONS, evaluate_geometry
 from ..pinyin import parse_components
 from ..visualization.reference_geometry import render_distance_maps, render_page
@@ -79,6 +80,26 @@ def _cosine_distances(labels, vectors):
     return distances
 
 
+def _load_acoustic_reference(name, root, pin, model_id):
+    from ..acoustic import validate_acoustic_targets
+    from ..evaluation.encoder_extraction import pinned_bytes
+
+    root = Path(root)
+    manifest = json.loads(pinned_bytes(root, "manifest.json", pin))
+    if manifest.get("bundle_type") != "acoustic_targets":
+        return load_embedding_bundle(name, root, pin, model_id)
+    validate_acoustic_targets(root)
+    model = manifest["identity"]["model"]
+    if model["id"] != model_id or any(model.get(key) != value for key, value in EXTRACTION.items()):
+        raise ValueError(f"{name} uses incompatible acoustic model settings")
+    labels = json.loads(pinned_bytes(root, "labels.json", manifest["artifacts"]["labels.json"]))
+    targets = pinned_bytes(root, "targets.npy", manifest["artifacts"]["targets.npy"])
+    vectors = np.load(io.BytesIO(targets), allow_pickle=False).astype(np.float64)
+    inventory = pinned_bytes(root, "inventory.jsonl", manifest["artifacts"]["inventory.jsonl"])
+    return {"vectors": dict(zip(labels, vectors)), "inventory": [json.loads(line) for line in inventory.splitlines()],
+            "manifest": {"model": model}}
+
+
 def run_reference_geometry(root, parameters, pins):
     root = Path(root)
     tolerance = parameters.get("tolerance", 1e-12)
@@ -89,7 +110,7 @@ def run_reference_geometry(root, parameters, pins):
     indices = [index for index, label in enumerate(labels) if label not in excluded]
     labels = [labels[index] for index in indices]
     dimsim = dimsim[np.ix_(indices, indices)]
-    acoustic = {key: load_embedding_bundle(key, parameters[key], pins[key], model) for key, model in _MODELS.items()}
+    acoustic = {key: _load_acoustic_reference(key, parameters[key], pins[key], model) for key, model in _MODELS.items()}
     missing = {key: sorted(set(labels) - bundle["vectors"].keys()) for key, bundle in acoustic.items()}
     common = sorted(set(labels) - set().union(*missing.values()))
     if len(common) < 2:

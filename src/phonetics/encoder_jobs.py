@@ -12,12 +12,14 @@ from .execution import safe_id
 
 def resolve_encoder_config(spec, resolve):
     required = {"id", "training_runs", "representations_root", "device", "batch_size", "tolerance"}
-    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics", "contrasts", "allow_extraction"}:
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics", "contrasts", "allow_extraction", "execution"}:
         raise ValueError("encoder_geometry requires id, training_runs, representations_root, device, batch_size and tolerance")
     if type(spec.get("diagnostics", False)) is not bool:
         raise ValueError("encoder diagnostics must be a boolean")
     if type(spec.get("allow_extraction", False)) is not bool:
         raise ValueError("encoder allow_extraction must be a boolean")
+    if spec.get("execution", "local") not in ("local", "notebook"):
+        raise ValueError("encoder_geometry.execution must be local or notebook")
     safe_id(spec["id"])
     runs = spec["training_runs"]
     if (not isinstance(runs, dict) or not runs
@@ -42,17 +44,28 @@ def resolve_encoder_config(spec, resolve):
             "training_runs": {key: resolve(value) for key, value in spec["training_runs"].items()}}
 
 
-def encoder_inputs(config):
+def encoder_inputs(config, state=None):
     if "encoder_geometry" not in config or "evaluation" not in config:
         raise ValueError("configure evaluation and encoder_geometry first")
-    spec, evaluation = config["encoder_geometry"], config["evaluation"]
+    from .execution import completed_manifest, evaluation_inputs, load_state
+
+    managed = config["evaluation"]["experiment_manifest_sha256"] is None
+    if managed and state is None:
+        state = load_state(config)
+    spec, evaluation = config["encoder_geometry"], evaluation_inputs(config, state)
     refs = {
         "evaluation": str(Path(evaluation["output_root"]) / evaluation["id"]),
         "experiment": evaluation["experiment_root"], **spec["training_runs"],
     }
     experiment = load_experiment_manifest(refs["experiment"], evaluation["experiment_manifest_sha256"])
     validate_run_inventory(refs, experiment)
-    pins = {key: sha256_file(Path(path) / "manifest.json") for key, path in refs.items()}
+    if managed:
+        pins = {"experiment": evaluation["experiment_manifest_sha256"],
+                "evaluation": completed_manifest(state, "prepare-evaluation", refs["evaluation"])}
+        pins.update({model: completed_manifest(state, "train:" + model, path)
+                     for model, path in spec["training_runs"].items()})
+    else:
+        pins = {key: sha256_file(Path(path) / "manifest.json") for key, path in refs.items()}
     if pins["experiment"] != evaluation["experiment_manifest_sha256"]:
         raise ValueError("configured experiment manifest changed")
     return refs, pins
@@ -159,11 +172,11 @@ def import_hidden_states(config, model, result):
     return target
 
 
-def run_configured_report(config, *, allow_execution=False):
+def run_configured_report(config, *, allow_execution=False, state=None):
     from .bundles import content_hash
     from .execution import sdk_hashes
 
-    refs, pins = encoder_inputs(config)
+    refs, pins = encoder_inputs(config, state)
     spec = config["encoder_geometry"]
     return run_encoder_workflow(refs=refs, pins=pins, spec=spec, reports_root=config["paths"]["reports"],
                                 source_sha256=content_hash(sdk_hashes()), allow_execution=allow_execution)

@@ -5,16 +5,60 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(PROJECT/'src'), str(PROJECT/'tests')]
 from phonetics.workflows import resolve_parameters, workflow_pins, run_workflow, validate_workflow_result
 from phonetics.workflows import package_workflow, workflow_contract
+from phonetics import workflows
 from phonetics.artifacts import sha256_file, write_json
 from test_training_summary import make_training_fixture
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_training_report_rejects_replacement_after_pinning(self):
+        with tempfile.TemporaryDirectory(dir=PROJECT / 'tests') as directory:
+            root = Path(directory)
+            run = root / 'components'
+            (run / 'seed-0').mkdir(parents=True)
+            workflow = {'id': 'report', 'workflow': 'training-report',
+                        'parameters': {'training_runs': {'components': str(run)}}}
+            manifest_path = run / 'manifest.json'
+            summary_path = run / 'summary.json'
+            history_path = run / 'seed-0/history.json'
+            summary = {'status': 'complete', 'seed_results': [{'seed': 0, 'test_metrics': {'objective': 1}}]}
+            history = {'epochs': [{'epoch': 1, 'train': {'objective': 1}, 'validation': {'objective': 1}}]}
+
+            for filename in ('manifest.json', 'summary.json', 'seed-0/history.json'):
+                with self.subTest(filename=filename):
+                    write_json(summary_path, summary)
+                    write_json(history_path, history)
+                    manifest = {'run_type': 'training_run', 'status': 'complete', 'model_id': 'components',
+                                'experiment_id': 'mock', 'experiment_hashes': {'manifest.json': 'a' * 64}, 'seeds': [0],
+                                'artifacts': {file.relative_to(run).as_posix(): sha256_file(file)
+                                              for file in (summary_path, history_path)}}
+                    write_json(manifest_path, manifest)
+                    pins = workflow_pins(workflow)
+                    dispatch = workflows._dispatch
+
+                    def replace_then_dispatch(*args):
+                        if filename == 'seed-0/history.json':
+                            write_json(history_path, {'epochs': []})
+                        else:
+                            write_json(summary_path, {'status': 'complete', 'seed_results': [
+                                {'seed': 0, 'test_metrics': {'objective': 9}},
+                            ]})
+                            if filename == 'manifest.json':
+                                manifest['artifacts']['summary.json'] = sha256_file(summary_path)
+                                write_json(manifest_path, manifest)
+                        return dispatch(*args)
+
+                    with patch.object(workflows, '_dispatch', side_effect=replace_then_dispatch):
+                        with self.assertRaisesRegex(ValueError, 'checksum mismatch: ' + filename):
+                            run_workflow(workflow, root / 'reports', expected_input_pins=pins)
+                    self.assertFalse((root / 'reports' / 'report').exists())
+
     def test_training_report_relocates_inputs_and_requires_matching_runs(self):
         with tempfile.TemporaryDirectory(dir=PROJECT / 'tests') as directory:
             root = Path(directory)

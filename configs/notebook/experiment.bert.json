@@ -89,13 +89,99 @@
   "execution": {
     "acoustic": "notebook",
     "training": "notebook",
-    "visualization": "local",
     "training_device": "cuda",
     "run_id": "run-1"
   },
-  "analysis": [],
-  "visualization": [],
+  "analysis": [
+    {
+      "id": "bert-training",
+      "workflow": "training-report",
+      "parameters": {}
+    },
+    {
+      "id": "bert-reference-geometry",
+      "workflow": "reference-geometry",
+      "parameters": {
+        "base_root": "../../datasets/pinyin-embeddings/reference-targets/notebook",
+        "base_model": {
+          "device": "cuda",
+          "dtype": "float32",
+          "id": "facebook/wav2vec2-base",
+          "layer": -1,
+          "mono": true,
+          "padding": "none",
+          "pooling": "mean_all",
+          "processor": "facebook/wav2vec2-base",
+          "revision": "0b5b8e868dd84f03fd87d01f9c4ff0f080fecfe8",
+          "sample_rate": 16000
+        }
+      }
+    },
+    {
+      "id": "bert-dimsim-distribution",
+      "workflow": "dimsim-distribution",
+      "parameters": {}
+    },
+    {
+      "id": "bert-dimsim-parsing",
+      "workflow": "dimsim-parser-alignment",
+      "parameters": {}
+    },
+    {
+      "id": "bert-dimsim-human-agreement",
+      "workflow": "dimsim-human-agreement",
+      "parameters": {
+        "input_root": "../../datasets/dimsim-human-agreement/li-2022-v1",
+        "source_sha256": "66699e0adce2e792aef3faa2975421653ca4f0caba53b08dad0ca5c19fe78250"
+      }
+    }
+  ],
   "notebooks": {
     "install_dependencies": true
+  },
+  "evaluation": {
+    "id": "bert",
+    "experiment_root": "../../datasets/experiments/notebook/bert",
+    "experiment_manifest_sha256": null,
+    "output_root": "../../datasets/evaluations/notebook",
+    "excluded_pinyin": [
+      "gu1",
+      "gu3",
+      "gu4",
+      "qu1",
+      "qu2",
+      "qu3",
+      "qu4",
+      "jun1",
+      "jun4",
+      "qun2",
+      "xun1",
+      "xun2",
+      "xun4"
+    ],
+    "exclusion_source": {
+      "run_id": "duyu-chinese-lessons-zh-cn-v1",
+      "manifest_sha256": "05fcbc862b29b29d66ad62067cfbe1f409dba416a5e0ff2b9019d0bf132b9d1a"
+    },
+    "exclusion_confirmation": {
+      "run_id": "parser-char-test-01",
+      "manifest_sha256": "5dedd9d50df8868575c45b1138edb5648c352033c98559078515e9d1ddf9aa77"
+    }
+  },
+  "encoder_geometry": {
+    "id": "bert-geometry",
+    "representations_root": "../../outputs/notebook/bert-hidden-states",
+    "device": "cuda",
+    "batch_size": 32,
+    "tolerance": 1e-12,
+    "allow_extraction": true,
+    "execution": "notebook",
+    "diagnostics": false,
+    "contrasts": [
+      [
+        "components",
+        "components-acoustic-lambda-1"
+      ]
+    ]
   }
 }

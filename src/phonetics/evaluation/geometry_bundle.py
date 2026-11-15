@@ -43,14 +43,15 @@ def _validate_exclusions(labels):
         validate_canonical_label(label)
 
 
-def resolve_evaluation_config(spec, resolve):
+def resolve_evaluation_config(spec, resolve, *, allow_run_input=False):
     fields = {"id", "experiment_root", "experiment_manifest_sha256", "output_root",
               "excluded_pinyin", "exclusion_source"}
     if not isinstance(spec, dict) or not fields <= set(spec) <= fields | {"exclusion_confirmation"}:
         raise ValueError("evaluation requires id, experiment_root, experiment_manifest_sha256, "
                          "output_root, excluded_pinyin and exclusion_source")
     _validate_evaluation_id(spec["id"])
-    _manifest_pin(spec["experiment_manifest_sha256"])
+    if spec["experiment_manifest_sha256"] is not None or not allow_run_input:
+        _manifest_pin(spec["experiment_manifest_sha256"])
     _validate_exclusions(spec["excluded_pinyin"])
     _validate_audit_reference(spec["exclusion_source"], "exclusion_source")
     if "exclusion_confirmation" in spec:

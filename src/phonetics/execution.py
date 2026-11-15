@@ -13,7 +13,7 @@ from .bundles import content_hash, seal_bundle, staging_directory, validate_bund
 PREPARATION = ('download-sounds', 'prepare-inventory', 'prepare-corpus',
                'prepare-embeddings', 'prepare-data', 'prepare-experiment')
 WORKFLOWS = {'dimsim-distribution', 'dimsim-parser-alignment', 'reference-geometry',
-             'training-visualization', 'evaluation-visualization', 'training-report'}
+             'training-visualization', 'evaluation-visualization', 'training-report', 'dimsim-human-agreement'}
 
 
 def sdk_files():
@@ -29,9 +29,11 @@ def sdk_hashes(files=None):
 
 def validate_execution_config(config, resolve):
     spec = config['execution']
-    required = {'acoustic', 'training', 'visualization', 'training_device', 'run_id'}
-    if not isinstance(spec, dict) or not required <= set(spec) <= required | {'preparation'}:
-        raise ValueError('execution requires acoustic, training, visualization, training_device and run_id')
+    required = {'acoustic', 'training', 'training_device', 'run_id'}
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {'preparation', 'visualization'}:
+        raise ValueError('execution requires acoustic, training, training_device and run_id')
+    spec.setdefault('visualization', 'local')
+    config.setdefault('visualization', [])
     for key in ('acoustic', 'training', 'visualization'):
         if spec[key] not in ('local', 'notebook'):
             raise ValueError(f'execution.{key} must be local or notebook')
@@ -60,7 +62,18 @@ def validate_execution_config(config, resolve):
                 raise ValueError('workflow is in the wrong config group')
             ids.add(job['id'])
             from .workflows import resolve_parameters
-            job['parameters'] = resolve_parameters(job['workflow'], job['parameters'], resolve)
+            params = job['parameters']
+            if job['workflow'] == 'training-report' and 'training_runs' not in params:
+                params = {**params, 'training_runs': training_run_paths(config)}
+            if job['workflow'] in ('dimsim-distribution', 'reference-geometry'):
+                evaluation = config.get('evaluation')
+                if 'evaluation_root' not in params and evaluation is not None:
+                    params = {'evaluation_root': str(Path(evaluation['output_root']) / evaluation['id']), **params}
+            if job['workflow'] == 'dimsim-parser-alignment' and not {'experiment_root', 'evaluation_root'} & params.keys():
+                params = {**params, 'experiment_root': str(Path(config['paths']['experiments']) / safe_id(config['experiment_id']))}
+            if job['workflow'] == 'reference-geometry' and 'base_model' in params:
+                params = {'zh_cn_root': config['paths']['acoustic'], **params}
+            job['parameters'] = resolve_parameters(job['workflow'], params, resolve)
 
 
 def safe_id(value):
@@ -118,6 +131,55 @@ def _manifest_pin(path):
     return sha256_file(Path(path) / 'manifest.json')
 
 
+def training_run_paths(config):
+    root = (Path(config['paths']['runs']) / safe_id(config['experiment_id']))
+    return {model: str(root / safe_id(model) / config['execution']['run_id'])
+            for model in config['experiment']['model_ids']}
+
+
+def completed_manifest(state, key, path):
+    record = state['completed'].get(key)
+    if record is None:
+        raise ValueError(f'{key} must finish before it can be used as an input')
+    if Path(record['path']).resolve() != Path(path).resolve():
+        raise ValueError(f'{key} path differs from the configured path')
+    if _manifest_pin(path) != record['manifest_sha256']:
+        raise ValueError(f'{key} manifest differs from the completed stage')
+    return record['manifest_sha256']
+
+
+def evaluation_inputs(config, state=None):
+    if 'evaluation' not in config:
+        raise ValueError('prepare-evaluation requires the evaluation config section')
+    spec = config['evaluation']
+    if spec['experiment_manifest_sha256'] is not None:
+        return spec
+    state = load_state(config) if state is None else state
+    return {**spec, 'experiment_manifest_sha256': completed_manifest(
+        state, 'prepare-experiment', spec['experiment_root'])}
+
+
+def prepare_configured_evaluation(config, state=None):
+    from .evaluation.geometry_bundle import prepare_geometry_bundle, validate_geometry_bundle
+
+    managed = 'evaluation' in config and config['evaluation']['experiment_manifest_sha256'] is None
+    if managed and state is None:
+        state = load_state(config)
+    spec = evaluation_inputs(config, state)
+    if not managed:
+        return prepare_geometry_bundle(spec)
+    target = Path(spec['output_root']) / spec['id']
+    key = 'prepare-evaluation'
+    if key in state['completed']:
+        completed_manifest(state, key, target)
+        validate_geometry_bundle(target)
+        return target
+    result = prepare_geometry_bundle(spec)
+    state['completed'][key] = {'path': str(result), 'manifest_sha256': _manifest_pin(result)}
+    _write_state(config['paths']['state'], state)
+    return result
+
+
 def preflight_copy(inputs, destination):
     """Reject overlap/symlinks before any destination directory is created."""
     destination = Path(destination).resolve()
@@ -134,7 +196,7 @@ def _copy_tree(source, destination, *, ignore=None):
     shutil.copytree(source, destination, ignore=ignore)
 
 
-def create_job(config, stage, input_path, *, model_id=None, workflow=None, _generation=None):
+def create_job(config, stage, input_path, *, model_id=None, workflow=None, reference=None, _generation=None):
     """Publish an immutable input package; notebooks are generated beside it."""
     context = {} if _generation is None else _generation
     if 'sources' not in context:
@@ -143,7 +205,7 @@ def create_job(config, stage, input_path, *, model_id=None, workflow=None, _gene
     if stage == 'acoustic':
         from .sound_inventory import validate_sound_inventory
         validate_sound_inventory(input_path)
-        parameters = {'model': config['model']}
+        parameters = {'model': config['model'] if reference is None else reference['parameters']['base_model']}
     elif stage == 'training':
         from .experiment import validate_experiment
         key = str(Path(input_path).resolve())
@@ -168,6 +230,8 @@ def create_job(config, stage, input_path, *, model_id=None, workflow=None, _gene
         raise ValueError('unsupported notebook stage')
     identity = {'stage': stage, 'parameters': parameters, 'sources': sdk_hashes(sources),
                 'input_manifest_sha256': _manifest_pin(input_path) if input_path else None}
+    if reference is not None:
+        identity['reference_id'] = reference['id']
     if stage == 'training':
         identity.update(external_input=True, input_config=_read(Path(input_path) / 'config.json'),
                         input_reference=str(Path(input_path).resolve()),
@@ -202,7 +266,8 @@ def create_job(config, stage, input_path, *, model_id=None, workflow=None, _gene
     from .notebooks import render_job_notebook
     notebook = render_job_notebook(target, install_dependencies=config['notebooks']['install_dependencies'], _sources=sources)
     return {'job_id': job_id, 'stage': stage, 'path': str(target), 'notebook': str(notebook),
-            'model_id': model_id, 'workflow_id': workflow['id'] if workflow else None}
+            'model_id': model_id, 'workflow_id': workflow['id'] if workflow else None,
+            **({'reference_id': reference['id']} if reference is not None else {})}
 
 
 def validate_job(path, *, expected_sources=None, expected_sdk_sha256=None):
@@ -320,8 +385,14 @@ def import_result(config, result_path):
                     'contract': 'acoustic-targets-1', 'backend': 'transformers'}
         if manifest['identity'] != expected:
             raise ValueError('acoustic result parameters differ from the job')
-        target = Path(config['paths']['acoustic'])
-        key = 'prepare-embeddings'
+        if 'reference_id' in job:
+            reference, = [item for item in config['analysis'] if item['id'] == job['reference_id']
+                          and item['workflow'] == 'reference-geometry' and 'base_model' in item['parameters']]
+            target = Path(reference['parameters']['base_root'])
+            key = 'reference-acoustic:' + reference['id']
+        else:
+            target = Path(config['paths']['acoustic'])
+            key = 'prepare-embeddings'
     elif job['stage'] == 'training':
         expected_config = job['input_config'] if job.get('external_input') else _read(Path(pending['path']) / 'input' / 'config.json')
         experiment_id = job['experiment_id'] if job.get('external_input') else _read(Path(pending['path']) / 'input' / 'manifest.json')['identity']['experiment_id']
@@ -369,6 +440,54 @@ def import_result(config, result_path):
     return target
 
 
+def _prepare_reference_acoustic(config, state, workflow, allow_inference):
+    from .acoustic import prepare_acoustic_targets, validate_acoustic_targets
+
+    params = workflow['parameters']
+    target = Path(params['base_root'])
+    inventory = config['paths']['inventory']
+    key = 'reference-acoustic:' + workflow['id']
+    if key in state['completed']:
+        completed_manifest(state, key, target)
+        validate_acoustic_targets(target)
+        return None
+    if not target.exists():
+        if config['execution']['acoustic'] == 'notebook':
+            state['waiting'] = create_job(config, 'acoustic', inventory, reference=workflow)
+            _write_state(config['paths']['state'], state)
+            return {'status': 'waiting', **state['waiting']}
+        if not allow_inference:
+            raise PermissionError('reference acoustic inference requires --allow-inference')
+    path = prepare_acoustic_targets(inventory, target, model=params['base_model'], cache_root=config['paths']['cache'])
+    state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+    _write_state(config['paths']['state'], state)
+    return None
+
+
+def _run_pipeline_workflow(config, state, group, workflow):
+    from .workflows import _inputs, run_workflow, validate_workflow_result, workflow_pins
+
+    key = group + ':' + workflow['id']
+    completed = {Path(record['path']).resolve(): record['manifest_sha256'] for record in state['completed'].values()}
+    paths = {name: Path(path).resolve() for name, path in _inputs(workflow).items()}
+    expected = {name: completed[path] for name, path in paths.items() if path in completed}
+    if key in state['completed']:
+        manifest = validate_workflow_result(state['completed'][key]['path'])
+        pins = workflow_pins(workflow)
+        if (manifest['identity']['input_pins'] != pins
+                or any(pins.get(name) != digest for name, digest in expected.items())):
+            raise ValueError('completed workflow inputs changed')
+        return None
+    if group == 'visualization' and config['execution']['visualization'] == 'notebook':
+        state['waiting'] = create_job(config, 'visualization', None, workflow=workflow)
+        _write_state(config['paths']['state'], state)
+        return {'status': 'waiting', **state['waiting']}
+    path = run_workflow(workflow, config['paths']['reports'], expected_input_pins=expected)
+    state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+    _write_state(config['paths']['state'], state)
+    return None
+
+
 def run_pipeline(config, *, through='visualization', allow_inference=False, allow_training=False):
     from .pipeline import run_stage
     if through not in ('experiment', 'training', 'analysis', 'visualization'):
@@ -397,11 +516,12 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
     if through == 'experiment':
         return {'status': 'complete', 'through': through, 'path': state['completed']['prepare-experiment']['path']}
     experiment = Path(config['paths']['experiments']) / config['experiment_id']
+    experiment_pin = completed_manifest(state, 'prepare-experiment', experiment)
     for model_id in config['experiment']['model_ids']:
         key = 'train:' + model_id
         if key in state['completed']:
             job = {'parameters': {'model_id': model_id, 'run_id': config['execution']['run_id']},
-                   'input_manifest_sha256': _manifest_pin(experiment)}
+                   'input_manifest_sha256': experiment_pin}
             validate_training_result(state['completed'][key]['path'], job)
             continue
         if config['execution']['training'] == 'notebook':
@@ -413,29 +533,45 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
         from .training import train_experiment
         result = train_experiment(experiment, model_id=model_id, runs_root=config['paths']['runs'],
                                   device=config['execution']['training_device'], run_id=config['execution']['run_id'],
-                                  expected_manifest_sha256=_manifest_pin(experiment))
+                                  expected_manifest_sha256=experiment_pin)
         path = result['run_dir']
         state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
         _write_state(config['paths']['state'], state)
+    for workflow in config['analysis']:
+        if workflow['workflow'] == 'training-report':
+            _run_pipeline_workflow(config, state, 'analysis', workflow)
     if through == 'training':
         return {'status': 'complete', 'through': through}
-    from .workflows import run_workflow
+    managed_evaluation = 'evaluation' in config and config['evaluation']['experiment_manifest_sha256'] is None
+    if managed_evaluation:
+        prepare_configured_evaluation(config, state)
     for group in ('analysis', 'visualization'):
         for workflow in config[group]:
-            key = group + ':' + workflow['id']
-            if key in state['completed']:
-                from .workflows import validate_workflow_result, workflow_pins
-                manifest = validate_workflow_result(state['completed'][key]['path'])
-                if manifest['identity']['input_pins'] != workflow_pins(workflow):
-                    raise ValueError('completed workflow inputs changed')
+            if workflow['workflow'] == 'training-report':
                 continue
-            if group == 'visualization' and config['execution']['visualization'] == 'notebook':
-                state['waiting'] = create_job(config, 'visualization', None, workflow=workflow)
-                _write_state(config['paths']['state'], state)
-                return {'status': 'waiting', **state['waiting']}
-            path = run_workflow(workflow, config['paths']['reports'])
-            state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
-            _write_state(config['paths']['state'], state)
+            if workflow['workflow'] == 'reference-geometry' and 'base_model' in workflow['parameters']:
+                waiting = _prepare_reference_acoustic(config, state, workflow, allow_inference)
+                if waiting:
+                    return waiting
+            waiting = _run_pipeline_workflow(config, state, group, workflow)
+            if waiting:
+                return waiting
         if through == group:
             break
+    if managed_evaluation and 'encoder_geometry' in config:
+        geometry = config['encoder_geometry']
+        if geometry.get('execution', 'local') == 'notebook':
+            from .notebooks import generate_encoder_notebooks
+            notebook, = generate_encoder_notebooks(config, state=state)
+            return {'status': 'notebook-ready', **notebook}
+        from .encoder_jobs import run_configured_report
+        target = Path(config['paths']['reports']) / geometry['id']
+        key = 'encoder-geometry'
+        if key in state['completed']:
+            completed_manifest(state, key, target)
+            validate_bundle(target, 'encoder_geometry_report')
+        else:
+            path = run_configured_report(config, allow_execution=geometry.get('allow_extraction', False), state=state)
+            state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+            _write_state(config['paths']['state'], state)
     return {'status': 'complete', 'through': through}

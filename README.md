@@ -102,7 +102,7 @@ source .venv/bin/activate
 For a local smoke run, install the training extra and run the mock config:
 
 ```sh
-uv sync --frozen --extra training
+uv sync --frozen --extra training --extra analysis
 phonetics run --config configs/experiment.mock.json --allow-training
 ```
 
@@ -116,7 +116,7 @@ phonetics run --config configs/local/experiment.bilstm.json --allow-inference --
 phonetics run --config configs/notebook/experiment.bilstm.json
 ```
 
-The notebook profile hands off acoustic inference and training. For research reports, add jobs to the empty `analysis` or `visualization` sections. Paths resolve relative to the config file. Acoustic targets can be imported from a selected bundle or computed from the configured model. Input hashes are recorded in bundles, jobs and run state.
+The notebook profile hands off acoustic inference and training. After all models finish, the CLI builds the training report and objective curves, then runs the configured evaluation and research reports. Both research profiles include reference geometry, DIMSIM distributions, DIMSIM parser alignment, and DIMSIM agreement with human ratings. Paths resolve relative to the config file. Input hashes are recorded in bundles, jobs and run state.
 
 Preparation order: download sounds → decode inventory → export and clean corpus → import or infer acoustic targets → assemble prepared data → assemble experiment. Each stage also has an individual CLI command. Computing acoustic targets locally requires the `inference` dependency extra and `--allow-inference`; local training requires `training` and `--allow-training`. Install the Torch 2.11.0 CPU/CUDA build for the selected environment separately. Torch is loaded for model execution.
 
@@ -126,7 +126,7 @@ The source stage downloads the pinned official Chinese Lessons archive and recor
 
 ### Notebook handoff and resumption
 
-`execution.acoustic`, `execution.training` and `execution.visualization` choose `local` or `notebook`. Analysis reports run locally. Acoustic execution mode controls computation of new targets; selecting an acoustic input bundle uses the import path. Training device and run ID are explicit.
+`execution.acoustic` and `execution.training` choose `local` or `notebook`. Research reports run locally, and `encoder_geometry.execution` selects the mode for encoder extraction and geometry. The acoustic execution mode also applies to the Wav2Vec2 base targets used by reference geometry. Training device and run ID are explicit.
 
 At a notebook stage, `run` prints `status: waiting` and the notebook and job paths. Training generation validates the experiment once for all objectives and creates small reference jobs. Upload the original experiment bundle as a dataset and attach it to the training notebooks; their job manifests and SDK are embedded. Acoustic and visualization jobs use accompanying input packages. Acoustic notebooks are generated after inventory preparation; training notebooks after experiment preparation. Running the final cell executes the configured stage. ML notebooks require Torch 2.11.0, installed separately with the CPU/CUDA build appropriate to the selected device.
 

@@ -11,7 +11,8 @@ from .bundles import content_hash, seal_bundle, staging_directory, validate_bund
 
 PATH_FIELDS = {
     'dimsim-distribution': {'evaluation_root'},
-    'dimsim-parser-alignment': {'evaluation_root'},
+    'dimsim-parser-alignment': set(),
+    'dimsim-human-agreement': {'input_root'},
     'reference-geometry': {'base_root', 'zh_cn_root', 'evaluation_root'},
     'training-visualization': set(),
     'training-report': set(),
@@ -20,21 +21,44 @@ PATH_FIELDS = {
 PARAMETERS = {
     'dimsim-distribution': set(),
     'dimsim-parser-alignment': {'seed', 'bootstrap_replicates', 'confidence', 'atol', 'rtol'},
-    'reference-geometry': {'tolerance', 'base_manifest_sha256'},
+    'reference-geometry': {'tolerance', 'base_manifest_sha256', 'base_model'},
+    'dimsim-human-agreement': {'source_sha256'},
     'training-visualization': {'training_runs', 'summary_run_id', 'mode'},
     'training-report': {'training_runs'},
     'evaluation-visualization': {'derived_run_ids', 'derived_mode'},
 }
 
 
+def _path_fields(name, parameters):
+    if name == 'dimsim-parser-alignment':
+        paths = {'evaluation_root', 'experiment_root'} & parameters.keys()
+        if len(paths) != 1:
+            raise ValueError('parser alignment requires exactly one evaluation or experiment path')
+        return paths
+    return PATH_FIELDS[name]
+
+
 def resolve_parameters(name, parameters, resolve):
-    paths = PATH_FIELDS[name]
+    paths = _path_fields(name, parameters)
     allowed = paths | PARAMETERS[name]
     if set(parameters) - allowed or not paths <= set(parameters):
         raise ValueError(f'invalid {name} parameters; allowed keys: {sorted(allowed)}')
     result = copy.deepcopy(parameters)
+    if name == 'dimsim-human-agreement':
+        from .evaluation.geometry_bundle import _manifest_pin
+        _manifest_pin(result.get('source_sha256'))
+    if name == 'reference-geometry' and 'base_model' in result:
+        from .preparation.config import validate_model_config
+        result['base_model'] = validate_model_config(result['base_model'])
+        model = result['base_model']
+        if (model['id'], model['padding'], model['pooling']) != ('facebook/wav2vec2-base', 'none', 'mean_all'):
+            raise ValueError('reference base_model requires wav2vec2-base, no padding, and mean_all pooling')
     for key in paths:
         result[key] = resolve(result[key])
+    if name == 'reference-geometry' and 'base_model' in result:
+        base, zh_cn = (Path(result[key]) for key in ('base_root', 'zh_cn_root'))
+        if base.is_relative_to(zh_cn) or zh_cn.is_relative_to(base):
+            raise ValueError('reference and training acoustic targets require separate directories')
     if name == 'training-visualization':
         if set(result) != allowed or result['mode'] not in ('prepare', 'reuse'):
             raise ValueError('training visualization requires training_runs, summary_run_id and mode')
@@ -64,7 +88,7 @@ def resolve_parameters(name, parameters, resolve):
 
 def _inputs(workflow):
     params = workflow['parameters']
-    result = {k: params[k] for k in sorted(PATH_FIELDS[workflow['workflow']])}
+    result = {k: params[k] for k in sorted(_path_fields(workflow['workflow'], params))}
     if workflow['workflow'] in ('training-visualization', 'training-report'):
         result.update({'training:' + k: p for k, p in params['training_runs'].items()})
     return result
@@ -76,7 +100,7 @@ def workflow_contract(workflow):
     try:
         name = result['workflow']
         params = result['parameters']
-        for field in PATH_FIELDS[name]:
+        for field in _path_fields(name, params):
             if not isinstance(params[field], str) or not params[field]:
                 raise ValueError('workflow input locations must be nonempty strings')
             params[field] = {'input': field}
@@ -111,6 +135,11 @@ def _verify_files(root):
 def workflow_pins(workflow):
     pins = {}
     for name, path in _inputs(workflow).items():
+        if workflow['workflow'] == 'dimsim-human-agreement':
+            from .research.dimsim_human_agreement import read_human_source
+            _, pin = read_human_source(Path(path), workflow['parameters']['source_sha256'])
+            pins[name] = pin
+            continue
         if workflow['workflow'] == 'reference-geometry' and name == 'base_root':
             manifest_path = Path(path) / 'manifest.json'
             if not manifest_path.is_file():
@@ -118,10 +147,12 @@ def workflow_pins(workflow):
             expected = workflow['parameters'].get('base_manifest_sha256')
             if expected is not None and sha256_file(manifest_path) != expected:
                 raise ValueError(f'Base embedding manifest SHA256 mismatch at {path}')
-            if json.loads(manifest_path.read_text(encoding='utf-8')).get('model', {}).get('padding') != 'none':
+            metadata = json.loads(manifest_path.read_text(encoding='utf-8'))
+            if metadata.get('identity', metadata).get('model', {}).get('padding') != 'none':
                 raise ValueError(f'Base embedding bundle at {path} requires padding=none')
         manifest = _verify_files(path)
-        if manifest.get('bundle_type') == 'character_experiment':
+        if manifest.get('bundle_type') == 'character_experiment' and (workflow['workflow'], name) != (
+                'dimsim-parser-alignment', 'experiment_root'):
             raise ValueError('existing research workflows do not accept character experiment bundles; character evaluation is separate')
         pins[name] = sha256_file(Path(path) / 'manifest.json')
     return pins
@@ -147,16 +178,21 @@ def package_workflow(workflow, destination):
     write_json(Path(destination) / 'workflow.json', copied)
 
 
-def _dispatch(workflow, project_root):
+def _dispatch(workflow, project_root, pins):
     from .execution import sdk_hashes
     name = workflow['workflow']
     params = copy.deepcopy(workflow['parameters'])
     if name == 'training-report':
-        lines = ['# Training smoke report', '']
+        from .evaluation.encoder_extraction import pinned_bytes
+        from .visualization.training_curves import render_training_curves
+
+        lines = ['# Training report', '']
+        curves = {}
+        selected_epochs = {}
         expected_population = None
         for model, directory in params['training_runs'].items():
             root = Path(directory)
-            manifest = _verify_files(root)
+            manifest = json.loads(pinned_bytes(root, 'manifest.json', pins['training:' + model]))
             if (manifest.get('run_type'), manifest.get('status'), manifest.get('model_id')) != ('training_run', 'complete', model):
                 raise ValueError(f'invalid completed training run for {model}')
             experiment = manifest.get('experiment_id')
@@ -171,9 +207,10 @@ def _dispatch(workflow, project_root):
                 expected_population = population
             elif population != expected_population:
                 raise ValueError('training report requires the same experiment and seed set across runs')
-            if 'summary.json' not in manifest['artifacts']:
+            artifacts = manifest['artifacts']
+            if 'summary.json' not in artifacts:
                 raise ValueError(f'invalid training summary for {model}')
-            summary = json.loads(safe_artifact(root, 'summary.json').read_text(encoding='utf-8'))
+            summary = json.loads(pinned_bytes(root, 'summary.json', artifacts['summary.json']))
             results = summary.get('seed_results')
             if (summary.get('status') != 'complete' or not isinstance(results, list)
                     or sorted(row['seed'] for row in results) != sorted(seeds)):
@@ -183,14 +220,33 @@ def _dispatch(workflow, project_root):
                 lines.extend(f'| {seed["seed"]} | {metric} | {value:.6g} |'
                              for metric, value in sorted(seed['test_metrics'].items()))
             lines.append('')
+            histories = {}
+            for seed in seeds:
+                history = f'seed-{seed}/history.json'
+                if history in artifacts:
+                    histories[seed] = json.loads(pinned_bytes(root, history, artifacts[history]))['epochs']
+            if histories:
+                if set(histories) != set(seeds):
+                    raise ValueError(f'incomplete training histories for {model}')
+                curves[model] = histories
+                selected_epochs[model] = {row['seed']: row['best_epoch'] for row in results if 'best_epoch' in row}
         report = project_root / 'report.md'
+        if curves:
+            if set(curves) != set(params['training_runs']):
+                raise ValueError('training histories must cover every reported model')
+            outputs = render_training_curves(curves, project_root / 'learning-curves.png', selected_epochs)
+            lines.extend(['## Learning curves', '', *(f'- [{path.stem}]({path.name})' for path in outputs), ''])
         report.write_text('\n'.join(lines), encoding='utf-8')
         return report
+    if name == 'dimsim-human-agreement':
+        from .research.dimsim_human_agreement import run_human_agreement
+        return run_human_agreement(params['input_root'], project_root / 'human-agreement',
+                                   expected_source_sha256=pins['input_root'])
     if name in ('dimsim-distribution', 'dimsim-parser-alignment'):
-        for key in PATH_FIELDS[name]:
+        for key in _path_fields(name, params):
             params[key] = Path(params[key])
             pin_name = key.removesuffix('_root') + '_manifest_sha256'
-            params[pin_name] = sha256_file(params[key] / 'manifest.json')
+            params[pin_name] = pins[key]
         if name == 'dimsim-distribution':
             from .research.dimsim_distribution import DimsimDistributionConfig as Config, run_dimsim_distribution as run
         else:
@@ -212,9 +268,11 @@ def validate_workflow_result(path):
     return validate_bundle(path, 'workflow_result')
 
 
-def run_workflow(workflow, output_root):
+def run_workflow(workflow, output_root, *, expected_input_pins=None):
     from .execution import sdk_hashes
     pins = workflow_pins(workflow)
+    if expected_input_pins is not None and any(pins.get(key) != value for key, value in expected_input_pins.items()):
+        raise ValueError('workflow inputs differ from completed pipeline stages')
     identity = {'workflow': workflow, 'input_pins': pins, 'source_sha256': content_hash(sdk_hashes())}
     target = Path(output_root) / workflow['id']
     for path in _inputs(workflow).values():
@@ -229,7 +287,7 @@ def run_workflow(workflow, output_root):
             from .research.reference_geometry import run_reference_geometry
             run_reference_geometry(temporary, workflow['parameters'], pins)
         else:
-            _dispatch(workflow, temporary)
+            _dispatch(workflow, temporary, pins)
         seal_bundle(temporary, 'workflow_result', identity)
     return target
 
