@@ -4,7 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 import zipfile
+
+
+def _print_progress(message):
+    print(message, file=sys.stderr, flush=True)
 
 
 def main(argv=None):
@@ -78,13 +83,19 @@ def main(argv=None):
             if args.command == 'run':
                 from .execution import run_pipeline
                 result = run_pipeline(config, through=args.through, allow_inference=args.allow_inference,
-                                      allow_training=args.allow_training)
+                                      allow_training=args.allow_training, progress=_print_progress)
+                if result['status'] in ('waiting', 'notebook-ready'):
+                    stage = result.get('reference_id') or result.get('model_id') or result['stage']
+                    _print_progress(f"Notebook ready for {stage}: {result['notebook']}")
             elif args.command == 'generate-notebooks':
                 from .notebooks import generate_notebooks
                 result = {'jobs': generate_notebooks(config, stage=args.stage)}
             elif args.command == 'import-result':
-                from .execution import import_result
-                result = {'path': str(import_result(config, args.result)), 'status': 'imported'}
+                from .execution import _progress_step, import_result
+                with _progress_step(_print_progress, 'Verify and import notebook result'):
+                    path = import_result(config, args.result)
+                _print_progress(f'Imported result: {path}')
+                result = {'path': str(path), 'status': 'imported'}
             else:
                 if args.id == config.get("encoder_geometry", {}).get("id"):
                     from .encoder_jobs import run_configured_report

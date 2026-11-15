@@ -36,6 +36,48 @@ class PipelineCLITests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual(Path(before["paths"]["source"]), (self.root / self.config["paths"]["source"]).resolve())
 
+    def test_run_progress_uses_stderr_and_summarizes_completed_stages(self):
+        config = json.loads((PROJECT / "configs/experiment.mock.json").read_text(encoding="utf-8"))
+        config["paths"] = {name: name for name in config["paths"]}
+        config["experiment"].update(sample_size=20, test_size=10)
+        self.path.write_text(json.dumps(config), encoding="utf-8")
+        command = ["run", "--config", str(self.path), "--through", "experiment"]
+        for resumed in (False, True):
+            with self.subTest(resumed=resumed), contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                    contextlib.redirect_stderr(io.StringIO()) as stderr:
+                self.assertEqual(main(command), 0)
+                self.assertEqual(json.loads(stdout.getvalue())["status"], "complete")
+                progress = stderr.getvalue()
+                self.assertIn("Experiment mock: checking run state", progress)
+                if resumed:
+                    self.assertIn("Verified manifests for 2 recorded stages", progress)
+                    self.assertNotIn("Build experiment bundle: started", progress)
+                else:
+                    self.assertIn("Build experiment bundle: started", progress)
+                    self.assertIn("Build experiment bundle: completed in", progress)
+
+    def test_notebook_handoff_and_import_keep_json_on_stdout(self):
+        pending = {"status": "waiting", "stage": "training", "model_id": "components", "notebook": "training.ipynb"}
+        with patch("phonetics.execution.run_pipeline", return_value=pending), \
+                contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(main(["run", "--config", str(self.path)]), 0)
+            self.assertEqual(json.loads(stdout.getvalue()), pending)
+            self.assertIn("Notebook ready for components: training.ipynb", stderr.getvalue())
+        with patch("phonetics.execution.import_result", return_value=self.root / "training"), \
+                contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(main(["import-result", "--config", str(self.path), "--result", "result"]), 0)
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "imported")
+            self.assertIn("Verify and import notebook result: started", stderr.getvalue())
+            self.assertIn("Imported result:", stderr.getvalue())
+        with patch("phonetics.execution.import_result", side_effect=ValueError("checksum mismatch")), \
+                contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as result:
+                main(["import-result", "--config", str(self.path), "--result", "result"])
+            self.assertEqual(result.exception.code, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertIn("checksum mismatch", stderr.getvalue())
+            self.assertNotIn("completed", stderr.getvalue())
+
     def test_training_guard_fails_before_importing_torch(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as result:

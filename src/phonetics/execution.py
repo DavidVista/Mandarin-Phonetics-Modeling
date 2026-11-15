@@ -6,14 +6,31 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
+from contextlib import contextmanager
+from time import perf_counter
 
 from .artifacts import sha256_file, write_json, safe_artifact
 from .bundles import content_hash, seal_bundle, staging_directory, validate_bundle
 
 PREPARATION = ('download-sounds', 'prepare-inventory', 'prepare-corpus',
                'prepare-embeddings', 'prepare-data', 'prepare-experiment')
+PREPARATION_LABELS = dict(zip(PREPARATION, (
+    'Download source audio', 'Build sound inventory', 'Export and process corpus',
+    'Prepare acoustic targets', 'Assemble prepared data', 'Build experiment bundle',
+)))
 WORKFLOWS = {'dimsim-distribution', 'dimsim-parser-alignment', 'reference-geometry',
              'training-visualization', 'evaluation-visualization', 'training-report', 'dimsim-human-agreement'}
+
+
+@contextmanager
+def _progress_step(progress, label):
+    if progress is None:
+        yield
+        return
+    progress(f'{label}: started')
+    started = perf_counter()
+    yield
+    progress(f'{label}: completed in {perf_counter() - started:.1f}s')
 
 
 def sdk_files():
@@ -440,7 +457,7 @@ def import_result(config, result_path):
     return target
 
 
-def _prepare_reference_acoustic(config, state, workflow, allow_inference):
+def _prepare_reference_acoustic(config, state, workflow, allow_inference, progress=None):
     from .acoustic import prepare_acoustic_targets, validate_acoustic_targets
 
     params = workflow['parameters']
@@ -453,18 +470,20 @@ def _prepare_reference_acoustic(config, state, workflow, allow_inference):
         return None
     if not target.exists():
         if config['execution']['acoustic'] == 'notebook':
-            state['waiting'] = create_job(config, 'acoustic', inventory, reference=workflow)
-            _write_state(config['paths']['state'], state)
+            with _progress_step(progress, 'Generate Wav2Vec2 Base notebook'):
+                state['waiting'] = create_job(config, 'acoustic', inventory, reference=workflow)
+                _write_state(config['paths']['state'], state)
             return {'status': 'waiting', **state['waiting']}
         if not allow_inference:
             raise PermissionError('reference acoustic inference requires --allow-inference')
-    path = prepare_acoustic_targets(inventory, target, model=params['base_model'], cache_root=config['paths']['cache'])
-    state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
-    _write_state(config['paths']['state'], state)
+    with _progress_step(progress, 'Prepare Wav2Vec2 Base targets'):
+        path = prepare_acoustic_targets(inventory, target, model=params['base_model'], cache_root=config['paths']['cache'])
+        state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+        _write_state(config['paths']['state'], state)
     return None
 
 
-def _run_pipeline_workflow(config, state, group, workflow):
+def _run_pipeline_workflow(config, state, group, workflow, progress=None):
     from .workflows import _inputs, run_workflow, validate_workflow_result, workflow_pins
 
     key = group + ':' + workflow['id']
@@ -479,19 +498,23 @@ def _run_pipeline_workflow(config, state, group, workflow):
             raise ValueError('completed workflow inputs changed')
         return None
     if group == 'visualization' and config['execution']['visualization'] == 'notebook':
-        state['waiting'] = create_job(config, 'visualization', None, workflow=workflow)
-        _write_state(config['paths']['state'], state)
+        with _progress_step(progress, f"Generate notebook for {workflow['id']}"):
+            state['waiting'] = create_job(config, 'visualization', None, workflow=workflow)
+            _write_state(config['paths']['state'], state)
         return {'status': 'waiting', **state['waiting']}
-    path = run_workflow(workflow, config['paths']['reports'], expected_input_pins=expected)
-    state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
-    _write_state(config['paths']['state'], state)
+    with _progress_step(progress, f"Report {workflow['id']}"):
+        path = run_workflow(workflow, config['paths']['reports'], expected_input_pins=expected)
+        state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+        _write_state(config['paths']['state'], state)
     return None
 
 
-def run_pipeline(config, *, through='visualization', allow_inference=False, allow_training=False):
+def run_pipeline(config, *, through='visualization', allow_inference=False, allow_training=False, progress=None):
     from .pipeline import run_stage
     if through not in ('experiment', 'training', 'analysis', 'visualization'):
         raise ValueError('invalid final pipeline stage')
+    if progress is not None:
+        progress(f"Experiment {config['experiment_id']}: checking run state")
     state = load_state(config)
     if state['waiting']:
         validate_job(state['waiting']['path'])
@@ -499,6 +522,8 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
     for record in state['completed'].values():
         if _manifest_pin(record['path']) != record['manifest_sha256']:
             raise ValueError('a completed stage manifest changed')
+    if progress is not None and state['completed']:
+        progress(f"Verified manifests for {len(state['completed'])} recorded stages")
     preparation = PREPARATION[-2:] if config['execution'].get('preparation') == 'mock' else PREPARATION
     for stage in preparation:
         if stage == 'prepare-embeddings' and stage in state['completed']:
@@ -507,17 +532,20 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
             validate_acoustic_targets(state['completed'][stage]['path'])
             continue
         if stage == 'prepare-embeddings' and config['acoustic']['existing_bundle'] is None and config['execution']['acoustic'] == 'notebook':
-            state['waiting'] = create_job(config, 'acoustic', config['paths']['inventory'])
-            _write_state(config['paths']['state'], state)
+            with _progress_step(progress, 'Generate acoustic notebook'):
+                state['waiting'] = create_job(config, 'acoustic', config['paths']['inventory'])
+                _write_state(config['paths']['state'], state)
             return {'status': 'waiting', **state['waiting']}
-        path = run_stage(config, stage, allow_inference=allow_inference)
-        state['completed'][stage] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
-        _write_state(config['paths']['state'], state)
+        with _progress_step(progress if stage not in state['completed'] else None, PREPARATION_LABELS[stage]):
+            path = run_stage(config, stage, allow_inference=allow_inference)
+            state['completed'][stage] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+            _write_state(config['paths']['state'], state)
     if through == 'experiment':
         return {'status': 'complete', 'through': through, 'path': state['completed']['prepare-experiment']['path']}
     experiment = Path(config['paths']['experiments']) / config['experiment_id']
     experiment_pin = completed_manifest(state, 'prepare-experiment', experiment)
-    for model_id in config['experiment']['model_ids']:
+    models = config['experiment']['model_ids']
+    for index, model_id in enumerate(models, start=1):
         key = 'train:' + model_id
         if key in state['completed']:
             job = {'parameters': {'model_id': model_id, 'run_id': config['execution']['run_id']},
@@ -525,35 +553,39 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
             validate_training_result(state['completed'][key]['path'], job)
             continue
         if config['execution']['training'] == 'notebook':
-            state['waiting'] = create_job(config, 'training', experiment, model_id=model_id)
-            _write_state(config['paths']['state'], state)
+            with _progress_step(progress, f'Generate training notebook {index}/{len(models)} ({model_id})'):
+                state['waiting'] = create_job(config, 'training', experiment, model_id=model_id)
+                _write_state(config['paths']['state'], state)
             return {'status': 'waiting', **state['waiting']}
         if not allow_training:
             raise PermissionError('local training requires --allow-training')
         from .training import train_experiment
-        result = train_experiment(experiment, model_id=model_id, runs_root=config['paths']['runs'],
-                                  device=config['execution']['training_device'], run_id=config['execution']['run_id'],
-                                  expected_manifest_sha256=experiment_pin)
-        path = result['run_dir']
-        state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
-        _write_state(config['paths']['state'], state)
+        with _progress_step(progress, f'Train model {index}/{len(models)} ({model_id})'):
+            result = train_experiment(experiment, model_id=model_id, runs_root=config['paths']['runs'],
+                                      device=config['execution']['training_device'], run_id=config['execution']['run_id'],
+                                      expected_manifest_sha256=experiment_pin)
+            path = result['run_dir']
+            state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+            _write_state(config['paths']['state'], state)
     for workflow in config['analysis']:
         if workflow['workflow'] == 'training-report':
-            _run_pipeline_workflow(config, state, 'analysis', workflow)
+            _run_pipeline_workflow(config, state, 'analysis', workflow, progress)
     if through == 'training':
         return {'status': 'complete', 'through': through}
     managed_evaluation = 'evaluation' in config and config['evaluation']['experiment_manifest_sha256'] is None
     if managed_evaluation:
-        prepare_configured_evaluation(config, state)
+        with _progress_step(progress if 'prepare-evaluation' not in state['completed'] else None,
+                            'Build evaluation bundle'):
+            prepare_configured_evaluation(config, state)
     for group in ('analysis', 'visualization'):
         for workflow in config[group]:
             if workflow['workflow'] == 'training-report':
                 continue
             if workflow['workflow'] == 'reference-geometry' and 'base_model' in workflow['parameters']:
-                waiting = _prepare_reference_acoustic(config, state, workflow, allow_inference)
+                waiting = _prepare_reference_acoustic(config, state, workflow, allow_inference, progress)
                 if waiting:
                     return waiting
-            waiting = _run_pipeline_workflow(config, state, group, workflow)
+            waiting = _run_pipeline_workflow(config, state, group, workflow, progress)
             if waiting:
                 return waiting
         if through == group:
@@ -562,7 +594,8 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
         geometry = config['encoder_geometry']
         if geometry.get('execution', 'local') == 'notebook':
             from .notebooks import generate_encoder_notebooks
-            notebook, = generate_encoder_notebooks(config, state=state)
+            with _progress_step(progress, 'Generate encoder geometry notebook'):
+                notebook, = generate_encoder_notebooks(config, state=state)
             return {'status': 'notebook-ready', **notebook}
         from .encoder_jobs import run_configured_report
         target = Path(config['paths']['reports']) / geometry['id']
@@ -571,7 +604,8 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
             completed_manifest(state, key, target)
             validate_bundle(target, 'encoder_geometry_report')
         else:
-            path = run_configured_report(config, allow_execution=geometry.get('allow_extraction', False), state=state)
-            state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
-            _write_state(config['paths']['state'], state)
+            with _progress_step(progress, 'Run encoder geometry'):
+                path = run_configured_report(config, allow_execution=geometry.get('allow_extraction', False), state=state)
+                state['completed'][key] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
+                _write_state(config['paths']['state'], state)
     return {'status': 'complete', 'through': through}
