@@ -27,6 +27,7 @@ class PipelineNotebookTests(unittest.TestCase):
     def test_schema_pins_order_and_isolated_sdk_import(self):
         import nbformat
         job = create_job(self.config, 'training', self.experiment, model_id='syllable')
+        self.assertLess(Path(job['notebook']).stat().st_size, 1_000_000)
         notebook = nbformat.read(job['notebook'], as_version=4)
         nbformat.validate(notebook)
         cells = {c.id: c.source for c in notebook.cells}
@@ -38,7 +39,11 @@ class PipelineNotebookTests(unittest.TestCase):
                 self.assertNotIn('RUN_TRAINING', cell.source)
         self.assertIn(validate_job(job['path'])['input_manifest_sha256'], cells['configuration'])
         self.assertIn('allow_execution=True', cells['run'])
-        script = cells['sdk'] + '\n' + cells['configuration'] + '\nfrom phonetics.cli import main\nmain(["--help"])\nassert "torch" not in sys.modules\n'
+        script = cells['sdk'] + '''
+restored = {p.relative_to(SDK_ROOT / "phonetics").as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in (SDK_ROOT / "phonetics").rglob("*") if p.is_file()}
+assert restored == EXPECTED_SOURCE_SHA256
+''' + cells['configuration'] + '\nfrom phonetics.cli import main\nmain(["--help"])\nassert "torch" not in sys.modules\n'
         # A script file avoids Windows command-line length limits.
         path = self.root / 'bootstrap.py'
         path.write_text(script, encoding='utf-8')
@@ -46,6 +51,18 @@ class PipelineNotebookTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('generate-notebooks', result.stdout)
+
+    def test_compressed_sdk_rejects_payload_with_changed_source(self):
+        from phonetics.execution import sdk_hashes
+        from phonetics.notebooks import _sdk_bootstrap
+
+        hashes = sdk_hashes({'__init__.py': '# original\n'})
+        script = self.root / 'mismatched-bootstrap.py'
+        script.write_text(_sdk_bootstrap({'__init__.py': '# replaced\n'}, hashes), encoding='utf-8')
+        result = subprocess.run([sys.executable, '-S', str(script)], cwd=self.root,
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SDK checksum mismatch: __init__.py', result.stderr)
 
     def test_tampering_and_deterministic_regeneration(self):
         job = create_job(self.config, 'training', self.experiment, model_id='syllable')

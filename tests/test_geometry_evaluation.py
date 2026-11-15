@@ -157,6 +157,7 @@ class GeometryEvaluationTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), original)
         self.assertTrue((fixture.root / "reports/training-report/report.md").is_file())
         notebook, = generate_encoder_notebooks(loaded)
+        self.assertLess(Path(notebook["notebook"]).stat().st_size, 1_000_000)
         if mode == "notebook":
             self.assertEqual(notebook["notebook"], result["notebook"])
         cells = json.loads(Path(notebook["notebook"]).read_text(encoding="utf-8"))["cells"]

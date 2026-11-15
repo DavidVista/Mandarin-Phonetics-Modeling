@@ -1,6 +1,8 @@
 """Generate optional notebook clients from configured jobs and current SDK files."""
 from __future__ import annotations
 
+import base64
+import gzip
 import json
 from pathlib import Path
 
@@ -15,6 +17,33 @@ def _cell(kind, source, identifier):
     if kind == 'code':
         value.update(execution_count=None, outputs=[])
     return value
+
+
+def _sdk_bootstrap(sources, hashes):
+    payload = json.dumps(sources, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    encoded = base64.b64encode(gzip.compress(payload, mtime=0)).decode("ascii")
+    return f'''import base64, gzip, hashlib, json, shutil, sys, tempfile
+from pathlib import Path
+if "numpy" in sys.modules and sys.modules["numpy"].__version__ != "2.1.3":
+    raise RuntimeError("Restart the kernel after installing NumPy 2.1.3")
+if any(name == "phonetics" or name.startswith("phonetics.") for name in sys.modules):
+    raise RuntimeError("Restart the kernel before loading the generated SDK")
+SDK_PAYLOAD = {encoded!r}
+EXPECTED_SOURCE_SHA256 = {hashes!r}
+sources = json.loads(gzip.decompress(base64.b64decode(SDK_PAYLOAD)))
+if sources.keys() != EXPECTED_SOURCE_SHA256.keys():
+    raise RuntimeError("SDK file inventory mismatch")
+SDK_TEMP = tempfile.TemporaryDirectory(prefix="phonetics-sdk-", dir=Path.cwd())
+SDK_ROOT = Path(SDK_TEMP.name)
+for name, body in sources.items():
+    data = body.encode("utf-8")
+    if hashlib.sha256(data).hexdigest() != EXPECTED_SOURCE_SHA256[name]:
+        raise RuntimeError(f"SDK checksum mismatch: {{name}}")
+    path = SDK_ROOT / "phonetics" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+sys.path.insert(0, str(SDK_ROOT))
+'''
 
 
 def render_job_notebook(job_path, *, install_dependencies=True, _sources=None):
@@ -43,24 +72,7 @@ for requirement in REQUIREMENTS:
     if version(name) != expected:
         raise RuntimeError(f"Required {requirement}")
 '''
-    bootstrap = '''import hashlib, json, sys, tempfile
-from pathlib import Path
-if "numpy" in sys.modules and sys.modules["numpy"].__version__ != "2.1.3":
-    raise RuntimeError("Restart the kernel after installing NumPy 2.1.3")
-if any(name == "phonetics" or name.startswith("phonetics.") for name in sys.modules):
-    raise RuntimeError("Restart the kernel before loading the generated SDK")
-SDK_ROOT = Path(tempfile.mkdtemp(prefix="phonetics-sdk-", dir=Path.cwd()))
-'''
-    bootstrap += f'SOURCES = {sources!r}\n'
-    bootstrap += f'EXPECTED_SOURCE_SHA256 = {job["sources"]!r}\n'
-    bootstrap += '''for name, body in SOURCES.items():
-    path = SDK_ROOT / "phonetics" / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8", newline="\\n")
-    if hashlib.sha256(path.read_bytes()).hexdigest() != EXPECTED_SOURCE_SHA256[name]:
-        raise RuntimeError(f"SDK checksum mismatch: {name}")
-sys.path.insert(0, str(SDK_ROOT))
-'''
+    bootstrap = _sdk_bootstrap(sources, job["sources"])
     select = f'''JOB_ID = {job_id!r}
 EXPECTED_INPUT_MANIFEST_SHA256 = {job['input_manifest_sha256']!r}
 LOCAL_JOB = Path({str(job_path)!r})
@@ -202,21 +214,7 @@ for requirement in REQUIREMENTS:
     if version(name) != expected:
         raise RuntimeError(f"Required {requirement}")
 """
-    sdk = f"""import hashlib, shutil, sys, tempfile
-from pathlib import Path
-if any(name == "phonetics" or name.startswith("phonetics.") for name in sys.modules):
-    raise RuntimeError("Restart the kernel before loading the generated SDK")
-SDK_ROOT = Path(tempfile.mkdtemp(prefix="phonetics-sdk-", dir=Path.cwd()))
-SOURCES = {sources!r}
-HASHES = {hashes!r}
-for name, source in SOURCES.items():
-    path = SDK_ROOT / "phonetics" / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(source, encoding="utf-8", newline="\\n")
-    if hashlib.sha256(path.read_bytes()).hexdigest() != HASHES[name]:
-        raise RuntimeError(f"SDK checksum mismatch: {{name}}")
-sys.path.insert(0, str(SDK_ROOT))
-"""
+    sdk = _sdk_bootstrap(sources, hashes)
 
     notebook_spec = {key: spec[key] for key in ("id", "device", "batch_size", "tolerance")}
     notebook_spec["diagnostics"] = spec.get("diagnostics", False)
