@@ -158,7 +158,7 @@ OUTPUT_PATH = Path.cwd() / "results" / JOB_ID
 print("Experiment:", INPUT_PATH, "SHA256:", EXPECTED_INPUT_MANIFEST_SHA256)
 '''
     if bert:
-        select += '\nimport os\nBERT_SNAPSHOT = ""  # Set to the attached BERT snapshot directory.\n'
+        select += '\nimport os\nBERT_SNAPSHOT = ""  # Optional path to a pinned snapshot for offline use.\n'
         execute += 'if BERT_SNAPSHOT:\n    os.environ["PHONETICS_BERT_SNAPSHOT"] = BERT_SNAPSHOT\n'
     if stage in ('acoustic', 'training'):
         execute += '''from importlib.metadata import version
@@ -271,7 +271,7 @@ FONT_FILES = []
 # FONT_FILES = ["/kaggle/input/your-fonts/arial.ttf", "/kaggle/input/your-fonts/arialbd.ttf"]
 """
     if bert:
-        settings += '\nimport os\nBERT_SNAPSHOT = ""  # Set to the attached BERT snapshot directory.\n'
+        settings += '\nimport os\nBERT_SNAPSHOT = ""  # Optional path to a pinned snapshot for offline use.\n'
     execution = 'if BERT_SNAPSHOT:\n    os.environ["PHONETICS_BERT_SNAPSHOT"] = BERT_SNAPSHOT\n' if bert else ''
     execution += """from matplotlib import font_manager
 from phonetics.encoder_jobs import run_encoder_workflow
@@ -304,7 +304,7 @@ print(report_zip)
         "as a ZIP and removes temporary hidden states when the computation ends."
     )
     if bert:
-        instructions += " Attach the pinned BERT snapshot and set BERT_SNAPSHOT before running."
+        instructions += " BERT downloads the pinned tokenizer and config when no snapshot path is supplied."
     document = {
         "nbformat": 4, "nbformat_minor": 5,
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},

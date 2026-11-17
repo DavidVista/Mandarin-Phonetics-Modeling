@@ -22,7 +22,8 @@ import torch
 from .artifacts import sha256_file, write_json
 from .data import create_loaders
 from .experiment import SELECTION_RULE, load_experiment, select_seed, training_epoch_limit
-from .bert import BertInputs, is_bert
+from .bert import is_bert
+from .bert_snapshot import load_bert_inputs
 from .metrics import batch_objective, finalize_epoch
 from .model import BertEncoder, build_encoder, shared_encoder_sha256
 from .objectives import canonical_model_id, parse_model_id
@@ -191,7 +192,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
     bert_inputs = None
     bert_rows = {}
     if is_bert(config):
-        bert_inputs = BertInputs(config["architecture"]["encoder"], pretrained=True)
+        bert_inputs = load_bert_inputs(config["architecture"]["encoder"], pretrained=True)
         splits = experiment["splits"]
         populations = [("test", splits["test"])]
         populations.extend((f"seed {seed} {split}", ids) for seed, partitions in splits["seeds"].items()
@@ -228,7 +229,8 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
         "seed_results": [], "summary": None, "artifacts": {},
     }
     if bert_inputs is not None:
-        manifest["code_sha256"]["bert.py"] = sha256_file(Path(__file__).with_name("bert.py"))
+        for name in ("bert.py", "bert_snapshot.py"):
+            manifest["code_sha256"][name] = sha256_file(Path(__file__).with_name(name))
         manifest["runtime"].update({name: importlib.metadata.version(name) for name in ("transformers", "tokenizers")})
     write_json(run_dir / "manifest.json", manifest)
     seed_results = []

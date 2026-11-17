@@ -15,7 +15,8 @@ from ..bundles import content_hash, seal_bundle, staging_directory, validate_bun
 from ..architecture import BERT_REQUIREMENTS
 from ..experiment import SCHEMA_VERSION, SELECTION_RULE, load_common_test
 from ..objectives import canonical_model_id, parse_model_id
-from ..bert import BertInputs, is_bert
+from ..bert import is_bert
+from ..bert_snapshot import load_bert_inputs
 from .geometry_bundle import validate_geometry_bundle
 
 EXTRACTION_TYPE = "encoder_prehead_export"
@@ -133,7 +134,7 @@ def expected_unknown_positions(root, pin, occurrences, test_pin):
         test_ids, samples = load_common_test(root, expected_manifest_sha256=pin)
         if content_hash(test_ids) != test_pin:
             raise ValueError("BERT evaluation test identity differs")
-        rows = BertInputs(config["architecture"]["encoder"]).prepare(samples, split="test")
+        rows = load_bert_inputs(config["architecture"]["encoder"]).prepare(samples, split="test")
         bert_unknown = np.asarray([rows[row["sample_id"]][2][row["character_position"]] for row in occurrences],
                                   dtype=bool)
     for seed in seeds:
@@ -172,7 +173,7 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
     labels = json.loads(pinned_bytes(experiment_root, "labels.json", experiment["artifacts"]["labels.json"]))
     if content_hash(config) != content_hash(training["config"]):
         raise ValueError("training and experiment configurations differ")
-    bert_inputs = BertInputs(config["architecture"]["encoder"]) if is_bert(config) else None
+    bert_inputs = load_bert_inputs(config["architecture"]["encoder"]) if is_bert(config) else None
     bert_rows = bert_inputs.prepare(samples, split="test") if bert_inputs is not None else None
     sample_map = {sample["sample_id"]: sample for sample in samples}
     by_sample = defaultdict(list)

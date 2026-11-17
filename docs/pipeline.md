@@ -56,7 +56,7 @@ For a new experiment, replace `experiment.architecture.encoder` with the followi
 }
 ```
 
-Download those files from the [pinned snapshot](https://huggingface.co/google-bert/bert-base-chinese/tree/8f23c25b06e129b6c986331a13d8d025a92cf0ea). Use the `bert` dependency extra for local training, set `PHONETICS_BERT_SNAPSHOT` to the snapshot directory, or attach the snapshot as an input and set `BERT_SNAPSHOT` in the generated notebook. Evaluation and checkpoint restoration need the model config and tokenizer files. Fine-tuning also needs the original weights.
+BERT downloads the required files from the pinned revision and verifies their SHA256 values. Use the `bert` dependency extra for local training. For offline use, set `PHONETICS_BERT_SNAPSHOT` to a directory of verified files, or attach that directory and set `BERT_SNAPSHOT` in the generated notebook. Evaluation and checkpoint restoration need the model config and tokenizer files. Fine-tuning also needs the original weights.
 
 The BERT adapter validates a one-to-one token mapping for every selected character before training. It rejects unalignable sentences and sequences beyond the model limit. Special tokens participate in attention and are excluded from the position-aligned outputs for the heads and evaluation. Unknown target positions are determined by the pinned BERT tokenizer.
 

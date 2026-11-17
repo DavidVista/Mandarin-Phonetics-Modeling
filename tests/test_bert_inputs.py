@@ -1,13 +1,53 @@
 """CPU-only checks for the BERT encoder configuration and token alignment."""
+import hashlib
+import os
+from pathlib import Path
+import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from phonetics.architecture import BERT_FILES, BERT_MODEL_ID, BERT_REVISION
 from phonetics.bert import BertInputs
+from phonetics.bert_snapshot import load_bert_inputs
 from phonetics.experiment import _validate_config, default_experiment_config
 
 
 class BertInputTests(unittest.TestCase):
+    def test_downloads_pinned_files_and_reuses_verified_snapshot(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            files = {"config.json": b"config", "model.safetensors": b"weights"}
+            spec = {"model_id": BERT_MODEL_ID, "revision": BERT_REVISION,
+                    "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
+            requests = []
+
+            def download(*, repo_id, revision, allow_patterns, local_dir):
+                requests.append((repo_id, revision, allow_patterns))
+                for name in allow_patterns:
+                    (local_dir / name).write_bytes(files[name])
+
+            with (patch("phonetics.bert_snapshot.validate_bert_snapshot"),
+                  patch("phonetics.bert_snapshot.BertInputs",
+                        side_effect=lambda *a, **k: Path(os.environ["PHONETICS_BERT_SNAPSHOT"])),
+                  patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=download)}),
+                  patch.dict(os.environ, {"PHONETICS_BERT_SNAPSHOT": "", "PHONETICS_BERT_CACHE": directory})):
+                tokenizer = load_bert_inputs(spec)
+                self.assertFalse((tokenizer / "model.safetensors").exists())
+                full = load_bert_inputs(spec, pretrained=True)
+                self.assertEqual(load_bert_inputs(spec), full)
+                self.assertEqual(load_bert_inputs(spec, pretrained=True), full)
+                self.assertEqual(os.environ["PHONETICS_BERT_SNAPSHOT"], "")
+                os.environ["PHONETICS_BERT_SNAPSHOT"] = str(tokenizer)
+                self.assertEqual(load_bert_inputs(spec), tokenizer)
+                self.assertEqual(requests, [(BERT_MODEL_ID, BERT_REVISION, ["config.json"]),
+                                            (BERT_MODEL_ID, BERT_REVISION, list(files))])
+                os.environ["PHONETICS_BERT_SNAPSHOT"] = ""
+                files["config.json"] = b"modified"
+                os.environ["PHONETICS_BERT_CACHE"] = str(Path(directory) / "corrupt")
+                with self.assertRaisesRegex(ValueError, "checksum mismatch: config.json"):
+                    load_bert_inputs(spec)
+
     def test_accepts_pinned_encoder_and_rejects_missing_tokenizer_hash(self):
         config = default_experiment_config()
         encoder = {"type": "bert", "model_id": BERT_MODEL_ID,
