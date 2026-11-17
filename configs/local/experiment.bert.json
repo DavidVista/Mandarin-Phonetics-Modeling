@@ -97,43 +97,6 @@
       "id": "bert-training",
       "workflow": "training-report",
       "parameters": {}
-    },
-    {
-      "id": "bert-reference-geometry",
-      "workflow": "reference-geometry",
-      "parameters": {
-        "base_root": "../../datasets/pinyin-embeddings/reference-targets/local",
-        "base_model": {
-          "device": "cpu",
-          "dtype": "float32",
-          "id": "facebook/wav2vec2-base",
-          "layer": -1,
-          "mono": true,
-          "padding": "none",
-          "pooling": "mean_all",
-          "processor": "facebook/wav2vec2-base",
-          "revision": "0b5b8e868dd84f03fd87d01f9c4ff0f080fecfe8",
-          "sample_rate": 16000
-        }
-      }
-    },
-    {
-      "id": "bert-dimsim-distribution",
-      "workflow": "dimsim-distribution",
-      "parameters": {}
-    },
-    {
-      "id": "bert-dimsim-parsing",
-      "workflow": "dimsim-parser-alignment",
-      "parameters": {}
-    },
-    {
-      "id": "bert-dimsim-human-agreement",
-      "workflow": "dimsim-human-agreement",
-      "parameters": {
-        "input_root": "../../datasets/dimsim-human-agreement/li-2022-v1",
-        "source_sha256": "66699e0adce2e792aef3faa2975421653ca4f0caba53b08dad0ca5c19fe78250"
-      }
     }
   ],
   "notebooks": {
