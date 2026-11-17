@@ -290,7 +290,10 @@ are compared on the same strictly ordered triples of distinct syllables.
 Keep the generated report directory together when opening `encoder_geometry.html`.
 It loads the selected seed view locally and displays DIMSIM with two selected
 models. The across-seeds view averages matrices and displays seedwise metric
-means and sample SD. The five static distance maps show mean distances.
+means and sample SD. The static distance maps show mean distances for each model.
+The residual histograms in `figures/` are exported in PNG and EPS. They average
+seedwise bin proportions and annotate the lowest and highest 5% per distinct
+pair mask on the primary inventory, including ties at the cutoffs.
 
 ## Visualization
 

@@ -4,6 +4,8 @@ import json
 
 from .core import DISTANCE_COLORS
 
+SIGNED_COLORS = ("#B65245", "#FFFFFF", "#68518E")
+
 PAGE = r"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mandarin syllable distance maps</title>
 <style>
@@ -50,7 +52,7 @@ tbody tr:nth-child(even){background:#FAF7FC}summary{color:var(--accent);font-wei
 <details><summary>Protocol and sources</summary><p>Evaluation input <code>@@evaluation_id@@</code>. The inventory uses the shared test split with strict nonempty initials and @@excluded@@ configured exclusions. The report uses the original DIMSIM reference and cosine distances from matching audio for both wav2vec2 systems. Comparison tolerance is @@tolerance@@.</p><p>Component matching predicts that replacing selected components with the anchor values, while holding all other candidate components fixed, does not increase dissimilarity. This structural criterion motivates controlled comparisons; it is not an empirically established universal law of Mandarin perception. One-step, two-step and full-match transitions remain separately selectable. Main summaries weight each unique triple equally. Anchor histograms summarize within-anchor win rates.</p><p>Sources: <a href="https://doi.org/10.1037/0033-295X.84.4.327">Tversky (1977), Features of Similarity</a> motivates feature-based monotonicity. <a href="https://doi.org/10.1080/01690960701728261">Tong, Francis &amp; Gandour (2008)</a> documents interactions among Mandarin segmental and tonal processing. <a href="https://aclanthology.org/K18-1043/">Li et al. (2018), DIMSIM</a> supplies the computational reference.</p><p>The exploratory protocol was developed while inspecting these wav2vec2 systems. Interpretation is conditional on the selected inventory, stored representations and reference implementation.</p></details><p class="hint">@@syllables@@ shared tone-marked syllables after applying the evaluation inventory filter. In Distance mode, lighter cells indicate smaller distances. The two wav2vec2 panels share a cosine distance scale.</p>
 <script>
 const distanceColors=__DISTANCE_COLORS__;
-const signedColors=['#B65245','#FFFFFF','#68518E'];
+const signedColors=__SIGNED_COLORS__;
 const gradient=colors=>'linear-gradient(90deg,'+colors.join(',')+')';
 function paletteLookup(colors){
  const stops=colors.map(hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)));
@@ -95,7 +97,8 @@ let agreeing=false, agreementMaps=null, agreementSupport=null;
 const agreementCache=new Map();
 let ranked=false,x=0,y=0,span=N,drag=null,hover=null;
 const panels=document.querySelector('#panels'),readout=document.querySelector('#readout');
-const views=['DIMSIM','wav2vec2 zh-cn','wav2vec2 base'].map((name,k)=>{
+const systemNames=['DIMSIM','wav2vec2 zh-cn','wav2vec2 base'];
+const views=systemNames.map((name,k)=>{
  const div=document.createElement('section');
  div.innerHTML='<h2>'+name+'</h2><canvas aria-label="'+name+' distance heatmap"></canvas><div class="extent"></div><div class="legend"></div><div class="limits"><span>0</span><span>'+ (k?'Cosine distance':'DIMSIM distance')+'</span><span>'+maxima[k].toFixed(3)+'</span></div>';
  panels.append(div);
@@ -391,14 +394,14 @@ for(const {canvas:c} of views){
    if(agreeing){
     const cell=row*N+j,n=agreementSupport[cell];
     const pct=k=>(100*agreementMaps[k][cell]).toFixed(1)+'%';
-    readout.textContent=labels[row]+' → '+labels[j]+(!n?' · No comparison':' · '+n+' alternatives · zh-cn '+pct(0)+' · base '+pct(1));
+    readout.textContent=labels[row]+' → '+labels[j]+(!n?' · No comparison':' · '+n+' alternatives · '+systemNames[1]+' '+pct(0)+' · '+systemNames[2]+' '+pct(1));
     draw();return;
    }
    if(effect&&!ranked){
-    const cell=row*N+j,systems=['DIMSIM','zh-cn','base'],detail=[];
+    const cell=row*N+j,detail=[];
     const own=overlapCode(row,j);
     function add(low,high,role,support,measure){
-     const line=systems.map((name,k)=>{
+     const line=systemNames.map((name,k)=>{
       const [delta,w,t]=measure(k);
       if(!winMode)return name+' '+(delta>=0?'+':'')+delta.toFixed(5)+' (n='+support+')';
       return name+' '+w+' win credit / '+support+' ('+(100*(w+.5*t)/support).toFixed(1)+'%)';
@@ -411,7 +414,10 @@ for(const {canvas:c} of views){
     }
     readout.textContent=labels[row]+' → '+labels[j]+' · '+(detail.join(' | ')||'No matched comparison');
     draw();return;
-   } else readout.textContent=labels[row]+' → '+labels[j]+(ranked?' · rank '+(col+1):'')+' · DIMSIM '+mat[0][row*N+j].toFixed(5)+' · zh-cn '+mat[1][row*N+j].toFixed(5)+' · base '+mat[2][row*N+j].toFixed(5);
+   } else {
+    const distances=systemNames.map((name,k)=>name+' '+mat[k][row*N+j].toFixed(5));
+    readout.textContent=labels[row]+' → '+labels[j]+(ranked?' · rank '+(col+1):'')+' · '+distances.join(' · ');
+   }
   }draw();
  });
  c.addEventListener('lostpointercapture',()=>{drag=null;});
@@ -514,4 +520,6 @@ function renderProfileSteps(){
 }
 document.querySelector('#profile-step-model').onchange=renderProfileSteps;
 window.addEventListener('resize',draw);rebuild();
-</script></html>""".replace("__DISTANCE_COLORS__", json.dumps(DISTANCE_COLORS))
+</script></html>""".replace("__DISTANCE_COLORS__", json.dumps(DISTANCE_COLORS)).replace(
+    "__SIGNED_COLORS__", json.dumps(SIGNED_COLORS)
+)

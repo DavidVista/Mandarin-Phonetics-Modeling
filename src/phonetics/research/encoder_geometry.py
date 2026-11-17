@@ -14,7 +14,9 @@ from ..evaluation.encoder_extraction import expected_unknown_positions, load_exp
 from ..evaluation.geometry_bundle import PAIRING_POLICY
 from ..evaluation.reference_geometry import component_masks, evaluate_geometry
 from ..visualization.encoder_geometry import rank_metrics, write_view, write_page
+from ..visualization.core import load_protocol
 from ..visualization.reference_geometry import render_distance_maps
+from ..visualization.residual_histograms import FIGURE_ID, render_residual_histograms, residual_histogram_seed
 from .reference_geometry import _read_reference
 from . import encoder_diagnostics as diagnostic
 
@@ -193,6 +195,11 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
     generators = {model: read_export(model) for model in models}
     all_tables = defaultdict(list)
     coverage = []
+    protocol = load_protocol()
+    histogram_spec = protocol.figure(FIGURE_ID)
+    histogram_edges = np.linspace(histogram_spec["edges_start"], histogram_spec["edges_stop"],
+                                  histogram_spec["edges_count"])
+    histogram_seeds = []
     matrix_sum = None
     map_sum = {}
     with staging_directory(target) as stage:
@@ -269,6 +276,7 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                                                                         for label in labels),
                                  "valid_full_matches": int(full_match.sum())})
             distances = np.stack(distances)
+            histogram_seeds.append(residual_histogram_seed(distances[1:], mask, labels, retained, histogram_edges))
             comparisons = np.concatenate((distances, baseline[None]))
             tables, maps = evaluate_geometry(labels, component_rows, comparisons,
                                              tolerance=tolerance, systems=(*systems, BASELINE), contextual=True)
@@ -332,5 +340,14 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                                          "evaluation_manifest_sha256": pins["evaluation"],
                                          "hidden_export_manifests": export_pins,
                                          "aggregation": "mean distance across seeds"})
+        render_residual_histograms(
+            stage / "figures", models, histogram_seeds, protocol=protocol,
+            provenance={"source_digest": content_hash(report_identity),
+                        "evaluation_manifest_sha256": pins["evaluation"],
+                        "hidden_export_manifests": export_pins,
+                        "aggregation": "mean of seedwise normalized histograms and tail shares",
+                        "tail_fraction": .05, "tail_cutoff_ties": "include",
+                        "dominant_character_fraction_exclusive": .5},
+        )
         seal_bundle(stage, "encoder_geometry_report", report_identity)
     return target

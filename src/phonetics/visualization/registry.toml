@@ -411,6 +411,21 @@ color = "#68518E"
 linestyle = "-"
 marker = "o"
 
+[figures.encoder_residual_histograms]
+status = "approved"
+kind = "histogram"
+name = "Cosine similarity residuals by overlap mask"
+xlabel = "Cosine similarity residual"
+ylabel = "Share per bin"
+series = ["encoder"]
+order = ["encoder"]
+scale = "linear"
+density = false
+ylim = [0.0]
+edges_start = -2.0
+edges_stop = 2.0
+edges_count = 161
+
 [figures.encoder_cosine_distances]
 status = "approved"
 kind = "distance_map"

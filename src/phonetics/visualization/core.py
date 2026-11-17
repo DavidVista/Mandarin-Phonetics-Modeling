@@ -151,16 +151,17 @@ def export_figure(fig,output_dir,stem,figure_id,p,*,scientific_provenance,overwr
  fig.canvas.draw();renderer=fig.canvas.get_renderer();box=fig.get_window_extent(renderer)
  from matplotlib.legend import Legend
  from matplotlib.text import Text
- ticks=set()
+ ticks=set();tick_labels=set()
  for ax in fig.axes:
   for axis in (ax.xaxis,ax.yaxis):
+   tick_labels.update(axis.get_ticklabels())
    lo,hi=sorted(axis.get_view_interval());tol=max(1,abs(hi-lo))*1e-12
    for tick in axis._update_ticks():
     loc=tick.get_loc()
     if math.isfinite(loc) and lo-tol<=loc<=hi+tol:
      ticks.update(x for x in (tick.label1,tick.label2) if x.get_visible())
  for a in fig.findobj(lambda x:isinstance(x,(Text,Legend))):
-  if isinstance(a,Text) and a not in ticks and any(a is z for ax in fig.axes for z in ax.get_xticklabels()+ax.get_yticklabels()):continue
+  if a in tick_labels and a not in ticks:continue
   if not a.get_visible():continue
   b=a.get_window_extent(renderer)
   if b.width and b.height and (b.x0<box.x0-1 or b.y0<box.y0-1 or b.x1>box.x1+1 or b.y1>box.y1+1):raise VisualizationError("Visible text or legend is clipped")

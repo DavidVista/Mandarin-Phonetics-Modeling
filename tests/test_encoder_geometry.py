@@ -197,7 +197,16 @@ class EncoderGeometryTests(unittest.TestCase):
             result = run_encoder_geometry(**arguments)
         validate_bundle(result, "encoder_geometry_report")
         self.assertEqual(len(list((result / "views").glob("*.js"))), len(seeds) + 1)
-        self.assertEqual(len(list((result / "figures").glob("*.png"))), len(models))
+        self.assertEqual(len(list((result / "figures").glob("*.png"))), len(models) + 1)
+        figure = result / "figures" / "residual-histograms-by-mask"
+        self.assertTrue(figure.with_suffix(".png").read_bytes().startswith(b"\x89PNG"))
+        self.assertTrue(figure.with_suffix(".eps").read_bytes().startswith(b"%!PS-Adobe"))
+        metadata = json.loads(figure.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["scientific_provenance"]["tail_cutoff_ties"], "include")
+        order = metadata["resolved_data"]["models"]
+        self.assertEqual(set(order), set(models))
+        if "components-acoustic-lambda-3" in models:
+            self.assertLess(order.index("components-acoustic-lambda-3"), order.index("components-acoustic-lambda-10"))
         self.assertIn("planned_triples", (result / "tables/controlled_match.csv").read_text())
         self.assertIn("valid_full_matches", (result / "tables/coverage.csv").read_text())
         self.assertIn("Component mismatch count", (result / "tables/pairwise_spearman.csv").read_text())

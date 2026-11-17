@@ -120,20 +120,22 @@ def _encoder_template(models):
     replacements = {
         "REFERENCE GEOMETRY": "ENCODER GEOMETRY",
         "Mandarin syllable distance maps": "Encoder geometry",
-        "wav2vec2 zh-cn": "@@right_name@@",
-        "wav2vec2 base": "@@left_name@@",
-        "systems=['DIMSIM','zh-cn','base']": "systems=['DIMSIM','@@right_name@@','@@left_name@@']",
-        "zh-cn "+chr(39): "@@right_name@@ "+chr(39),
-        "base "+chr(39): "@@left_name@@ "+chr(39),
-        "the two wav2vec2": "the two encoder",
-        "The two wav2vec2": "The two encoder",
-        "both wav2vec2 systems": "the contextual encoders",
-        "cosine distances from matching audio for the contextual encoders": "weighted cosine distances from the contextual encoders",
+        "wav2vec2 zh-cn": "@@left_name@@",
+        "wav2vec2 base": "@@right_name@@",
+        "The two wav2vec2 panels share a cosine distance scale.": "The encoder panels share a cosine distance scale.",
+        "cosine distances from matching audio for both wav2vec2 systems":
+            "character-balanced cosine distances from contextual encoder representations",
         "wav2vec2 ties": "Encoder ties",
-        "these wav2vec2 systems": "the acoustic reference systems",
+        "<p>The exploratory protocol was developed while inspecting these wav2vec2 systems. ":
+            "<p>",
+        "Other cells, including self-pairs, are shown in light gray.":
+            "Unselected cells and the diagonal in this view are shown in light gray.",
         "Self-distances are zero for the current matrices.": "Contextual full match excludes self-comparisons. Grey encoder diagonals lack two distinct occurrences in at least one seed. The DIMSIM matrix shows its zero self-distances.",
         "Mask 111 uses self-pairs, with cosine 1 and DIMSIM distance 0.": "Mask 111 uses contextual within-reading distances and the corresponding zero DIMSIM distances on the shared Full Match inventory.",
-        "Mask means, centered R², J and residuals describe each system independently.": "Mask means, centered R², J and residuals describe each system independently. Residuals are available for individual seeds.",
+        "Mask means, centered R², J and residuals describe each system independently.":
+            "Mask means, centered R² and J describe each system independently.",
+        "Including self-pairs (111)": "Including Full Match (111)",
+        "</style>": ".panels > section:first-child{order:1}.panels > section:nth-child(3){order:2}</style>",
         "const preparedCells=decode(prepared.cells,Uint16Array), preparedEffects=decode(prepared.effects,Float64Array);":
             "const preparedCells=decode(prepared.cells,Uint16Array), preparedEffects=prepared.effects.map(x=>decode(x,Float64Array));",
         "const preparedWins=decode(prepared.wins,Uint16Array), preparedAgreement=decode(prepared.agree,Uint16Array);":
@@ -148,6 +150,13 @@ def _encoder_template(models):
     }
     for before, after in replacements.items():
         page = page.replace(before, after)
+    start = page.index("<h2>Top positive residual pairs</h2>")
+    end = page.index("</section>", start)
+    page = page[:start] + page[end:]
+    page = page.replace("const residualTopPairs=@@residualTopPairs@@;\n", "")
+    start = page.index(" document.querySelector('#profile-residuals').innerHTML")
+    end = page.index(" renderProfileSteps();", start)
+    page = page[:start] + page[end:]
     start = page.index("<a href='figures/dimsim-distances.png'>")
     end = page.index("</p>", start)
     links = " · ".join(f"<a href='figures/{model}-cosine-distances.png'>{name} cosine distances</a>"
@@ -161,6 +170,9 @@ _SHELL = r"""<!doctype html><html lang="en"><meta charset="utf-8">
 <style>
 body{margin:0 auto;max-width:1740px;background:#F5F1F7;color:#292330;font:15px system-ui,sans-serif}
 header,details{padding:16px 24px;background:white;border:1px solid #dbe2e8;border-radius:12px;margin:12px}
+header{background:#50346f;border-color:#50346f;color:white;box-shadow:0 3px 9px #29233026}
+header h1{margin:0 0 12px}header a{color:#fff;text-underline-offset:3px}
+.report-note{max-width:105ch;margin:16px auto;padding:0 20px;text-align:center;line-height:1.5}
 label{display:inline-block;margin:5px 16px 5px 0}select{font:inherit;padding:7px;border:1px solid #D6CCDE;border-radius:7px;background:#FAF7FC}
 iframe{border:0;width:100%;height:78vh;min-height:680px;display:block}summary{cursor:pointer;font-weight:bold}
 table{border-collapse:collapse}th,td{padding:6px 10px;border-bottom:1px solid #dbe2e8;text-align:left}th{background:#EFE8F5}
@@ -171,9 +183,9 @@ table{border-collapse:collapse}th,td{padding:6px 10px;border-bottom:1px solid #d
 @@DIAGNOSTICS@@
 <iframe id="view" title="Synchronized encoder distance maps"></iframe>
 <details><summary>Selected metrics and seed dispersion</summary><div id="summary"></div></details>
-<p>DIMSIM Agreement excludes reference ties. The score is (wins + 0.5 × model ties) / comparisons,
-with 50% as the neutral level. Controlled match win rate uses the expected component direction.
-Paired differences subtract the first model from the second within each seed.</p>
+<p class="report-note">DIMSIM Agreement excludes DIMSIM ties and gives model ties half credit. Controlled match win rate
+uses the direction predicted by component matching. Both rates have a neutral value of 50%.
+Paired differences are the named destination system minus the source system within each seed.</p>
 <script>
 const settings=@@SETTINGS@@, template=@@TEMPLATE@@;
 window.encoderViews={};
@@ -213,12 +225,12 @@ async function render(){
  try{
   const view=await load(key);
   if(token!==revision)return;
-  const systems=[0,r,l], p=view.prepared, select=items=>systems.map(i=>items[i]);
+  const systems=[0,l,r], p=view.prepared, select=items=>systems.map(i=>items[i]);
   const data={labels:settings.labels,rank:view.rank,maps:select(view.distance),maxima:view.maxima};
-  const prepared={factor:p.factor,cells:p.cells,effects:select(p.effects),wins:select(p.wins),agree:[p.agree[r],p.agree[l]],
-                  support:p.support,points:p.points.map(row=>[row[r],row[l]]),ties:p.ties};
+  const prepared={factor:p.factor,cells:p.cells,effects:select(p.effects),wins:select(p.wins),agree:[p.agree[l],p.agree[r]],
+                  support:p.support,points:p.points.map(row=>[row[l],row[r]]),ties:p.ties};
   const values={data,prepared,components:settings.components,profileData:select(view.profiles),
-   residualTopPairs:select(view.residuals),rankStats:view.rankStats.map(select),rankGroupSize:view.rankGroupSize};
+   rankStats:view.rankStats.map(select),rankGroupSize:view.rankGroupSize};
   const escapedLessThan=String.fromCharCode(92)+'u003c';
   const substitutions=Object.fromEntries(Object.entries(values).map(([name,value])=>[name,JSON.stringify(value).replaceAll('<',escapedLessThan)]));
   Object.assign(substitutions,{left_name:settings.names[l],right_name:settings.names[r],
@@ -253,7 +265,7 @@ def write_page(path, labels, components, coverage, *, evaluation, excluded, tole
     links = ""
     if diagnostics:
         from ..research.encoder_diagnostics import TABLE_FIELDS
-        links = "<p>Diagnostics: " + " · ".join(
+        links = '<p class="report-note">Diagnostics: ' + " · ".join(
             f'<a href="tables/diagnostic_{name}.csv">{name.replace("_", " ").capitalize()}</a>'
             for name in TABLE_FIELDS
         ) + ' · <a href="data/diagnostics.json">Inventories and provenance</a></p>'
