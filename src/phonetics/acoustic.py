@@ -146,6 +146,8 @@ def assemble_character_data(corpus_path, acoustic_path, destination):
             shutil.copyfile(corpus_path / name, temporary / name)
         for name in ("labels.json", "targets.npy", "inference.json"):
             shutil.copyfile(acoustic_path / name, temporary / name)
+        if cm["artifacts"]["inventory.jsonl"] != am["artifacts"]["inventory.jsonl"]:
+            shutil.copyfile(acoustic_path / "inventory.jsonl", temporary / "acoustic_inventory.jsonl")
         shutil.copyfile(corpus_path / "manifest.json", temporary / "corpus_manifest.json")
         shutil.copyfile(acoustic_path / "manifest.json", temporary / "acoustic_manifest.json")
         seal_bundle(temporary, "character_prepared", identity)
@@ -162,6 +164,7 @@ def validate_character_data(path, *, identity=None):
             raise ValueError("prepared provenance checksum mismatch")
     cm = json.loads((root / "corpus_manifest.json").read_text(encoding="utf-8"))
     am = json.loads((root / "acoustic_manifest.json").read_text(encoding="utf-8"))
+    separate_inventory = "acoustic_inventory.jsonl" in manifest["artifacts"]
     from .bundles import content_hash
     for upstream, kind, names in (
         (cm, "character_corpus", ("corpus.jsonl", "statistics.json", "rejections.jsonl", "inventory.jsonl")),
@@ -171,10 +174,15 @@ def validate_character_data(path, *, identity=None):
                 or set(upstream.get("artifacts", {})) != set(names)):
             raise ValueError("prepared upstream contract mismatch")
         for name in names:
-            if sha256_file(root / name) != upstream["artifacts"][name]:
+            embedded = ("acoustic_inventory.jsonl"
+                        if separate_inventory and kind == "acoustic_targets" and name == "inventory.jsonl" else name)
+            if sha256_file(root / embedded) != upstream["artifacts"][name]:
                 raise ValueError(f"prepared upstream artifact mismatch: {name}")
     if cm["identity"]["inventory_manifest_sha256"] != am["identity"]["inventory_manifest_sha256"]:
         raise ValueError("prepared upstream inventory provenance mismatch")
+    if separate_inventory and inventory_signature(read_jsonl(root / "inventory.jsonl")) != inventory_signature(
+            read_jsonl(root / "acoustic_inventory.jsonl")):
+        raise ValueError("prepared upstream inventory mismatch")
     validate_corpus_records(root)
     validate_target_records(root)
     return manifest
