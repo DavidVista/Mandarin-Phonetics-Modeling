@@ -116,13 +116,17 @@ class ExecutionTests(unittest.TestCase):
         self.assertIsNone(load_state(self.config)['waiting'])
 
     def test_import_legacy_training_payload_after_sdk_upgrade(self):
-        from phonetics.execution import sdk_files
+        from phonetics.execution import _existing_training_job, sdk_files, sdk_hashes
         old_sources = sdk_files()
         old_sources['execution.py'] += '\n# Previous SDK snapshot\n'
         with patch('phonetics.execution.sdk_files', return_value=old_sources), patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
             pending = run_pipeline(self.config)
             result = self.make_result(pending)
             old_state = load_state(self.config)
+            experiment_pin = old_state['completed']['prepare-experiment']['manifest_sha256']
+            components = _existing_training_job(
+                self.config, self.experiment, 'components', experiment_pin, sdk_hashes(old_sources))
+            self.assertIsNotNone(components)
         with self.assertRaisesRegex(ValueError, 'configuration or SDK changed'):
             load_state(self.config)
         mismatched = copy.deepcopy(old_state)
@@ -135,8 +139,16 @@ class ExecutionTests(unittest.TestCase):
         imported = import_result(self.config, result)
         self.assertTrue((imported / 'opaque.pt').exists())
         self.assertIsNone(load_state(self.config)['waiting'])
-        with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
-            self.assertEqual(run_pipeline(self.config)['model_id'], 'components')
+        with (patch('phonetics.pipeline.run_stage', side_effect=AssertionError('completed stages must not rerun')),
+              patch('phonetics.experiment.validate_experiment', side_effect=AssertionError('experiment already verified')),
+              patch('phonetics.notebooks.render_job_notebook', side_effect=AssertionError('notebook already exists'))):
+            waiting = run_pipeline(self.config)
+        self.assertEqual(waiting, {'status': 'waiting', **components})
+        shutil.rmtree(result)
+        with patch('phonetics.execution.sdk_files', return_value=old_sources):
+            result = self.make_result(waiting, run_tree=True)
+        self.assertEqual(import_result(self.config, result).parent.name, 'components')
+        self.assertIn('train:components', load_state(self.config)['completed'])
 
     def test_wrong_receipt_cannot_publish_or_advance(self):
         with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
@@ -151,11 +163,83 @@ class ExecutionTests(unittest.TestCase):
         self.assertIsNotNone(load_state(self.config)['waiting'])
         self.assertFalse(Path(self.config['paths']['runs']).exists())
 
+    def test_run_repairs_invalid_and_mismatched_training_notebooks(self):
+        from phonetics.execution import create_job, validate_job
+        from phonetics.notebooks import render_job_notebook, training_notebook_matches
+
+        first = create_job(self.config, 'training', self.experiment, model_id='syllable')
+        second = create_job(self.config, 'training', self.experiment, model_id='components')
+        install = self.config['notebooks']['install_dependencies']
+        render_job_notebook(first['path'], install_dependencies=not install)
+        Path(second['notebook']).write_bytes(b'')
+
+        def assert_usable(entry):
+            self.assertTrue(training_notebook_matches(entry['notebook'], validate_job(entry['path']), install))
+
+        with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
+            waiting = run_pipeline(self.config)
+        self.assertEqual(waiting['job_id'], first['job_id'])
+        assert_usable(waiting)
+        assert_usable(second)
+        Path(waiting['notebook']).write_bytes(b'')
+        self.assertEqual(run_pipeline(self.config), waiting)
+        assert_usable(waiting)
+
+    def test_regenerating_training_explicitly_replaces_the_pending_job(self):
+        from phonetics.execution import sdk_files, validate_job
+        from phonetics.notebooks import generate_notebooks
+
+        old_sources = sdk_files()
+        old_sources['execution.py'] += '\n# Previous SDK snapshot\n'
+        with (patch('phonetics.execution.sdk_files', return_value=old_sources),
+              patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage)):
+            waiting = run_pipeline(self.config)
+            completed = load_state(self.config)['completed']
+        jobs = generate_notebooks(self.config, stage='training', refresh_sdk=True)
+        replacement = jobs[0]
+        self.assertNotEqual(waiting['job_id'], replacement['job_id'])
+        self.assertEqual(load_state(self.config)['waiting'], replacement)
+        self.assertEqual(load_state(self.config)['completed'], completed)
+        validate_job(replacement['path'])
+
     def test_state_rejects_config_changes(self):
         _write_state(self.config['paths']['state'], load_state(self.config))
         self.config['execution']['training_device'] = 'cpu'
         with self.assertRaisesRegex(ValueError, 'configuration or SDK changed'):
             load_state(self.config)
+
+    def test_refresh_sdk_between_training_import_and_next_run(self):
+        from phonetics.execution import sdk_files, validate_job
+        from phonetics.notebooks import generate_notebooks
+
+        old_sources = sdk_files()
+        old_sources['execution.py'] += '\n# Previous SDK snapshot\n'
+        with (patch('phonetics.execution.sdk_files', return_value=old_sources),
+              patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage)):
+            waiting = run_pipeline(self.config)
+            imported = import_result(self.config, self.make_result(waiting))
+            old_state = load_state(self.config)
+        self.assertIsNone(old_state['waiting'])
+        with self.assertRaisesRegex(ValueError, 'configuration or SDK changed'):
+            run_pipeline(self.config)
+
+        manifest = imported / 'manifest.json'
+        original = manifest.read_bytes()
+        manifest.write_bytes(original + b'\n')
+        state_path = Path(self.config['paths']['state'])
+        original_state = state_path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'completed stage manifest changed'):
+            generate_notebooks(self.config, stage='training', refresh_sdk=True)
+        self.assertEqual(state_path.read_bytes(), original_state)
+        manifest.write_bytes(original)
+
+        generate_notebooks(self.config, stage='training', refresh_sdk=True)
+        state = load_state(self.config)
+        self.assertEqual(state['completed'], old_state['completed'])
+        self.assertIsNone(state['waiting'])
+        pending = run_pipeline(self.config)
+        self.assertEqual(pending['model_id'], 'components')
+        validate_job(pending['path'])
 
     def test_bert_notebook_includes_pinned_dependencies_and_snapshot_setting(self):
         from phonetics.architecture import BERT_FILES, BERT_MODEL_ID, BERT_REVISION

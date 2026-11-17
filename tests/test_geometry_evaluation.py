@@ -17,7 +17,7 @@ from phonetics.cli import main
 from phonetics.evaluation.distribution import compute_retained_population
 from phonetics.evaluation.geometry_bundle import prepare_geometry_bundle, validate_geometry_bundle
 from phonetics.execution import _run_pipeline_workflow, load_state, run_pipeline
-from phonetics.notebooks import generate_encoder_notebooks
+from phonetics.notebooks import generate_encoder_notebooks, generate_notebooks
 from phonetics.pipeline import load_config, run_stage
 from phonetics.workflows import run_workflow, validate_workflow_result, workflow_pins
 
@@ -167,6 +167,40 @@ class GeometryEvaluationTests(unittest.TestCase):
             self.assertIn(completed[key]["manifest_sha256"], settings)
         self.assertIn("ALLOW_EXTRACTION = True", settings)
         self.assertIn("run_encoder_workflow", "".join(cells[-1]["source"]))
+        if mode == "notebook":
+            import shutil
+            import tempfile
+            from zipfile import ZipFile
+            from phonetics.execution import sdk_files
+
+            state_path = Path(loaded["paths"]["state"])
+            state_before = state_path.read_bytes()
+            sources = sdk_files()
+            sources["notebooks.py"] += "\n# Simulated SDK update"
+            with (patch("phonetics.execution.sdk_files", return_value=sources),
+                  patch("phonetics.notebooks.sdk_files", return_value=sources)):
+                regenerated, = generate_notebooks(loaded, stage="encoder-geometry", refresh_sdk=True)
+            self.assertNotEqual(regenerated["notebook"], notebook["notebook"])
+            self.assertEqual(state_path.read_bytes(), state_before)
+            run_cell = "".join(cells[-1]["source"])
+            outputs = fixture.root / "notebook-output"
+
+            def fake_geometry(*, spec, reports_root, **kwargs):
+                spec["representations_root"].mkdir()
+                (spec["representations_root"] / "vectors.npy").write_bytes(b"fixture")
+                report = reports_root / "bert.geometry"
+                report.mkdir(parents=True)
+                (report / "encoder_geometry.html").write_text("<html></html>", encoding="utf-8")
+                return report
+
+            with patch("phonetics.encoder_jobs.run_encoder_workflow", side_effect=fake_geometry):
+                exec(run_cell, {"Path": Path, "tempfile": tempfile, "shutil": shutil,
+                                "RESULTS_ROOT": outputs, "SPEC": {}, "REFERENCES": {}, "PINS": {},
+                                "SOURCE_SHA256": "", "ALLOW_EXTRACTION": True, "INPUT_ROOT": None,
+                                "FONT_FILES": []})
+            self.assertEqual(list(outputs.iterdir()), [outputs / "reports"])
+            with ZipFile(outputs / "reports/bert.geometry.zip") as archive:
+                self.assertEqual(archive.namelist(), ["encoder_geometry.html"])
 
         occurrences = Path(completed["prepare-evaluation"]["path"]) / "occurrences.jsonl"
         content = occurrences.read_bytes()

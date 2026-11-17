@@ -75,7 +75,9 @@ The research profiles use one config from preparation through evaluation and rep
 
 When `encoder_geometry.training_runs` is omitted for a run-owned experiment, the CLI derives each path from `paths.runs`, the experiment ID, model ID, and run ID. A `training-report` configured with empty parameters uses the same run paths. The geometry workflow checks the evaluation and training manifest hashes recorded in state before it reads their contents. Repeating the local command reuses validated outputs. Set `encoder_geometry.allow_extraction` to `true` for the orchestrated local run to extract missing hidden states.
 
-The notebook profiles build evaluation locally after the acoustic and training results have been imported. At the geometry step they return `notebook-ready` and the path to the generated encoder notebook. This notebook extracts hidden states and renders geometry together, using SHA256 values from the recorded run state. Open it with the pinned input bundles attached, and adjust `REFERENCES` if needed. Its report and hidden-state ZIPs are the final outputs of that notebook.
+The notebook profiles build evaluation locally after the acoustic and training results have been imported. At the geometry step they return `notebook-ready` and the path to the generated encoder notebook. This notebook extracts hidden states and renders geometry together, using SHA256 values from the recorded run state. Open it with the pinned input bundles attached, and adjust `REFERENCES` if needed. Its final output is the report ZIP. Newly extracted hidden states are temporary files.
+
+After an SDK update, `generate-notebooks --stage encoder-geometry --refresh-sdk` uses the existing run's verified input hashes with the current SDK. For training, `generate-notebooks --stage training --refresh-sdk` replaces the pending training job with the new notebook for that model. Use it before executing the replacement, since subsequent imports expect the new job ID. Both commands require the config that matches the recorded run.
 
 `--through training` includes the configured training report. Objective and available validation curves use the actual model and seed lists, the epoch grid of each model, and sample standard deviation for multiple seeds. The objective curves mark selected validation epochs. DIMSIM distributions use the evaluation bundle. Parser alignment uses the complete shared test inventory from the experiment bundle. Reference geometry reuses the training acoustic targets and generates Wav2Vec2 base targets from the same inventory. The notebook profiles request a separate acoustic job for these base targets when needed. DIMSIM agreement with human ratings uses the pinned bundled Li et al. source.
 
@@ -235,9 +237,7 @@ SHA256 and epoch per model and seed. Set `encoder_geometry.allow_extraction`
 to `true` to generate the notebook with `ALLOW_EXTRACTION = True`. The
 default is `false`, which limits the notebook to existing exports. The CLI
 uses its own `--allow-execution` flag. Extraction requires Torch 2.11.0.
-The notebook writes a report ZIP and
-one hidden-state ZIP containing every model export used by the report. Each export retains occurrence
-IDs, raw pre-head vectors, and target-position UNK flags.
+The notebook writes a report ZIP. It removes the hidden states it extracted when the temporary directory closes.
 
 To import a saved export for local use:
 

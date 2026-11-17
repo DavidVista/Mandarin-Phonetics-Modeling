@@ -4,7 +4,9 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import os
 from pathlib import Path
+import tempfile
 
 from .artifacts import write_json
 from .architecture import BERT_REQUIREMENTS
@@ -17,6 +19,36 @@ def _cell(kind, source, identifier):
     if kind == 'code':
         value.update(execution_count=None, outputs=[])
     return value
+
+
+def _write_notebook(target, document):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".notebook-", suffix=".tmp", dir=target.parent)
+    os.close(fd)
+    temporary = Path(name)
+    try:
+        write_json(temporary, document)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def training_notebook_matches(path, job, install_dependencies):
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+        metadata = document["metadata"]
+        if (document["nbformat"] != 4 or metadata["job_id"] != job["job_id"]
+                or metadata["source_sha256"] != job["sources"]):
+            return False
+        code = {cell["id"]: "".join(cell["source"]) for cell in document["cells"] if cell["cell_type"] == "code"}
+        if not all(code.get(name, "").strip() for name in ("dependencies", "sdk", "configuration", "run")):
+            return False
+        # Read the dependency cell so notebooks generated before cache reuse still match.
+        marker = ("subprocess.check_call(" if install_dependencies
+                  else 'print("Install these dependencies before running:"')
+        return marker in code["dependencies"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def _sdk_bootstrap(sources, hashes):
@@ -154,17 +186,23 @@ if job["stage"] == "training":
                           _cell('code', install, 'dependencies'), _cell('code', bootstrap, 'sdk'),
                           _cell('code', select, 'configuration'), _cell('code', execute, 'run')]}
     target = job_path.parent.parent / 'notebooks' / f'{stage}-{job_id[:16]}.ipynb'
-    target.parent.mkdir(parents=True, exist_ok=True)
-    write_json(target, document)
+    _write_notebook(target, document)
     return target
 
 
-def generate_notebooks(config, *, stage='ready'):
-    from .execution import create_job
+def generate_notebooks(config, *, stage='ready', refresh_sdk=False):
+    from .execution import create_job, load_state, refresh_training_sdk
     if config['schema_version'] != 2:
         raise ValueError('notebook generation requires configuration schema 2')
+    state = None
+    if refresh_sdk:
+        if stage not in ('training', 'encoder-geometry'):
+            raise ValueError('--refresh-sdk requires training or encoder-geometry')
+        state = load_state(config, _allow_stale_sdk=True)
+        if stage == 'training' and state['waiting'] and state['waiting']['stage'] != 'training':
+            raise ValueError('--refresh-sdk cannot replace a pending non-training job')
     if stage == "encoder-geometry":
-        return generate_encoder_notebooks(config)
+        return generate_encoder_notebooks(config, state=state)
     paths = config['paths']
     result = []
     generation = {}
@@ -180,6 +218,8 @@ def generate_notebooks(config, *, stage='ready'):
                 result.append(create_job(config, 'training', experiment, model_id=model_id, _generation=generation))
         elif stage == 'training':
             raise ValueError('prepare the experiment bundle before generating training notebooks')
+    if refresh_sdk:
+        refresh_training_sdk(config, state, result)
     if stage in ('ready', 'visualization'):
         for workflow in config['visualization']:
             result.append(create_job(config, 'visualization', None, workflow=workflow))
@@ -234,10 +274,7 @@ FONT_FILES = []
         settings += '\nimport os\nBERT_SNAPSHOT = ""  # Set to the attached BERT snapshot directory.\n'
     execution = 'if BERT_SNAPSHOT:\n    os.environ["PHONETICS_BERT_SNAPSHOT"] = BERT_SNAPSHOT\n' if bert else ''
     execution += """from matplotlib import font_manager
-from phonetics.encoder_jobs import run_encoder_workflow, locate_exports
-from phonetics.bundles import validate_bundle
-from phonetics.artifacts import sha256_file
-import json
+from phonetics.encoder_jobs import run_encoder_workflow
 
 for filename in FONT_FILES:
     font_file = Path(filename).resolve(strict=True)
@@ -245,32 +282,26 @@ for filename in FONT_FILES:
         raise ValueError(f"Expected an Arial font file: {font_file}")
     font_manager.fontManager.addfont(str(font_file))
 
-representations = RESULTS_ROOT / "hidden-states"
-spec = {**SPEC, "representations_root": representations}
-result = run_encoder_workflow(
-    refs=REFERENCES, pins=PINS, spec=spec,
-    reports_root=RESULTS_ROOT / "reports", source_sha256=SOURCE_SHA256,
-    allow_execution=ALLOW_EXTRACTION, mount=INPUT_ROOT,
-)
-identity = json.loads((result / "manifest.json").read_text(encoding="utf-8"))["identity"]
-exports = locate_exports(spec, PINS, identity["models"], INPUT_ROOT)
-with tempfile.TemporaryDirectory(dir=RESULTS_ROOT) as folder:
-    for model in identity["models"]:
-        copied = Path(folder) / model
-        shutil.copytree(exports[model], copied)
-        if sha256_file(copied / "manifest.json") != identity["exports"][model]:
-            raise ValueError(f"Export differs from report input: {model}")
-        validate_bundle(copied, "encoder_prehead_export")
-    print(shutil.make_archive(str(RESULTS_ROOT / (SPEC["id"] + "-hidden-states")), "zip", root_dir=folder))
-print(shutil.make_archive(str(result), "zip", root_dir=result))
+RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(prefix="geometry-", dir=RESULTS_ROOT) as folder:
+    temporary = Path(folder)
+    spec = {**SPEC, "representations_root": temporary / "hidden-states"}
+    result = run_encoder_workflow(
+        refs=REFERENCES, pins=PINS, spec=spec,
+        reports_root=RESULTS_ROOT / "reports", source_sha256=SOURCE_SHA256,
+        allow_execution=ALLOW_EXTRACTION, mount=INPUT_ROOT,
+    )
+    archive = shutil.make_archive(str(temporary / "report"), "zip", root_dir=result)
+    report_zip = Path(archive).replace(result.with_name(result.name + ".zip"))
+print(report_zip)
 """
     instructions = (
         "Attach the pinned evaluation, experiment and training bundles. Update REFERENCES "
         "if needed; the input manifests must match PINS. Attach any existing "
         "hidden-state exports to reuse. To extract missing exports, enable ALLOW_EXTRACTION "
         "after reviewing the device and inputs. Extraction requires Torch 2.11.0. "
-        "Set FONT_FILES when Arial is supplied as an input dataset. The report and new "
-        "hidden-state exports are saved as two ZIP archives."
+        "Set FONT_FILES when Arial is supplied as an input dataset. The notebook saves the report "
+        "as a ZIP and removes temporary hidden states when the computation ends."
     )
     if bert:
         instructions += " Attach the pinned BERT snapshot and set BERT_SNAPSHOT before running."
@@ -285,5 +316,5 @@ print(shutil.make_archive(str(result), "zip", root_dir=result))
     identity = {"pins": pins, "sources": hashes, "config": spec,
                 "install_dependencies": config["notebooks"]["install_dependencies"]}
     destination = root / f"encoder-geometry-{content_hash(identity)[:16]}.ipynb"
-    write_json(destination, document)
+    _write_notebook(destination, document)
     return [{"stage": "encoder-geometry", "notebook": str(destination)}]

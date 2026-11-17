@@ -29,6 +29,8 @@ def main(argv=None):
     generate = commands.add_parser('generate-notebooks', help='Generate notebooks and portable input jobs from one config')
     generate.add_argument('--config', required=True)
     generate.add_argument('--stage', choices=('ready', 'acoustic', 'training', 'visualization', 'encoder-geometry'), default='ready')
+    generate.add_argument('--refresh-sdk', action='store_true',
+                          help='Use the current SDK for geometry or replace the pending training notebook')
     extraction = commands.add_parser("extract-hidden-states", help="Export one encoder model over its configured seeds")
     extraction.add_argument("--config", required=True)
     extraction.add_argument("--model", required=True)
@@ -89,7 +91,7 @@ def main(argv=None):
                     _print_progress(f"Notebook ready for {stage}: {result['notebook']}")
             elif args.command == 'generate-notebooks':
                 from .notebooks import generate_notebooks
-                result = {'jobs': generate_notebooks(config, stage=args.stage)}
+                result = {'jobs': generate_notebooks(config, stage=args.stage, refresh_sdk=args.refresh_sdk)}
             elif args.command == 'import-result':
                 from .execution import _progress_step, import_result
                 with _progress_step(_print_progress, 'Verify and import notebook result'):

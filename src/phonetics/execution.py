@@ -126,7 +126,7 @@ def _state_identity(config):
                                         if config['acoustic']['existing_bundle'] else None)}
 
 
-def load_state(config, *, _allow_pending_training_sdk=False):
+def load_state(config, *, _allow_pending_training_sdk=False, _allow_stale_sdk=False):
     identity = _state_identity(config)
     path = Path(config['paths']['state'])
     if path.exists():
@@ -134,7 +134,9 @@ def load_state(config, *, _allow_pending_training_sdk=False):
         stored = state.get('identity', {})
         pending = state.get('waiting') or {}
         # Import can finish an already issued training job after an SDK upgrade.
-        upgrade = (_allow_pending_training_sdk and isinstance(pending, dict) and pending.get('stage') == 'training'
+        accepts_upgrade = _allow_stale_sdk or (_allow_pending_training_sdk and isinstance(pending, dict)
+                                               and pending.get('stage') == 'training')
+        upgrade = (accepts_upgrade
                    and isinstance(stored, dict)
                    and isinstance(stored.get('sdk_sha256'), str)
                    and {**stored, 'sdk_sha256': identity['sdk_sha256']} == identity)
@@ -213,6 +215,65 @@ def _copy_tree(source, destination, *, ignore=None):
     shutil.copytree(source, destination, ignore=ignore)
 
 
+def _training_job_inputs(config, experiment, model_id, experiment_pin, sources):
+    return {
+        'stage': 'training',
+        'parameters': {'model_id': model_id, 'device': config['execution']['training_device'],
+                       'run_id': config['execution']['run_id']},
+        'sources': sources, 'input_manifest_sha256': experiment_pin, 'external_input': True,
+        'input_config': _read(Path(experiment) / 'config.json'),
+        'input_reference': str(Path(experiment).resolve()), 'experiment_id': config['experiment_id'],
+    }
+
+
+def _existing_training_job(config, experiment, model_id, experiment_pin, sources):
+    from .notebooks import training_notebook_matches
+
+    identity = _training_job_inputs(config, experiment, model_id, experiment_pin, sources)
+    job_id = content_hash(identity)
+    root = Path(config['paths']['generated'])
+    path = root / 'jobs' / job_id
+    notebook = root / 'notebooks' / f'training-{job_id[:16]}.ipynb'
+    if not path.exists() or not notebook.is_file():
+        return None
+    job = validate_job(path, expected_sources=sources)
+    if job['job_id'] != job_id:
+        raise ValueError('existing training job differs from the requested job')
+    if not training_notebook_matches(notebook, job, config['notebooks']['install_dependencies']):
+        return None
+    return {'job_id': job_id, 'stage': 'training', 'path': str(path), 'notebook': str(notebook),
+            'model_id': model_id, 'workflow_id': None, 'sdk_sha256': content_hash(sources)}
+
+
+def _pending_sdk(state):
+    pending = state['waiting']
+    if pending['stage'] == 'training' and 'sdk_sha256' in pending:
+        return pending['sdk_sha256']
+    return state['identity']['sdk_sha256']
+
+
+def refresh_training_sdk(config, state, jobs):
+    pending = state['waiting']
+    if pending is not None:
+        old_job = validate_job(pending['path'], expected_sdk_sha256=_pending_sdk(state))
+        if old_job['stage'] != 'training' or old_job['job_id'] != pending['job_id']:
+            raise ValueError('pending training job identity mismatch')
+        replacement, = [entry for entry in jobs if entry['model_id'] == old_job['parameters']['model_id']]
+        new_job = validate_job(replacement['path'])
+        fields = ('parameters', 'input_manifest_sha256', 'experiment_id', 'input_config')
+        if any(new_job[field] != old_job.get(field) for field in fields):
+            raise ValueError('replacement job differs in training parameters or input experiment')
+    else:
+        _verify_completed_manifests(state)
+    if load_state(config, _allow_stale_sdk=True) != state:
+        raise ValueError('run state changed during notebook generation')
+    if pending is not None:
+        state['waiting'] = replacement
+    state['identity'] = _state_identity(config)
+    state.pop('previous_training_sources', None)
+    _write_state(config['paths']['state'], state)
+
+
 def create_job(config, stage, input_path, *, model_id=None, workflow=None, reference=None, _generation=None):
     """Publish an immutable input package; notebooks are generated beside it."""
     context = {} if _generation is None else _generation
@@ -250,9 +311,7 @@ def create_job(config, stage, input_path, *, model_id=None, workflow=None, refer
     if reference is not None:
         identity['reference_id'] = reference['id']
     if stage == 'training':
-        identity.update(external_input=True, input_config=_read(Path(input_path) / 'config.json'),
-                        input_reference=str(Path(input_path).resolve()),
-                        experiment_id=manifest['identity']['experiment_id'])
+        identity = _training_job_inputs(config, input_path, model_id, identity['input_manifest_sha256'], identity['sources'])
     if workflow:
         from .workflows import workflow_pins
         identity['workflow_pins'] = workflow_pins(workflow)
@@ -386,7 +445,7 @@ def import_result(config, result_path):
     pending = state['waiting']
     if not pending:
         raise ValueError('pipeline has no pending notebook result')
-    job = validate_job(pending['path'], expected_sdk_sha256=state['identity']['sdk_sha256'])
+    job = validate_job(pending['path'], expected_sdk_sha256=_pending_sdk(state))
     if job['job_id'] != pending['job_id'] or job['stage'] != pending['stage']:
         raise ValueError('job identity differs from the pending state')
     root = Path(result_path)
@@ -452,7 +511,10 @@ def import_result(config, result_path):
             shutil.copytree(payload, temporary, dirs_exist_ok=True)
     state['completed'][key] = {'path': str(target), 'manifest_sha256': _manifest_pin(target), 'job_id': job['job_id']}
     state['waiting'] = None
-    state['identity'] = _state_identity(config)
+    identity = _state_identity(config)
+    if job['stage'] == 'training' and state['identity']['sdk_sha256'] != identity['sdk_sha256']:
+        state.setdefault('previous_training_sources', job['sources'])
+    state['identity'] = identity
     _write_state(config['paths']['state'], state)
     return target
 
@@ -509,34 +571,60 @@ def _run_pipeline_workflow(config, state, group, workflow, progress=None):
     return None
 
 
+def _verify_completed_manifests(state):
+    for record in state['completed'].values():
+        if _manifest_pin(record['path']) != record['manifest_sha256']:
+            raise ValueError('a completed stage manifest changed')
+
+
 def run_pipeline(config, *, through='visualization', allow_inference=False, allow_training=False, progress=None):
     from .pipeline import run_stage
     if through not in ('experiment', 'training', 'analysis', 'visualization'):
         raise ValueError('invalid final pipeline stage')
     if progress is not None:
         progress(f"Experiment {config['experiment_id']}: checking run state")
-    state = load_state(config)
+    state = load_state(config, _allow_pending_training_sdk=True)
     if state['waiting']:
-        validate_job(state['waiting']['path'])
+        pending = state['waiting']
+        job = validate_job(pending['path'], expected_sdk_sha256=_pending_sdk(state))
+        if (job['job_id'], job['stage']) != (pending['job_id'], pending['stage']):
+            raise ValueError('job identity differs from the pending state')
+        if job['stage'] == 'training':
+            from .notebooks import render_job_notebook, training_notebook_matches
+            install = config['notebooks']['install_dependencies']
+            if not training_notebook_matches(pending['notebook'], job, install):
+                sources = sdk_files()
+                if job['sources'] != sdk_hashes(sources):
+                    raise ValueError('pending training notebook is unusable and requires its original SDK; '
+                                     'a completed result can still be imported')
+                with _progress_step(progress, f"Restore training notebook ({pending['model_id']})"):
+                    pending['notebook'] = str(render_job_notebook(
+                        pending['path'], install_dependencies=install, _sources=sources))
+                    _write_state(config['paths']['state'], state)
         return {'status': 'waiting', **state['waiting']}
-    for record in state['completed'].values():
-        if _manifest_pin(record['path']) != record['manifest_sha256']:
-            raise ValueError('a completed stage manifest changed')
+    _verify_completed_manifests(state)
     if progress is not None and state['completed']:
         progress(f"Verified manifests for {len(state['completed'])} recorded stages")
     preparation = PREPARATION[-2:] if config['execution'].get('preparation') == 'mock' else PREPARATION
+    verified_paths = set()
     for stage in preparation:
-        if stage == 'prepare-embeddings' and stage in state['completed']:
-            # Imported results have no historical-bundle import identity.
-            from .acoustic import validate_acoustic_targets
-            validate_acoustic_targets(state['completed'][stage]['path'])
+        if stage in state['completed']:
+            path = Path(state['completed'][stage]['path'])
+            if path not in verified_paths:
+                kind = _read(path / 'manifest.json')['bundle_type']
+                if kind == 'sound_source':
+                    from .source_preparation.download import validate_source_bundle
+                    validate_source_bundle(path)
+                else:
+                    validate_bundle(path, kind)
+                verified_paths.add(path)
             continue
         if stage == 'prepare-embeddings' and config['acoustic']['existing_bundle'] is None and config['execution']['acoustic'] == 'notebook':
             with _progress_step(progress, 'Generate acoustic notebook'):
                 state['waiting'] = create_job(config, 'acoustic', config['paths']['inventory'])
                 _write_state(config['paths']['state'], state)
             return {'status': 'waiting', **state['waiting']}
-        with _progress_step(progress if stage not in state['completed'] else None, PREPARATION_LABELS[stage]):
+        with _progress_step(progress, PREPARATION_LABELS[stage]):
             path = run_stage(config, stage, allow_inference=allow_inference)
             state['completed'][stage] = {'path': str(path), 'manifest_sha256': _manifest_pin(path)}
             _write_state(config['paths']['state'], state)
@@ -553,9 +641,22 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
             validate_training_result(state['completed'][key]['path'], job)
             continue
         if config['execution']['training'] == 'notebook':
-            with _progress_step(progress, f'Generate training notebook {index}/{len(models)} ({model_id})'):
-                state['waiting'] = create_job(config, 'training', experiment, model_id=model_id)
-                _write_state(config['paths']['state'], state)
+            sources = sdk_files()
+            hashes = sdk_hashes(sources)
+            previous = state.get('previous_training_sources')
+            generation = {'sources': sources, 'experiments': {str(experiment.resolve()): True}}
+            jobs = {}
+            for remaining in models[index - 1:]:
+                if 'train:' + remaining in state['completed']:
+                    continue
+                ready = _existing_training_job(config, experiment, remaining, experiment_pin, previous) if previous else None
+                ready = ready or _existing_training_job(config, experiment, remaining, experiment_pin, hashes)
+                if ready is None:
+                    with _progress_step(progress, f'Generate training notebook ({remaining})'):
+                        ready = create_job(config, 'training', experiment, model_id=remaining, _generation=generation)
+                jobs[remaining] = ready
+            state['waiting'] = jobs[model_id]
+            _write_state(config['paths']['state'], state)
             return {'status': 'waiting', **state['waiting']}
         if not allow_training:
             raise PermissionError('local training requires --allow-training')
