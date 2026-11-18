@@ -118,8 +118,6 @@ def write_view(path, key, distances, maps, tables, tolerance, *, systems, seeds,
 def _encoder_template(models):
     page = PAGE
     replacements = {
-        "REFERENCE GEOMETRY": "ENCODER GEOMETRY",
-        "Mandarin syllable distance maps": "Encoder geometry",
         "wav2vec2 zh-cn": "@@left_name@@",
         "wav2vec2 base": "@@right_name@@",
         "The two wav2vec2 panels share a cosine distance scale.": "The encoder panels share a cosine distance scale.",
@@ -150,6 +148,7 @@ def _encoder_template(models):
     }
     for before, after in replacements.items():
         page = page.replace(before, after)
+    page = style_encoder_maps(page)
     start = page.index("<h2>Top positive residual pairs</h2>")
     end = page.index("</section>", start)
     page = page[:start] + page[end:]
@@ -165,20 +164,54 @@ def _encoder_template(models):
     return page
 
 
+def style_encoder_maps(page):
+    """Give the embedded analysis its own heading and a lighter visual hierarchy."""
+    start = page.index('<header class="report-head">')
+    end = page.index('</header>', start) + len('</header>')
+    page = page[:start] + (
+        '<header class="report-head"><h2>Mandarin syllable distance maps</h2>'
+        '<p>@@syllables@@ syllables · @@pairs@@ unique pairs</p></header>'
+    ) + page[end:]
+    page = page.replace('<title>Encoder geometry</title>', '<title>Mandarin syllable distance maps</title>')
+    page = page.replace('<th>Population</th><th>Count</th>',
+        '<th scope="col">Model and seed</th><th scope="col">Retained occurrences</th>'
+        '<th scope="col">Target UNK before filtering</th><th scope="col">Valid / planned Full Matches</th>')
+    return page.replace('</style>', """
+body{padding:16px 18px 32px;background:#fff}
+.report-head{padding:0 0 10px;border:0;border-bottom:1px solid var(--line);border-radius:0}
+.report-head h2{margin:0;font-size:22px;line-height:1.25}
+.report-head p{margin:4px 0 0;color:var(--muted);font-variant-numeric:tabular-nums}
+.toolbar{padding:6px 0;border:0;border-radius:0}
+.panels>section,#map-results>section,#profile-results,details{border-radius:5px}
+@media(max-width:700px){body{padding:12px}}
+</style>""", 1)
+
+
 _SHELL = r"""<!doctype html><html lang="en"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Encoder geometry</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>@@ARCHITECTURE@@ evaluation report</title>
 <style>
-body{margin:0 auto;max-width:1740px;background:#F5F1F7;color:#292330;font:15px system-ui,sans-serif}
-header,details{padding:16px 24px;background:white;border:1px solid #dbe2e8;border-radius:12px;margin:12px}
-header{background:#50346f;border-color:#50346f;color:white;box-shadow:0 3px 9px #29233026}
-header h1{margin:0 0 12px}header a{color:#fff;text-underline-offset:3px}
-.report-note{max-width:105ch;margin:16px auto;padding:0 20px;text-align:center;line-height:1.5}
-label{display:inline-block;margin:5px 16px 5px 0}select{font:inherit;padding:7px;border:1px solid #D6CCDE;border-radius:7px;background:#FAF7FC}
-iframe{border:0;width:100%;height:78vh;min-height:680px;display:block}summary{cursor:pointer;font-weight:bold}
-table{border-collapse:collapse}th,td{padding:6px 10px;border-bottom:1px solid #dbe2e8;text-align:left}th{background:#EFE8F5}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1560px;padding:0 clamp(12px,3vw,40px) 28px;background:#fbfafc;color:#292330;font:15px/1.5 system-ui,sans-serif}
+header{padding:24px 0 16px;border-bottom:1px solid #ded7e6}
+.report-context{margin:0;color:#5e5268;font-weight:600}
+header h1{margin:2px 0 14px;font-size:clamp(27px,3.4vw,39px);line-height:1.12;letter-spacing:-.025em}
+.selectors{display:flex;flex-wrap:wrap;gap:8px 20px}
+label{display:flex;align-items:center;gap:8px;font-weight:600}
+select{min-width:0;max-width:min(100%,34ch);font:inherit;padding:5px 8px;border:1px solid #c8bdcf;border-radius:5px;background:white;color:inherit}
+a{color:#563671;text-underline-offset:3px}
+:focus-visible{outline:2px solid #79549a;outline-offset:2px}
+#status,.report-note{margin:9px 0;color:#5e5268;font-size:14px}
+iframe{border:1px solid #ded7e6;border-radius:6px;width:100%;height:78vh;min-height:680px;display:block;margin:14px 0;background:#fff}
+details{background:#fff;border:1px solid #ded7e6;border-radius:6px;padding:12px 16px}
+summary{cursor:pointer;font-weight:650}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:6px 10px;border-bottom:1px solid #e7e1eb;text-align:left}
+th{background:#f4f0f7}
+@media(max-width:520px){.selectors label{width:100%;justify-content:space-between}select{max-width:70%}}
 </style>
-<header><h1>Encoder geometry</h1><label>Seed <select id="seed"></select></label>
-<label>Left model <select id="left"></select></label><label>Right model <select id="right"></select></label>
+<header><p class="report-context">@@ARCHITECTURE@@ evaluation report</p><h1>Encoder Geometry</h1>
+<div class="selectors"><label>Seed <select id="seed"></select></label>
+<label>Left model <select id="left"></select></label><label>Right model <select id="right"></select></label></div>
 <p id="status" aria-live="polite"></p><a href="tables/coverage.csv">Coverage and UNK counts</a> · <a href="manifest.json">Manifest</a></header>
 @@DIAGNOSTICS@@
 <iframe id="view" title="Synchronized encoder distance maps"></iframe>
@@ -249,7 +282,8 @@ render();
 </script></html>"""
 
 
-def write_page(path, labels, components, coverage, *, evaluation, excluded, tolerance, systems, seeds, diagnostics=False):
+def write_page(path, labels, components, coverage, *, architecture, evaluation, excluded, tolerance, systems, seeds,
+               diagnostics=False):
     order = sorted(range(len(labels)), key=lambda index: (tuple(components[index]), labels[index]))
     rows = "".join(
         f"<tr><th>{html.escape(row['system'])} · Seed {row['seed']}</th>"
@@ -261,7 +295,9 @@ def write_page(path, labels, components, coverage, *, evaluation, excluded, tole
     settings = {"labels": [labels[i] for i in order], "components": np.asarray(components)[order].T.tolist(),
                 "names": [_system_name(system) for system in systems], "systems": systems, "seeds": seeds, "coverage": rows,
                 "evaluation": html.escape(evaluation), "excluded": len(excluded), "tolerance": f"{tolerance:g}"}
-    page = _SHELL.replace("@@SETTINGS@@", _json(settings)).replace("@@TEMPLATE@@", _json(_encoder_template(systems[1:])))
+    architecture_name = {"char_bilstm": "BiLSTM", "bert": "BERT"}[architecture]
+    page = (_SHELL.replace("@@ARCHITECTURE@@", architecture_name)
+            .replace("@@SETTINGS@@", _json(settings)).replace("@@TEMPLATE@@", _json(_encoder_template(systems[1:]))))
     links = ""
     if diagnostics:
         from ..research.encoder_diagnostics import TABLE_FIELDS

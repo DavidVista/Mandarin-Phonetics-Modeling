@@ -335,6 +335,7 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
         write_view(stage / "views/across-seeds.js", "across-seeds", means, map_sum, summary,
                    tolerance, systems=systems, seeds=seeds, rankings=rankings)
         write_page(stage / "encoder_geometry.html", labels, [components[x] for x in labels], coverage,
+                   architecture=experiment["identity"]["config"]["architecture"]["encoder"]["type"],
                    evaluation=identity["evaluation_id"], excluded=identity["excluded_pinyin"],
                    tolerance=tolerance, systems=systems, seeds=seeds, diagnostics=diagnostics)
         render_distance_maps(stage / "figures", labels, means[1:], map_sum["component_order"], encoder_models=models,
