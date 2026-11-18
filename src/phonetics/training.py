@@ -27,10 +27,11 @@ from .bert_snapshot import load_bert_inputs
 from .metrics import batch_objective, finalize_epoch
 from .model import BertEncoder, build_encoder, shared_encoder_sha256
 from .objectives import canonical_model_id, parse_model_id
-from .reproducibility import rng_snapshot, seed_everything
+from .reproducibility import seed_everything
+from .training_artifacts import COMPACT_SCHEMA, CONTRACT_SOURCE
 
 CODE_FILES = ("training.py", "model.py", "data.py", "metrics.py", "reproducibility.py", "experiment.py",
-              "training_data.py", "objectives.py", "pinyin.py", "artifacts.py", "data_contract.py", "bundles.py", "acoustic.py", "corpus.py", "sound_inventory.py", "architecture.py")
+              "training_data.py", "objectives.py", "pinyin.py", "artifacts.py", "data_contract.py", "bundles.py", "acoustic.py", "corpus.py", "sound_inventory.py", "architecture.py", CONTRACT_SOURCE)
 
 
 class TrainingStepFailure(FloatingPointError):
@@ -217,7 +218,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
     run_dir.parent.mkdir(parents=True, exist_ok=True)
     run_dir.mkdir(parents=False, exist_ok=False)
     manifest = {
-        "schema_version": 1, "run_type": "training_run", "status": "running", "run_id": run_id,
+        "schema_version": COMPACT_SCHEMA, "run_type": "training_run", "status": "running", "run_id": run_id,
         "experiment_id": experiment_id, "model_id": model_id, "lambda_cosine": lambda_cosine, "device": str(target_device), "seeds": seeds,
         "selection": SELECTION_RULE,
         "experiment_hashes": {name: sha256_file(experiment_root / name) for name in
@@ -254,11 +255,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
             seed_everything(seed)
             model = build_encoder(config, seed_input["vocab"], model_id=model_id, seed=seed,
                                   bert_inputs=bert_inputs).to(target_device)
-            initial_state = {key: value.detach().cpu().clone() for key, value in model.encoder.state_dict().items()}
-            shared_hash = _state_hash(initial_state)
-            torch.save({"state_dict": initial_state, "seed": seed, "sha256": shared_hash,
-                        "seed_input_hashes": seed_inputs, "experiment_hashes": manifest["experiment_hashes"]},
-                       seed_dir / "shared_encoder.pt")
+            shared_hash = _state_hash(model.encoder.state_dict())
             loaders = create_loaders(seed_input, seed, batch_size=config["training"]["batch_size"], num_workers=0,
                                      bert_inputs=bert_inputs, bert_rows=bert_rows)
             acoustic = torch.as_tensor(experiment["acoustic_targets"], dtype=torch.float32, device=target_device)
@@ -298,13 +295,6 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
                                 "config_sha256": sha256_file(experiment_root / "config.json"),
                                 "vocab_sha256": sha256_file(experiment_root / "seeds" / str(seed) / "vocabulary.json"),
                                 "seed_input_hashes": seed_inputs}, seed_dir / "best.pt")
-                torch.save({"state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(),
-                            **({"scheduler_state_dict": scheduler.state_dict()} if scheduler is not None else {}),
-                            "seed": seed, "epoch": epoch_num, "rng_state": rng_snapshot(loaders["train"].generator),
-                            "model_id": model_id, "seed_input_hashes": seed_inputs,
-                            "experiment_hashes": manifest["experiment_hashes"],
-                            "shared_encoder_sha256": shared_hash},
-                           seed_dir / "last.pt")
                 write_json(seed_dir / "history.json", {"epochs": epoch_history})
                 log_event({"event": "epoch", "epoch": epoch_num, "train": train_metrics, "validation": validation_metrics,
                            "best_epoch": best_epoch, "best_validation_objective": best})

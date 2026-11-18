@@ -17,6 +17,7 @@ from ..experiment import SCHEMA_VERSION, SELECTION_RULE, load_common_test
 from ..objectives import canonical_model_id, parse_model_id
 from ..bert import is_bert
 from ..bert_snapshot import load_bert_inputs
+from ..training_artifacts import TRAINING_RUN_SCHEMAS
 from .geometry_bundle import validate_geometry_bundle
 
 EXTRACTION_TYPE = "encoder_prehead_export"
@@ -68,7 +69,8 @@ def inspect_checkpoints(root, pin, model, experiment_pin, experiment):
     if model not in config["model_ids"]:
         raise ValueError("unknown encoder model")
     manifest = json.loads(pinned_bytes(root, "manifest.json", pin))
-    if (manifest.get("run_type") != "training_run" or manifest.get("schema_version") != 1
+    if (manifest.get("run_type") != "training_run" or type(manifest.get("schema_version")) is not int
+            or manifest["schema_version"] not in TRAINING_RUN_SCHEMAS
             or content_hash(manifest.get("config")) != content_hash(config)
             or manifest.get("model_id") != model or manifest.get("status") != "complete"
             or content_hash(manifest.get("seeds")) != content_hash(seeds)

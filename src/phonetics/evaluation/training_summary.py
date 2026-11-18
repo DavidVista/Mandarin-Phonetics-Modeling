@@ -12,6 +12,7 @@ from .evaluation_outputs import _finite_json, _is_sha, _evaluation_run, _write, 
 from ..research.artifacts import file_sha256
 from ..experiment import SELECTION_RULE, training_epoch_limit
 from ..objectives import parse_model_id
+from ..training_artifacts import LEGACY_SCHEMA, TRAINING_RUN_SCHEMAS
 
 TRAINING_MODELS = ('syllable','components','acoustic','components-acoustic-lambda-1','components-acoustic-lambda-10')
 TRAINING_SEEDS = (0,1,2,3,4)
@@ -105,7 +106,9 @@ def load_training_runs(training_runs):
         character = m['config'].get('schema_version') == 4
         allowed_metrics = {METRICS_SOURCE_SHA256, CHARACTER_METRICS_SOURCE_SHA256} if character else {METRICS_SOURCE_SHA256}
         metrics_source = m.get('code_sha256',{}).get('metrics.py')
-        if (m.get('schema_version')!=1 or m.get('run_type')!='training_run' or m.get('status')!='complete'
+        schemas = TRAINING_RUN_SCHEMAS if character else (LEGACY_SCHEMA,)
+        if (type(m.get('schema_version')) is not int or m['schema_version'] not in schemas
+                or m.get('run_type')!='training_run' or m.get('status')!='complete'
                 or m.get('model_id')!=model or m.get('run_id')!=root.name or m.get('seeds')!=list(TRAINING_SEEDS)
                 or any(type(s) is not int for s in m.get('seeds',[]))
                 or m.get('seed_status')!={str(s):'complete' for s in TRAINING_SEEDS}

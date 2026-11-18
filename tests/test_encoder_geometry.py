@@ -105,7 +105,8 @@ class EncoderGeometryTests(unittest.TestCase):
                     artifacts[path.relative_to(run).as_posix()] = sha256_file(path)
             model_source = Path(__file__).resolve().parents[1] / "src/phonetics/model.py"
             write_json(run / "manifest.json", {
-                "schema_version": 1, "run_type": "training_run", "status": "complete",
+                "schema_version": 2 if model == models[-1] else 1,
+                "run_type": "training_run", "status": "complete",
                 "model_id": model, "seeds": list(seeds), "config": fixture.config,
                 "seed_status": {str(seed): "complete" for seed in seeds},
                 "selection": SELECTION_RULE, "experiment_hashes": {"manifest.json": experiment_pin},

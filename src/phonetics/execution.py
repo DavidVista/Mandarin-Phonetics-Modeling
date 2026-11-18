@@ -395,9 +395,16 @@ def execute_job(path, destination, *, allow_execution=False, input_path=None):
 
 def validate_training_result(root, job):
     """Authenticate opaque checkpoint bytes and JSON contracts without Torch."""
+    from .training_artifacts import (
+        COMPACT_SCHEMA, CONTRACT_SOURCE, LEGACY_SCHEMA, TRAINING_RUN_SCHEMAS, required_training_artifacts,
+    )
+
     root = Path(root)
     manifest = _read(root / 'manifest.json')
     params = job['parameters']
+    schema = manifest.get('schema_version', LEGACY_SCHEMA)
+    if type(schema) is not int or schema not in TRAINING_RUN_SCHEMAS:
+        raise ValueError('unsupported training result schema')
     if (manifest.get('run_type') != 'training_run' or manifest.get('status') != 'complete'
             or manifest.get('model_id') != params['model_id'] or manifest.get('run_id') != params['run_id']
             or manifest.get('experiment_hashes', {}).get('manifest.json') != job['input_manifest_sha256']):
@@ -415,6 +422,11 @@ def validate_training_result(root, job):
     if 'sources' in job:
         codes = manifest.get('code_sha256', {})
         required = {'training.py', 'model.py', 'metrics.py', 'architecture.py', 'experiment.py'}
+        job_schema = COMPACT_SCHEMA if CONTRACT_SOURCE in job['sources'] else LEGACY_SCHEMA
+        if schema != job_schema:
+            raise ValueError('training result schema differs from the job')
+        if job_schema == COMPACT_SCHEMA:
+            required.add(CONTRACT_SOURCE)
         from .bert import is_bert
         from .architecture import BERT_REQUIREMENTS
         if is_bert(manifest.get('config', {'architecture': {}})):
@@ -430,10 +442,11 @@ def validate_training_result(root, job):
     actual = {p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file() and p != root / 'manifest.json'}
     if not artifacts or set(artifacts) != actual or any(p.is_symlink() for p in root.rglob('*')):
         raise ValueError('training result artifact set mismatch')
-    required = {'summary.json'} | {f'seed-{seed}/{name}' for seed in seeds for name in
-                                   ('best.pt', 'last.pt', 'shared_encoder.pt', 'summary.json', 'history.json', 'events.jsonl')}
+    required = required_training_artifacts(seeds, schema)
     if not required <= set(artifacts):
         raise ValueError('training result lacks required checkpoints or logs')
+    if schema == COMPACT_SCHEMA and set(artifacts) != required:
+        raise ValueError('compact training result contains unexpected artifacts')
     for name, digest in artifacts.items():
         if sha256_file(safe_artifact(root, name)) != digest:
             raise ValueError('training result artifact checksum mismatch')

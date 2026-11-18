@@ -6,6 +6,7 @@ import sys
 import shutil
 import wave
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -44,26 +45,30 @@ class ExecutionTests(unittest.TestCase):
 
     def make_result(self, pending, *, run_tree=False, epoch_limit=None):
         from phonetics.execution import validate_job
+        from phonetics.training_artifacts import (
+            COMPACT_SCHEMA, CONTRACT_SOURCE, LEGACY_SCHEMA, required_training_artifacts,
+        )
         job = validate_job(pending['path'])
         root = self.root / 'download'
         payload = root / 'payload'
         if run_tree:
             payload = root / 'runs' / job['experiment_id'] / job['parameters']['model_id'] / job['parameters']['run_id']
         payload.mkdir(parents=True)
-        (payload / 'opaque.pt').write_bytes(b'opaque checkpoint fixture; never deserialize')
         cfg = self.fixture.config
         seeds = list(range(cfg['seed_count']))
-        for seed in seeds:
-            directory = payload / f'seed-{seed}'
-            directory.mkdir()
-            for name in ('best.pt', 'last.pt', 'shared_encoder.pt', 'summary.json', 'history.json', 'events.jsonl'):
-                (directory / name).write_bytes(b'fixture')
-        (payload / 'summary.json').write_bytes(b'fixture')
-        manifest = {'run_type': 'training_run', 'status': 'complete', 'experiment_id': self.experiment.name,
+        schema = COMPACT_SCHEMA if CONTRACT_SOURCE in job['sources'] else LEGACY_SCHEMA
+        for relative in required_training_artifacts(seeds, schema):
+            path = payload / relative
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(b'opaque fixture; never deserialize')
+        code_files = ['training.py', 'model.py', 'metrics.py', 'architecture.py', 'experiment.py']
+        if schema == COMPACT_SCHEMA:
+            code_files.append(CONTRACT_SOURCE)
+        manifest = {'schema_version': schema, 'run_type': 'training_run', 'status': 'complete', 'experiment_id': self.experiment.name,
                     'model_id': pending['model_id'], 'run_id': self.config['execution']['run_id'], 'config': cfg,
                     'seeds': seeds, 'seed_status': {str(s): 'complete' for s in seeds},
                     'experiment_hashes': {'manifest.json': job['input_manifest_sha256']},
-                    'code_sha256': {n: job['sources'][n] for n in ('training.py','model.py','metrics.py','architecture.py','experiment.py')},
+                    'code_sha256': {n: job['sources'][n] for n in code_files},
                     'runtime': {'torch':'2.11.0'},
                     'artifacts': {p.relative_to(payload).as_posix(): sha256_file(p) for p in payload.rglob('*') if p.is_file()}}
         if epoch_limit is not None:
@@ -79,8 +84,16 @@ class ExecutionTests(unittest.TestCase):
             waiting = run_pipeline(self.config)
             self.assertEqual((waiting['status'], waiting['model_id']), ('waiting', 'syllable'))
             self.assertEqual(run_pipeline(self.config)['job_id'], waiting['job_id'])
-            imported = import_result(self.config, self.make_result(waiting, run_tree=True))
-            self.assertTrue((imported / 'opaque.pt').exists())
+            fixture = self.make_result(waiting, run_tree=True)
+            def train(_experiment, *, runs_root, **_kwargs):
+                shutil.copytree(fixture / 'runs', runs_root)
+            with patch.dict(sys.modules, {'phonetics.training': SimpleNamespace(train_experiment=train)}):
+                published = execute_job(waiting['path'], self.root / 'published', allow_execution=True)
+            archive = shutil.make_archive(str(self.root / 'result'), 'zip', root_dir=published)
+            extracted = self.root / 'extracted'
+            shutil.unpack_archive(archive, extracted)
+            imported = import_result(self.config, extracted)
+            self.assertEqual({p.name for p in imported.rglob('*.pt')}, {'best.pt'})
             self.assertIsNone(load_state(self.config)['waiting'])
             self.assertEqual(run_pipeline(self.config)['model_id'], 'components')
         self.assertNotIn('torch', sys.modules)
@@ -117,7 +130,9 @@ class ExecutionTests(unittest.TestCase):
 
     def test_import_legacy_training_payload_after_sdk_upgrade(self):
         from phonetics.execution import _existing_training_job, sdk_files, sdk_hashes
+        from phonetics.training_artifacts import CONTRACT_SOURCE
         old_sources = sdk_files()
+        old_sources.pop(CONTRACT_SOURCE)
         old_sources['execution.py'] += '\n# Previous SDK snapshot\n'
         with patch('phonetics.execution.sdk_files', return_value=old_sources), patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
             pending = run_pipeline(self.config)
@@ -137,7 +152,7 @@ class ExecutionTests(unittest.TestCase):
         self.assertFalse(Path(self.config['paths']['runs']).exists())
         _write_state(self.config['paths']['state'], old_state)
         imported = import_result(self.config, result)
-        self.assertTrue((imported / 'opaque.pt').exists())
+        self.assertEqual({p.name for p in imported.rglob('*.pt')}, {'best.pt', 'last.pt', 'shared_encoder.pt'})
         self.assertIsNone(load_state(self.config)['waiting'])
         with (patch('phonetics.pipeline.run_stage', side_effect=AssertionError('completed stages must not rerun')),
               patch('phonetics.experiment.validate_experiment', side_effect=AssertionError('experiment already verified')),
@@ -149,6 +164,30 @@ class ExecutionTests(unittest.TestCase):
             result = self.make_result(waiting, run_tree=True)
         self.assertEqual(import_result(self.config, result).parent.name, 'components')
         self.assertIn('train:components', load_state(self.config)['completed'])
+
+    def test_compact_result_rejects_missing_or_corrupt_best_checkpoint(self):
+        from phonetics.execution import validate_job, validate_training_result
+
+        with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
+            pending = run_pipeline(self.config)
+        job = validate_job(pending['path'])
+        result = self.make_result(pending)
+        payload = result / 'payload'
+        manifest_path = payload / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        checkpoint = payload / 'seed-0/best.pt'
+        checkpoint.write_bytes(b'corrupt')
+        with self.assertRaisesRegex(ValueError, 'artifact checksum mismatch'):
+            validate_training_result(payload, job)
+        checkpoint.unlink()
+        manifest['artifacts'].pop('seed-0/best.pt')
+        write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(ValueError, 'lacks required checkpoints'):
+            validate_training_result(payload, job)
+        manifest['schema_version'] = 1
+        write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(ValueError, 'schema differs from the job'):
+            validate_training_result(payload, job)
 
     def test_wrong_receipt_cannot_publish_or_advance(self):
         with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):

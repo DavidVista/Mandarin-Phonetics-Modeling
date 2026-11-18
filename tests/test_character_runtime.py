@@ -69,11 +69,16 @@ class CharacterRuntimeTests(unittest.TestCase):
                                       runs_root=fixture.root / 'runs', run_id='fixture')
         self.assertEqual(result['manifest']['seeds'], [0, 1])
         self.assertEqual(result['manifest']['status'], 'complete')
+        self.assertEqual(result['manifest']['schema_version'], 2)
         loaded = load_experiment(root)
         for seed in (0, 1):
             seed_dir = result['run_dir'] / f'seed-{seed}'
+            self.assertEqual({p.name for p in seed_dir.iterdir()},
+                             {'best.pt', 'summary.json', 'history.json', 'events.jsonl'})
             checkpoint = torch.load(seed_dir / 'best.pt', weights_only=True)
             self.assertEqual(checkpoint['seed'], seed)
+            self.assertEqual(checkpoint['shared_encoder_sha256'],
+                             result['manifest']['seed_results'][seed]['shared_encoder_sha256'])
             self.assertEqual(checkpoint['vocab_sha256'], sha256_file(root / 'seeds' / str(seed) / 'vocabulary.json'))
             self.assertEqual(checkpoint['seed_input_hashes']['test'], result['manifest']['seed_results'][seed]['seed_input_hashes']['test'])
             self.assertIn(tuple(select_seed(loaded, seed)['splits']['train']), observed)

@@ -70,6 +70,8 @@ def make_training_fixture(root, *, character=False, epochs_by_model=None):
             'config':{'training':{'epochs':3},'training_seeds':list(range(5))},
             'lambda_cosine':10. if model.endswith('lambda-10') else 1. if model.endswith('lambda-1') else None}
         if character:
+            if model == 'syllable':
+                manifest['schema_version'] = 2
             manifest['config'] = {'schema_version': 4, 'training': {'epochs': 3}, 'seed_count': 5}
             manifest['code_sha256']['metrics.py'] = CHARACTER_METRICS_SOURCE_SHA256
         if epochs_by_model is not None:

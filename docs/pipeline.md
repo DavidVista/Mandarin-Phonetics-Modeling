@@ -92,6 +92,11 @@ phonetics run --config configs/notebook/experiment.bilstm.json
 
 Import verifies outer and nested inventories, the pending job, original input manifest, source hashes, acoustic extraction parameters or training objective/config/seed completion, and checkpoint/log file hashes. It does not load checkpoint tensors. A wrong or incomplete result leaves the pending state intact. Existing different destination data is never overwritten. Imported acoustic targets continue directly into prepared/experiment assembly.
 
+New BiLSTM and BERT training runs use manifest schema 2. Each seed stores
+`best.pt`, `summary.json`, `history.json` and `events.jsonl`. The initialization
+SHA remains in the checkpoint and summary. Schema 1 runs and results from jobs
+issued with the earlier SDK retain their original artifact contract.
+
 `paths.state` is generated progress, separate from the editable config. Config/source changes reject stale state; select a new state path and run ID, and new output IDs for stages whose scientific inputs changed. Repeated runs revalidate upstream inputs and completed outputs. State is written atomically. There is no concurrent-writer scheduler; run only one CLI writer for a config/state file.
 
 ## Syllable geometry evaluation bundle
