@@ -19,6 +19,7 @@ from ..visualization.reference_geometry import render_distance_maps
 from ..visualization.residual_histograms import FIGURE_ID, render_residual_histograms, residual_histogram_seed
 from .reference_geometry import _read_reference
 from . import encoder_diagnostics as diagnostic
+from .shared_character import TRIPLE_BANDS, reading_counts, same_mask_breakdown, shared_pair_residuals, shared_triple_agreement
 
 BASELINE = "Component mismatch count"
 DEFAULT_CONTRASTS = (
@@ -65,6 +66,9 @@ def _summarize_seed_tables(tables, seeds):
         "mask_profiles": ("system", "mask"), "mask_summary": ("system", "includes_full_match"),
         "full_match_gains": ("system", "component", "step_1", "step_2", "step_3"),
         "paired_differences": ("from_system", "to_system", "metric", "slice"),
+        "same_mask_breakdown": ("system", "scope"),
+        "shared_character_residual": ("slice", "system", "mask"),
+        "shared_character_matched_agreement": ("slice", "comparison", "system"),
     }
     result = {}
     for name, keys in dimensions.items():
@@ -170,6 +174,8 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
     all_labels, all_reference = labels, reference
     reference = reference[np.ix_(label_indices, label_indices)]
     labels = [labels[index] for index in label_indices]
+    residual_eligible = np.flatnonzero([all(counts[label] >= 11 for counts in counts_by_seed.values())
+                                      for label in labels])
     component_rows = [components[label] for label in labels]
     primary_occurrences = sum(row["pinyin"] in candidate_labels for row in occurrences)
     full_match = np.array([all(counts[label] > 1 for counts in counts_by_seed.values()) for label in labels])
@@ -208,6 +214,20 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
         for name in ("tables", "data", "figures", "views"):
             (stage / name).mkdir()
         write_json(stage / "config.json", report_identity)
+        write_json(stage / "data/shared_character_matched_agreement.json", {
+            "minimum_valid_occurrences_per_reading_per_seed": 11,
+            "unknown_policy": "exclude_target_position",
+            "strong_shared_character_minimum_fraction_per_reading": .25,
+            "frequency_band_edges": TRIPLE_BANDS,
+            "pair_frequency_bands": "base-two logarithmic bins",
+            "pair_population": "Readings with at least 11 valid occurrences in every seed.",
+            "triple_population": "Readings with at least 11 valid occurrences in the current seed.",
+            "matching": ["seed", "anchor", "comparison type", "exact candidate masks", "candidate frequency bands"],
+            "control": "Neither candidate shares a character with the anchor.",
+            "agreement": "DIMSIM ties are excluded. Encoder ties receive half credit.",
+            "weighting": "Control strata are weighted by matched Shared Char comparison counts.",
+            "source_inputs": {"experiment": pins["experiment"], "evaluation": pins["evaluation"]},
+        })
         write_json(stage / "data/inventory.json", {
             "labels": labels, "components": component_rows,
             "full_match_labels": [label for label, available in zip(labels, full_match) if available],
@@ -251,12 +271,12 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
             for model in models:
                 _, hidden, _, _ = next(generators[model])
                 distance = contextual_distances(labels, retained, hidden[selected])
-                if diagnostics:
-                    diagnostic_rows["full_match"].extend(
-                        {"seed": seed, **row} for row in diagnostic.full_match_rows(
-                            labels, component_rows, retained, hidden[selected], distance, tolerance, model
-                        )
+                diagnostic_rows["full_match"].extend(
+                    {"seed": seed, **row} for row in diagnostic.full_match_rows(
+                        labels, component_rows, retained, hidden[selected], distance, tolerance, model
                     )
+                )
+                if diagnostics:
                     for name, (inventory, _, positions_by_seed, match) in populations.items():
                         if len(inventory) < 2:
                             continue
@@ -291,6 +311,14 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                 row.update(top_overlap=overlap, near_far_win_rate=near_far)
             rankings = (overlap_rates[:len(systems)], near_far_rates[:len(systems)])
             tables["paired_differences"] = paired_differences(tables)
+            counts = reading_counts(labels, retained)
+            tables["same_mask_breakdown"] = list(same_mask_breakdown(tables["same_mask_agreement"]))
+            tables["shared_character_residual"] = list(
+                shared_pair_residuals(counts, mask, distances, systems, residual_eligible)
+            )
+            tables["shared_character_matched_agreement"] = list(
+                shared_triple_agreement(counts, mask, distances, systems, tolerance)
+            )
             if diagnostics:
                 diagnostic_rows["coverage"].append(
                     {"seed": seed, "population": "primary", "syllables": len(labels),
@@ -324,8 +352,8 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
         np.savez_compressed(stage / "data/across-seeds.npz", distances=means, **map_sum)
         _write_tables(stage / "tables", {**all_tables, "coverage": coverage}, "")
         _write_tables(stage / "tables", summary, "_across_seeds")
-        if diagnostics:
-            for name, fields in diagnostic.TABLE_FIELDS.items():
+        for name, fields in diagnostic.TABLE_FIELDS.items():
+            if diagnostics or name == "full_match":
                 with (stage / "tables" / f"diagnostic_{name}.csv").open("w", encoding="utf-8", newline="") as stream:
                     writer = csv.DictWriter(stream, fieldnames=fields.split())
                     writer.writeheader()

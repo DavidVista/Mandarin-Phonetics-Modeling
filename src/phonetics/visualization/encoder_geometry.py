@@ -91,7 +91,7 @@ def write_view(path, key, distances, maps, tables, tolerance, *, systems, seeds,
             for row in tables["dimsim_agreement"] if row["system"] == "DIMSIM"}
     profiles, residuals = _view_profiles(tables, across, systems)
     overlap, near_far = rankings if rankings is not None else rank_metrics(distances, maps["neighborhood"], tolerance)
-    keys = ("controlled_match", "dimsim_agreement", "same_mask_agreement", "pairwise_spearman",
+    keys = ("controlled_match", "dimsim_agreement", "same_mask_breakdown", "shared_character_residual", "pairwise_spearman",
             "paired_differences", "mask_summary", "full_match_gains")
     view = {
         "distance": _encode_models(ordered, "<f4"),
@@ -152,6 +152,7 @@ def _encoder_template(models):
     start = page.index("<h2>Top positive residual pairs</h2>")
     end = page.index("</section>", start)
     page = page[:start] + page[end:]
+    page = page.replace('<div id="profile-steps"></div>', '<div id="profile-steps"></div>@@shared_char_profile@@')
     page = page.replace("const residualTopPairs=@@residualTopPairs@@;\n", "")
     start = page.index(" document.querySelector('#profile-residuals').innerHTML")
     end = page.index(" renderProfileSteps();", start)
@@ -238,17 +239,59 @@ function load(key){
  });
 }
 const escapeHTML=value=>String(value??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function selectedTables(view, models){
+const percent=value=>value==null?'—':(100*value).toFixed(2)+'%';
+const number=(value,digits=0)=>value==null?'—':value.toLocaleString('en-US',{maximumFractionDigits:digits});
+function reportTable(columns, rows){
+ const cells=(row,tag)=>row.map(value=>'<'+tag+'>'+escapeHTML(value)+'</'+tag+'>').join('');
+ return '<div class="scroll" style="overflow:auto"><table><thead><tr>'+cells(columns,'th')+
+   '</tr></thead><tbody>'+rows.map(row=>'<tr>'+cells(row,'td')+'</tr>').join('')+'</tbody></table></div>';
+}
+function sharedCharProfile(view, models, across){
+ const rows=view.tables.shared_character_residual;
+ const fmt=value=>value==null?'—':value.toFixed(4);
+ const columns=['Model','Mask','Δ residual','Matched pairs'];
+ const table=items=>reportTable(columns,items.map(row=>[
+   settings.names[settings.systems.indexOf(row.system)],row.mask,
+   across?fmt(row.delta_mean)+(row.delta_sd==null?'':' ± '+fmt(row.delta_sd)):fmt(row.delta),
+   number(across?row.shared_pairs_matched_mean:row.shared_pairs_matched,1)]));
+ const slices=['any_shared_character','shared_character_at_least_25pct'];
+ return '<h2>Shared Char residual Δ</h2><p class="hint">Shared-character pairs minus matched controls.'+
+   (across?' Values are mean ± sample SD across seeds.':'')+'</p>'+
+   slices.map((slice,index)=>{
+     const selected=rows.filter(row=>row.slice===slice&&models.includes(settings.systems.indexOf(row.system)));
+     return '<h3>'+['Any shared character','Shared character in ≥25% of each reading'][index]+'</h3>'+
+       table(selected.filter(row=>row.mask==='all'))+
+       '<details><summary>Breakdown by overlap mask</summary>'+table(selected.filter(row=>row.mask!=='all'))+'</details>';
+   }).join('')+
+   '<p><a href="tables/shared_character_residual_across_seeds.csv" target="_top">Summary CSV</a> · '+
+   '<a href="tables/shared_character_residual.csv" target="_top">Per-seed CSV</a> · '+
+   '<a href="figures/residual-histograms-by-mask.png" target="_top">Residual histograms</a> · '+
+   '<a href="figures/residual-histograms-by-mask.eps" target="_top">EPS</a> · '+
+   '<a href="tables/residuals_top50.csv" target="_top">Top positive residual pairs</a></p>';
+}
+function selectedTables(view, models, across){
  const names=new Set(models.map(i=>settings.systems[i]));
  const display=value=>escapeHTML(typeof value==='number'?Number(value.toPrecision(6)):value);
  return Object.entries(view.tables).map(([name, rows])=>{
+  if(name==='shared_character_residual')return '';
   const selected=rows.filter(row=>names.has(row.system)||row.system==='Component mismatch count'||
     (names.has(row.from_system)&&names.has(row.to_system)));
   if(!selected.length)return '';
+  if(name==='same_mask_breakdown'){
+   return '<h3>Same mask</h3>'+reportTable(['System','Scope','Triples','Comparisons','DIMSIM agreement'],
+     selected.map(row=>[settings.names[settings.systems.indexOf(row.system)]??row.system,
+      row.scope==='Same mask 000'?'No shared components (000)':row.scope,
+      number(across?row.triples_mean:row.triples,1),number(across?row.comparisons_mean:row.comparisons,1),
+      across?percent(row.agreement_mean)+(row.agreement_sd==null?'':' ± '+percent(row.agreement_sd)):percent(row.agreement)]))+
+      '<p><a href="tables/same_mask_agreement.csv">Per-mask CSV</a> · '+
+      '<a href="tables/same_mask_breakdown.csv">Breakdown by seed</a> · '+
+      '<a href="tables/same_mask_breakdown_across_seeds.csv">Breakdown across seeds</a></p>';
+  }
   const keys=Object.keys(selected[0]);
   return '<h3>'+escapeHTML(name.replaceAll('_',' '))+'</h3><div style="overflow:auto"><table><tr>'+
    keys.map(key=>'<th>'+escapeHTML(key.replaceAll('_',' '))+'</th>').join('')+'</tr>'+
-   selected.map(row=>'<tr>'+keys.map(key=>'<td>'+display(row[key])+'</td>').join('')+'</tr>').join('')+'</table></div>';
+   selected.map(row=>'<tr>'+keys.map(key=>'<td>'+(/(?:agreement|win_rate)(?:_mean|_sd)?$/.test(key)
+     ? percent(row[key]) : display(row[key]))+'</td>').join('')+'</tr>').join('')+'</table></div>';
  }).join('');
 }
 async function render(){
@@ -270,10 +313,11 @@ async function render(){
     syllables:settings.labels.length.toLocaleString('en-US'),
     pairs:(settings.labels.length*(settings.labels.length-1)/2).toLocaleString('en-US'),
     evaluation_id:settings.evaluation,excluded:settings.excluded,tolerance:settings.tolerance,coverage:settings.coverage});
-  $('view').srcdoc=template.replace(/@@([A-Za-z_]+)@@/g,(_,name)=>substitutions[name]);
   const across=key==='across-seeds';
+  substitutions.shared_char_profile=sharedCharProfile(view,systems,across);
+  $('view').srcdoc=template.replace(/@@([A-Za-z_]+)@@/g,(_,name)=>substitutions[name]);
   $('status').textContent=across?'Maps show mean distances and seedwise comparison scores. Tables summarize metrics computed separately by seed.':'Showing distances and metrics for '+$('seed').selectedOptions[0].text+'.';
-  $('summary').innerHTML=selectedTables(view,systems);
+  $('summary').innerHTML=selectedTables(view,systems,across);
   for(const loaded of Object.keys(window.encoderViews))if(loaded!==key)delete window.encoderViews[loaded];
  }catch(error){if(token===revision)$('status').textContent=error.message;}
 }
@@ -298,11 +342,15 @@ def write_page(path, labels, components, coverage, *, architecture, evaluation, 
     architecture_name = {"char_bilstm": "BiLSTM", "bert": "BERT"}[architecture]
     page = (_SHELL.replace("@@ARCHITECTURE@@", architecture_name)
             .replace("@@SETTINGS@@", _json(settings)).replace("@@TEMPLATE@@", _json(_encoder_template(systems[1:]))))
-    links = ""
+    links = ('<p class="report-note"><a href="tables/shared_character_matched_agreement_across_seeds.csv">Shared Char agreement across seeds</a> · '
+             '<a href="tables/shared_character_matched_agreement.csv">Shared Char agreement by seed</a> · '
+             '<a href="tables/diagnostic_full_match.csv">Full Match by character</a> · '
+             '<a href="data/shared_character_matched_agreement.json">Shared Char method</a></p>')
     if diagnostics:
         from ..research.encoder_diagnostics import TABLE_FIELDS
-        links = '<p class="report-note">Diagnostics: ' + " · ".join(
+        links += '<p class="report-note">Diagnostics: ' + " · ".join(
             f'<a href="tables/diagnostic_{name}.csv">{name.replace("_", " ").capitalize()}</a>'
             for name in TABLE_FIELDS
+            if name != "full_match"
         ) + ' · <a href="data/diagnostics.json">Inventories and provenance</a></p>'
     Path(path).write_text(page.replace("@@DIAGNOSTICS@@", links), encoding="utf-8")
