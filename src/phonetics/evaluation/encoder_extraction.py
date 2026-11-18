@@ -14,7 +14,7 @@ from ..artifacts import safe_artifact, sha256_file, write_json
 from ..bundles import content_hash, seal_bundle, staging_directory, validate_bundle
 from ..architecture import BERT_REQUIREMENTS
 from ..experiment import SCHEMA_VERSION, SELECTION_RULE, load_common_test
-from ..objectives import canonical_model_id, parse_model_id
+from ..objectives import canonical_model_id, is_extension_model, parse_model_id
 from ..bert import is_bert
 from ..bert_snapshot import load_bert_inputs
 from ..training_artifacts import TRAINING_RUN_SCHEMAS
@@ -66,7 +66,7 @@ def inspect_checkpoints(root, pin, model, experiment_pin, experiment):
     """Check checkpoint bytes and selected epochs without loading tensors."""
     config = experiment["identity"]["config"]
     seeds = experiment["identity"]["training_seeds"]
-    if model not in config["model_ids"]:
+    if model not in config["model_ids"] and not is_extension_model(model):
         raise ValueError("unknown encoder model")
     manifest = json.loads(pinned_bytes(root, "manifest.json", pin))
     if (manifest.get("run_type") != "training_run" or type(manifest.get("schema_version")) is not int
@@ -87,6 +87,9 @@ def inspect_checkpoints(root, pin, model, experiment_pin, experiment):
         source = (Path(__file__).parents[1] / name).read_text(encoding="utf-8")
         source_pins = {hashlib.sha256(text.encode()).hexdigest()
                        for text in (source, source.replace("\n", "\r\n"))}
+        if name == "model.py" and not is_extension_model(model):
+            # The model before the syllable-acoustic head combination used the same existing heads.
+            source_pins.add("4c9df43b451155582e1df117c0a5edaa60284a7b054fe34fad5cf75616ce6842")
         if not is_bert(config):
             # The pre-BERT model implements the same BiLSTM state and input contract.
             source_pins.update(("ee0a140f942238a9bdd99721ed1dcc6f4124bc4bb650cde33808cb49a7bcd12e",

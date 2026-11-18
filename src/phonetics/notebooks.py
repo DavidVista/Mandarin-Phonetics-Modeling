@@ -191,7 +191,7 @@ if job["stage"] == "training":
 
 
 def generate_notebooks(config, *, stage='ready', refresh_sdk=False):
-    from .execution import create_job, load_state, refresh_training_sdk
+    from .execution import create_job, load_state, refresh_training_sdk, training_model_ids
     if config['schema_version'] != 2:
         raise ValueError('notebook generation requires configuration schema 2')
     state = None
@@ -214,7 +214,11 @@ def generate_notebooks(config, *, stage='ready', refresh_sdk=False):
     experiment = Path(paths['experiments']) / config['experiment_id']
     if stage in ('ready', 'training'):
         if experiment.exists():
-            for model_id in config['experiment']['model_ids']:
+            if state is None and config['execution'].get('additional_model_ids'):
+                state = load_state(config)
+            for model_id in training_model_ids(config):
+                if state is not None and 'train:' + model_id in state['completed']:
+                    continue
                 result.append(create_job(config, 'training', experiment, model_id=model_id, _generation=generation))
         elif stage == 'training':
             raise ValueError('prepare the experiment bundle before generating training notebooks')

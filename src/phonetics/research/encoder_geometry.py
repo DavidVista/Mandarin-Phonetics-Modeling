@@ -118,7 +118,9 @@ def _write_tables(root, tables, suffix):
 def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, checkpoints,
                          output, tolerance, source_sha256, diagnostics=False, contrasts=None):
     experiment = load_experiment_manifest(experiment_root, pins["experiment"])
-    models = experiment["identity"]["config"]["model_ids"]
+    from ..encoder_jobs import validate_run_inventory
+
+    models = validate_run_inventory(pins, experiment)
     seeds = experiment["identity"]["training_seeds"]
     if set(exports) != set(models) or set(checkpoints) != set(models):
         raise ValueError("encoder report input models differ from the experiment")

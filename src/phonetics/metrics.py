@@ -17,7 +17,7 @@ def batch_objective(outputs: dict, batch: dict, acoustic_targets: torch.Tensor, 
     if count <= 0 or not torch.equal(mask, batch["acoustic_ids"] >= 0):
         raise ValueError("batch target masks are empty or misaligned")
     values = {"characters": count, "objective_sum": outputs["hidden"].new_zeros(())}
-    if family == "syllable":
+    if family in {"syllable", "syllable-acoustic"}:
         target = batch["syllable_ids"][mask]
         loss = F.cross_entropy(outputs["syllable_logits"][mask], target, reduction="sum")
         values["syllable_ce_sum"] = loss
@@ -41,7 +41,7 @@ def batch_objective(outputs: dict, batch: dict, acoustic_targets: torch.Tensor, 
         valid = (predicted[:, None, :] == valid_pairs[None, :, :]).all(dim=-1).any(dim=-1)
         values["invalid_if_count"] = int((~valid).sum().item())
         values["joint_ift_correct"] = int((torch.stack([outputs["component_logits"][n][mask].argmax(-1) for n in ("initials", "finals", "tones")], dim=-1) == labels).all(dim=-1).sum().item())
-    if family in {"acoustic", "components-acoustic"}:
+    if family in {"acoustic", "components-acoustic", "syllable-acoustic"}:
         target_ids = batch["acoustic_ids"][mask]
         prediction = outputs["acoustic_prediction"][mask]
         targets = acoustic_targets[target_ids]
@@ -49,7 +49,7 @@ def batch_objective(outputs: dict, batch: dict, acoustic_targets: torch.Tensor, 
         cosine_sum = cosine_distance.sum()
         values["cosine_sum"] = cosine_sum
         values["predicted_norm_below_epsilon"] = int((torch.linalg.vector_norm(prediction.float(), dim=-1) < COSINE_EPSILON).sum().item())
-        weighted = (weight if family == "components-acoustic" else 1.0) * cosine_sum
+        weighted = (weight if weight is not None else 1.0) * cosine_sum
         values["weighted_cosine_sum"] = weighted
         values["objective_sum"] = values["objective_sum"] + weighted
     values["objective"] = values["objective_sum"] / count

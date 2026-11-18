@@ -34,7 +34,8 @@ class CharacterRuntimeTests(unittest.TestCase):
         vocabulary = {'characters': {'tokens': ['[PAD]', '[UNK]', '妈']}, 'syllables': ['ma1'],
                       'labels': {'initials': INITIALS, 'finals': FINALS, 'tones': TONES}}
         hashes = []
-        for objective in DEFAULT_MODEL_IDS:
+        combined = 'syllable-acoustic-lambda-1'
+        for objective in (*DEFAULT_MODEL_IDS, combined):
             model = build_encoder(config, vocabulary, model_id=objective, seed=1)
             hashes.append(shared_encoder_sha256(model))
             model.eval()
@@ -44,6 +45,10 @@ class CharacterRuntimeTests(unittest.TestCase):
             self.assertEqual(outputs['mask'].sum().item(), 3)
             stats = batch_objective(outputs, batch, torch.tensor([[1., 2.]]), objective)
             self.assertTrue(torch.isfinite(stats['objective']))
+            if objective == combined:
+                expected = (stats['syllable_ce_sum'] + stats['cosine_sum']) / stats['characters']
+                torch.testing.assert_close(stats['objective'], expected)
+                self.assertNotIn('component_logits', outputs)
             stats['objective'].backward()
             self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None))
         self.assertEqual(len(set(hashes)), 1)

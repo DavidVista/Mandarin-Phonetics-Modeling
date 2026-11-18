@@ -72,11 +72,14 @@ def encoder_inputs(config, state=None):
 
 
 def validate_run_inventory(refs, experiment):
+    from .objectives import is_extension_model
+
     models = experiment["identity"]["config"]["model_ids"]
     required = {"experiment", "evaluation", *models}
-    if set(refs) != required:
-        raise ValueError("select exactly one training run for each experiment model")
-    return models
+    additional = sorted(set(refs) - required)
+    if not required <= set(refs) or not all(is_extension_model(model) for model in additional):
+        raise ValueError("select exactly one training run for each experiment model and any valid extension models")
+    return [*models, *additional]
 
 
 def locate_manifests(refs, pins, mount):
@@ -197,7 +200,8 @@ def run_encoder_workflow(*, refs, pins, spec, reports_root, source_sha256, allow
         raise ValueError("evaluation and experiment pins differ")
     experiment = load_experiment_manifest(roots["experiment"], pins["experiment"])
     models = validate_run_inventory(refs, experiment)
-    validate_run_inventory(pins, experiment)
+    if set(pins) != set(refs):
+        raise ValueError("encoder input references and pins name different models")
     exports = locate_exports(spec, pins, models, mount)
     missing = [model for model in models if model not in exports]
     if missing and not allow_execution:

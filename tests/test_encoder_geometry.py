@@ -56,7 +56,12 @@ class EncoderGeometryTests(unittest.TestCase):
         models = (*TRAINING_MODELS, "components-acoustic-lambda-3")
         self.check_report(models, (0, 1, 2), contrasts=[["components", models[-1]]])
 
-    def check_report(self, models, seeds, contrasts=None):
+    def test_report_accepts_extension_checkpoint_from_the_original_experiment(self):
+        extension = "syllable-acoustic-lambda-1"
+        self.check_report((*TRAINING_MODELS, extension), (0, 1, 2),
+                          contrasts=[["components-acoustic-lambda-1", extension]], extension=extension)
+
+    def check_report(self, models, seeds, contrasts=None, extension=None):
         from phonetics.visualization.core import VisualizationError, load_protocol, require_font
         try:
             require_font(load_protocol().style["font"]["family"])
@@ -68,7 +73,7 @@ class EncoderGeometryTests(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         fixture.setUp()
         fixture.config["seed_count"] = len(seeds)
-        fixture.config["model_ids"] = list(models)
+        fixture.config["model_ids"] = [model for model in models if model != extension]
         experiment = fixture.build()
         experiment_pin = sha256_file(experiment / "manifest.json")
         evaluation = prepare_geometry_bundle({
@@ -110,7 +115,9 @@ class EncoderGeometryTests(unittest.TestCase):
                 "model_id": model, "seeds": list(seeds), "config": fixture.config,
                 "seed_status": {str(seed): "complete" for seed in seeds},
                 "selection": SELECTION_RULE, "experiment_hashes": {"manifest.json": experiment_pin},
-                "code_sha256": {"model.py": sha256_file(model_source)}, "artifacts": artifacts,
+                "code_sha256": {"model.py": (
+                    "4c9df43b451155582e1df117c0a5edaa60284a7b054fe34fad5cf75616ce6842"
+                    if extension and model != extension else sha256_file(model_source))}, "artifacts": artifacts,
             })
             root = fixture.root / "exports" / model
             exports[model] = root

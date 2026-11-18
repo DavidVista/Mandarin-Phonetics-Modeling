@@ -92,8 +92,8 @@ class TrainingModel(nn.Module):
         if family in {"components", "components-acoustic"}:
             for name in ("initials", "finals", "tones"):
                 self.component_heads[name] = ClassifierHead(len(labels[name]), self.context_dim, heads)
-        self.syllable_head = ClassifierHead(len(vocab["syllables"]), self.context_dim, heads) if family == "syllable" else None
-        self.acoustic_head = nn.Linear(self.context_dim, int(acoustic_dim)) if family in {"acoustic", "components-acoustic"} else None
+        self.syllable_head = ClassifierHead(len(vocab["syllables"]), self.context_dim, heads) if family in {"syllable", "syllable-acoustic"} else None
+        self.acoustic_head = nn.Linear(self.context_dim, int(acoustic_dim)) if family in {"acoustic", "components-acoustic", "syllable-acoustic"} else None
 
     def encode(self, batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
         return self.encoder.encode(batch)

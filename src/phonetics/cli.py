@@ -26,6 +26,8 @@ def main(argv=None):
     run.add_argument('--through', choices=('experiment', 'training', 'analysis', 'visualization'), default='visualization')
     run.add_argument('--allow-inference', action='store_true')
     run.add_argument('--allow-training', action='store_true')
+    run.add_argument('--extend-training', action='store_true',
+                     help='Add configured objectives to an existing completed training inventory')
     generate = commands.add_parser('generate-notebooks', help='Generate notebooks and portable input jobs from one config')
     generate.add_argument('--config', required=True)
     generate.add_argument('--stage', choices=('ready', 'acoustic', 'training', 'visualization', 'encoder-geometry'), default='ready')
@@ -85,7 +87,8 @@ def main(argv=None):
             if args.command == 'run':
                 from .execution import run_pipeline
                 result = run_pipeline(config, through=args.through, allow_inference=args.allow_inference,
-                                      allow_training=args.allow_training, progress=_print_progress)
+                                      allow_training=args.allow_training, extend_training=args.extend_training,
+                                      progress=_print_progress)
                 if result['status'] in ('waiting', 'notebook-ready'):
                     stage = result.get('reference_id') or result.get('model_id') or result['stage']
                     _print_progress(f"Notebook ready for {stage}: {result['notebook']}")

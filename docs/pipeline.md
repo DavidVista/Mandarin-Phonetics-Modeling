@@ -97,6 +97,14 @@ New BiLSTM and BERT training runs use manifest schema 2. Each seed stores
 SHA remains in the checkpoint and summary. Schema 1 runs and results from jobs
 issued with the earlier SDK retain their original artifact contract.
 
+To extend a completed run, add `syllable-acoustic-lambda-1` to
+`execution.additional_model_ids` and select new IDs for the training report and
+encoder geometry. Keep `experiment` unchanged. Run
+`phonetics run --config PATH --extend-training --through training` to validate the
+completed runs and prepare the added training job. It uses the original bundle
+and combines syllable cross-entropy with cosine distance at λ = 1. Import the
+result with the same configuration.
+
 `paths.state` is generated progress, separate from the editable config. Config/source changes reject stale state; select a new state path and run ID, and new output IDs for stages whose scientific inputs changed. Repeated runs revalidate upstream inputs and completed outputs. State is written atomically. There is no concurrent-writer scheduler; run only one CLI writer for a config/state file.
 
 ## Syllable geometry evaluation bundle

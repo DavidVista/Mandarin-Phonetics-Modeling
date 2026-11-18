@@ -26,7 +26,7 @@ from .bert import is_bert
 from .bert_snapshot import load_bert_inputs
 from .metrics import batch_objective, finalize_epoch
 from .model import BertEncoder, build_encoder, shared_encoder_sha256
-from .objectives import canonical_model_id, parse_model_id
+from .objectives import canonical_model_id, is_extension_model, parse_model_id
 from .reproducibility import seed_everything
 from .training_artifacts import COMPACT_SCHEMA, CONTRACT_SOURCE
 
@@ -187,7 +187,7 @@ def train_experiment(experiment_path, *, model_id: str, runs_root=None, device: 
         if actual_manifest_sha256 != expected_manifest_sha256:
             raise ValueError("experiment manifest does not match the explicitly selected input pin")
     config = experiment["config"]
-    if model_id not in config["model_ids"]:
+    if model_id not in config["model_ids"] and not is_extension_model(model_id):
         raise ValueError("selected model_id is not configured in the experiment")
     epoch_limit = training_epoch_limit(config, model_id)
     bert_inputs = None

@@ -16,7 +16,7 @@ def _system_name(system):
     if system == "DIMSIM":
         return system
     family, weight = parse_model_id(system)
-    return f"Components + Acoustic (λ={weight:g})" if weight is not None else family.capitalize()
+    return f"{family.removesuffix('-acoustic').capitalize()} + Acoustic (λ={weight:g})" if weight is not None else family.capitalize()
 
 
 def _json(value):

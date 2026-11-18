@@ -1,6 +1,7 @@
 """Local execution and content-bound notebook handoffs without eager ML imports."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -47,8 +48,13 @@ def sdk_hashes(files=None):
 def validate_execution_config(config, resolve):
     spec = config['execution']
     required = {'acoustic', 'training', 'training_device', 'run_id'}
-    if not isinstance(spec, dict) or not required <= set(spec) <= required | {'preparation', 'visualization'}:
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {'preparation', 'visualization', 'additional_model_ids'}:
         raise ValueError('execution requires acoustic, training, training_device and run_id')
+    from .objectives import is_extension_model
+    additional = spec.get('additional_model_ids', [])
+    if (not isinstance(additional, list) or not all(is_extension_model(model) for model in additional)
+            or len(set(additional)) != len(additional) or set(additional) & set(config['experiment']['model_ids'])):
+        raise ValueError('execution.additional_model_ids must contain distinct new syllable-acoustic objectives')
     spec.setdefault('visualization', 'local')
     config.setdefault('visualization', [])
     for key in ('acoustic', 'training', 'visualization'):
@@ -153,7 +159,11 @@ def _manifest_pin(path):
 def training_run_paths(config):
     root = (Path(config['paths']['runs']) / safe_id(config['experiment_id']))
     return {model: str(root / safe_id(model) / config['execution']['run_id'])
-            for model in config['experiment']['model_ids']}
+            for model in training_model_ids(config)}
+
+
+def training_model_ids(config):
+    return [*config['experiment']['model_ids'], *config['execution'].get('additional_model_ids', [])]
 
 
 def completed_manifest(state, key, path):
@@ -285,6 +295,8 @@ def create_job(config, stage, input_path, *, model_id=None, workflow=None, refer
         validate_sound_inventory(input_path)
         parameters = {'model': config['model'] if reference is None else reference['parameters']['base_model']}
     elif stage == 'training':
+        if model_id not in training_model_ids(config):
+            raise ValueError('training objective is not configured for this run')
         from .experiment import validate_experiment
         key = str(Path(input_path).resolve())
         if key not in context.setdefault('experiments', {}):
@@ -590,13 +602,77 @@ def _verify_completed_manifests(state):
             raise ValueError('a completed stage manifest changed')
 
 
-def run_pipeline(config, *, through='visualization', allow_inference=False, allow_training=False, progress=None):
+def extend_training_state(config):
+    """Adopt added training objectives while retaining the pinned experiment and completed runs."""
+    path = Path(config['paths']['state'])
+    state = _read(path)
+    old = state['identity']['config']
+    if old == config:
+        return load_state(config, _allow_pending_training_sdk=True)
+    previous = training_model_ids(old)
+    models = training_model_ids(config)
+    if (state.get('schema_version') != 1 or state['waiting'] is not None
+            or models[:len(previous)] != previous or len(models) == len(previous)):
+        raise ValueError('training extension requires an idle run and appended objectives')
+    retained = copy.deepcopy(config)
+    retained['execution'] = {key: value for key, value in retained['execution'].items() if key != 'additional_model_ids'}
+    if 'additional_model_ids' in old['execution']:
+        retained['execution']['additional_model_ids'] = old['execution']['additional_model_ids']
+    old_reports = [job for job in old['analysis'] if job['workflow'] == 'training-report']
+    new_reports = [job for job in config['analysis'] if job['workflow'] == 'training-report']
+    for prior, current in zip(old_reports, new_reports, strict=True):
+        expected = {'id': current['id'], 'workflow': 'training-report',
+                    'parameters': {'training_runs': training_run_paths(config)}}
+        if current != expected or prior['id'] == current['id']:
+            raise ValueError('select a new training-report ID for the expanded inventory')
+        retained['analysis'][config['analysis'].index(current)] = prior
+    if 'encoder_geometry' in old and 'encoder_geometry' in config:
+        prior, current = old['encoder_geometry'], config['encoder_geometry']
+        if prior['id'] == current['id']:
+            raise ValueError('select a new encoder_geometry ID for the expanded inventory')
+        old_contrasts = prior.get('contrasts', [])
+        if 'contrasts' not in prior and 'contrasts' in current:
+            from .research.encoder_geometry import DEFAULT_CONTRASTS
+            old_contrasts = [list(pair) for pair in DEFAULT_CONTRASTS if set(pair) <= set(previous)]
+        new_contrasts = current.get('contrasts', [])
+        if (new_contrasts[:len(old_contrasts)] != old_contrasts
+                or any(set(pair) <= set(previous) for pair in new_contrasts[len(old_contrasts):])):
+            raise ValueError('append only contrasts involving additional objectives')
+        geometry = {**current, 'id': prior['id'], 'training_runs': prior['training_runs']}
+        if 'contrasts' in prior:
+            geometry['contrasts'] = old_contrasts
+        else:
+            geometry.pop('contrasts', None)
+        retained['encoder_geometry'] = geometry
+    identity = _state_identity(config)
+    if retained != old or identity['acoustic_source_sha256'] != state['identity']['acoustic_source_sha256']:
+        raise ValueError('training extension changes existing pipeline inputs or settings')
+    _verify_completed_manifests(state)
+    experiment = Path(config['paths']['experiments']) / config['experiment_id']
+    pin = completed_manifest(state, 'prepare-experiment', experiment)
+    for model in previous:
+        root = training_run_paths(old)[model]
+        completed_manifest(state, 'train:' + model, root)
+        validate_training_result(root, {'parameters': {'model_id': model, 'run_id': config['execution']['run_id']},
+                                        'input_manifest_sha256': pin})
+    for report in old_reports:
+        state['completed'].pop('analysis:' + report['id'], None)
+    state['completed'].pop('encoder-geometry', None)
+    state.pop('previous_training_sources', None)
+    state['identity'] = identity
+    _write_state(path, state)
+    return state
+
+
+def run_pipeline(config, *, through='visualization', allow_inference=False, allow_training=False,
+                 extend_training=False, progress=None):
     from .pipeline import run_stage
     if through not in ('experiment', 'training', 'analysis', 'visualization'):
         raise ValueError('invalid final pipeline stage')
     if progress is not None:
         progress(f"Experiment {config['experiment_id']}: checking run state")
-    state = load_state(config, _allow_pending_training_sdk=True)
+    state = (extend_training_state(config) if extend_training
+             else load_state(config, _allow_pending_training_sdk=True))
     if state['waiting']:
         pending = state['waiting']
         job = validate_job(pending['path'], expected_sdk_sha256=_pending_sdk(state))
@@ -645,7 +721,7 @@ def run_pipeline(config, *, through='visualization', allow_inference=False, allo
         return {'status': 'complete', 'through': through, 'path': state['completed']['prepare-experiment']['path']}
     experiment = Path(config['paths']['experiments']) / config['experiment_id']
     experiment_pin = completed_manifest(state, 'prepare-experiment', experiment)
-    models = config['experiment']['model_ids']
+    models = training_model_ids(config)
     for index, model_id in enumerate(models, start=1):
         key = 'train:' + model_id
         if key in state['completed']:

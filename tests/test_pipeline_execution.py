@@ -33,6 +33,7 @@ class ExecutionTests(unittest.TestCase):
             shutil.copyfile(self.fixture.prepared / name, self.acoustic / name)
         seal_bundle(self.acoustic, 'acoustic_targets', {'inventory_manifest_sha256': 'a' * 64})
         self.config = load_config(PROJECT / 'configs/notebook/experiment.bilstm.json')
+        self.config['execution'].pop('additional_model_ids', None)
         self.config['acoustic'] = {'existing_bundle': str(self.acoustic),
                                    'manifest_sha256': sha256_file(self.acoustic / 'manifest.json')}
         self.config['experiment_id'] = self.experiment.name
@@ -97,6 +98,44 @@ class ExecutionTests(unittest.TestCase):
             self.assertIsNone(load_state(self.config)['waiting'])
             self.assertEqual(run_pipeline(self.config)['model_id'], 'components')
         self.assertNotIn('torch', sys.modules)
+
+    def test_extend_training_reuses_imported_runs_and_pins_new_result(self):
+        self.config['analysis'] = []
+        self.config.pop('encoder_geometry')
+        original_pin = sha256_file(self.experiment / 'manifest.json')
+        with patch('phonetics.pipeline.run_stage', side_effect=self.mock_stage):
+            for _ in self.config['experiment']['model_ids']:
+                pending = run_pipeline(self.config, through='training')
+                fixture = self.make_result(pending, run_tree=True)
+                import_result(self.config, fixture)
+                shutil.rmtree(fixture)
+        original = copy.deepcopy(load_state(self.config)['completed'])
+        extension = 'syllable-acoustic-lambda-1'
+        self.config['execution']['additional_model_ids'] = [extension]
+        notebooks = Path(self.config['paths']['generated']) / 'notebooks'
+        existing = set(notebooks.iterdir())
+        with patch('phonetics.pipeline.run_stage', side_effect=AssertionError('completed stages must be reused')):
+            pending = run_pipeline(self.config, through='training', extend_training=True)
+            self.assertEqual(pending['model_id'], extension)
+            self.assertEqual(set(notebooks.iterdir()) - existing, {Path(pending['notebook'])})
+            self.assertEqual(load_state(self.config)['completed'], original)
+            self.assertEqual(sha256_file(self.experiment / 'manifest.json'), original_pin)
+            fixture = self.make_result(pending, run_tree=True)
+            run = fixture / 'runs' / self.experiment.name / extension / self.config['execution']['run_id']
+            manifest_path = run / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            manifest['experiment_hashes']['manifest.json'] = '0' * 64
+            write_json(manifest_path, manifest)
+            seal_bundle(fixture, 'pipeline_result', {'job_id': pending['job_id']})
+            with self.assertRaisesRegex(ValueError, 'training result does not match the job'):
+                import_result(self.config, fixture)
+            self.assertEqual(load_state(self.config)['waiting']['job_id'], pending['job_id'])
+            manifest['experiment_hashes']['manifest.json'] = original_pin
+            write_json(manifest_path, manifest)
+            seal_bundle(fixture, 'pipeline_result', {'job_id': pending['job_id']})
+            self.assertEqual(import_result(self.config, fixture).parent.name, extension)
+            self.assertEqual(run_pipeline(self.config, through='training')['status'], 'complete')
+        self.assertEqual({key: load_state(self.config)['completed'][key] for key in original}, original)
 
     def test_import_checks_epoch_limit_for_model_override(self):
         self.fixture.config['training']['epochs_by_model'] = {'syllable': 4}
