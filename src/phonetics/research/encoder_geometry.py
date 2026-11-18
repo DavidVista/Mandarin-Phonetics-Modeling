@@ -19,7 +19,7 @@ from ..visualization.reference_geometry import render_distance_maps
 from ..visualization.residual_histograms import FIGURE_ID, render_residual_histograms, residual_histogram_seed
 from .reference_geometry import _read_reference
 from . import encoder_diagnostics as diagnostic
-from .shared_character import TRIPLE_BANDS, reading_counts, same_mask_breakdown, shared_pair_residuals, shared_triple_agreement
+from .shared_character import TRIPLE_BANDS, reading_counts, shared_pair_residuals, shared_triple_agreement
 
 BASELINE = "Component mismatch count"
 DEFAULT_CONTRASTS = (
@@ -312,7 +312,6 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
             rankings = (overlap_rates[:len(systems)], near_far_rates[:len(systems)])
             tables["paired_differences"] = paired_differences(tables)
             counts = reading_counts(labels, retained)
-            tables["same_mask_breakdown"] = list(same_mask_breakdown(tables["same_mask_agreement"]))
             tables["shared_character_residual"] = list(
                 shared_pair_residuals(counts, mask, distances, systems, residual_eligible)
             )

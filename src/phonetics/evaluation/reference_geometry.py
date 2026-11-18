@@ -1,6 +1,8 @@
 """Syllable distance views and component comparisons for reference geometry."""
 from __future__ import annotations
 
+from collections import defaultdict
+
 import numpy as np
 from scipy.stats import spearmanr
 
@@ -9,6 +11,21 @@ SLICES = ("Controlled match", "Trade-off", "Same mask")
 TRANSITIONS = tuple((low, high) for low in range(7) for high in range(low + 1, 8)
                     if low & high == low)
 MASKS = tuple(f"{mask:03b}" for mask in range(8))
+SAME_MASK_SCOPES = ("Same mask", "Same mask 000", "Same mask excluding 000")
+
+
+def same_mask_breakdown(rows):
+    by_system = defaultdict(list)
+    for row in rows:
+        by_system[row["system"]].append(row)
+    for system, entries in by_system.items():
+        zero = [row for row in entries if row["mask"] == "000"]
+        other = [row for row in entries if row["mask"] != "000"]
+        for scope, selected in zip(SAME_MASK_SCOPES, (entries, zero, other), strict=True):
+            totals = {key: sum(row[key] for row in selected) for key in
+                      ("triples", "comparisons", "wins", "losses", "model_ties", "dimsim_ties")}
+            yield dict(system=system, scope=scope, **totals,
+                       agreement=_rate(totals["wins"] + .5 * totals["model_ties"], totals["comparisons"]))
 
 
 def component_masks(components):
@@ -137,7 +154,7 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
             agreement_totals[index, :, 2] += scores.sum(axis=1)
             if contextual:
                 agreement_outcomes[index] += _agreement_counts(signs[:, valid], signs[0, valid])
-            if contextual and index == 2:
+            if index == 2:
                 mask_codes = low[selection]
                 for code in np.unique(mask_codes):
                     group = mask_codes == code
@@ -175,15 +192,14 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
                                    "anchors": int(agreement_anchors[index].sum()), "dimsim_ties": int(count - valid),
                                    "comparisons": int(valid), "agreement": _rate(score, valid),
                                    **({"wins": wins, "losses": losses, "model_ties": ties} if contextual else {})})
-        if contextual:
-            for code, (count, valid) in enumerate(same_mask_counts):
-                wins, losses, ties = map(int, same_mask_outcomes[code, model])
-                same_mask_rows.append({
-                    "system": name, "mask": MASKS[code], "triples": int(count),
-                    "dimsim_ties": int(count - valid), "comparisons": int(valid),
-                    "wins": wins, "losses": losses, "model_ties": ties,
-                    "agreement": _rate(wins + .5 * ties, valid),
-                })
+        for code, (count, valid) in enumerate(same_mask_counts):
+            wins, losses, ties = map(int, same_mask_outcomes[code, model])
+            same_mask_rows.append({
+                "system": name, "mask": MASKS[code], "triples": int(count),
+                "dimsim_ties": int(count - valid), "comparisons": int(valid),
+                "wins": wins, "losses": losses, "model_ties": ties,
+                "agreement": _rate(wins + .5 * ties, valid),
+            })
         for anchor, label in enumerate(labels):
             anchor_rows.append({"system": name, "anchor": label, "triples": int(anchor_support[anchor]),
                                 "win_rate": _rate(anchor_wins[anchor, model], anchor_support[anchor])})
@@ -198,9 +214,8 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
 
     tables = {"controlled_match": controlled_rows, "dimsim_agreement": agreement_rows,
               "anchor_win_rates": anchor_rows, "anchor_summary": anchor_summary,
-              "pairwise_spearman": rank_rows}
-    if contextual:
-        tables["same_mask_agreement"] = same_mask_rows
+              "pairwise_spearman": rank_rows, "same_mask_agreement": same_mask_rows,
+              "same_mask_breakdown": list(same_mask_breakdown(same_mask_rows))}
     tables.update(_profiles(labels, distances, masks, left, right, systems=systems,
                             full_match=availability))
     maps = {

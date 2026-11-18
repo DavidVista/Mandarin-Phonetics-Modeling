@@ -14,6 +14,50 @@ from .core import DISTANCE_COLORS, apply_style, export_figure, layout, load_prot
 from .reference_geometry_template import PAGE
 
 _PANEL_MODELS = (0, 2, 1)
+_REFERENCE_STYLE = """
+body{margin:0 auto;max-width:1560px;padding:0 clamp(12px,3vw,40px) 28px;background:#fbfafc;color:#292330;font:15px/1.5 system-ui,sans-serif}
+.report-head{padding:24px 0 16px;border:0;border-bottom:1px solid #ded7e6;border-radius:0;background:transparent}
+.report-context,.report-count{margin:0;color:#5e5268}
+.report-context{font-weight:600}
+.report-head h1{margin:2px 0 0;font-size:clamp(27px,3.4vw,39px);line-height:1.12;letter-spacing:-.025em}
+.map-title{margin:16px 0 3px;font-size:22px}
+.toolbar{padding:6px 0;border:0;border-radius:0;background:transparent}
+.panels>section,#map-results>section,#profile-results,details{border-radius:6px}
+details{background:#fff;border-color:#ded7e6}
+table{font-variant-numeric:tabular-nums}thead th{background:#f4f0f7}
+a{color:#563671;text-underline-offset:3px}
+:focus-visible{outline:2px solid #79549a;outline-offset:2px}
+"""
+_REFERENCE_HEADER = """<header class="report-head"><p class="report-context">DIMSIM and wav2vec2 reference report</p>
+<h1>Reference Geometry</h1></header>
+<h2 class="map-title">Mandarin syllable distance maps</h2>
+<p class="report-count">@@syllables@@ syllables · @@pairs@@ unique pairs</p>"""
+_REFERENCE_PAGE = re.sub(r'<header class="report-head">.*?</header>', _REFERENCE_HEADER, PAGE, count=1, flags=re.S)
+_REFERENCE_PAGE = (_REFERENCE_PAGE
+                   .replace("<title>Mandarin syllable distance maps</title>",
+                            "<title>DIMSIM and wav2vec2 reference report</title>", 1)
+                   .replace("</style>", _REFERENCE_STYLE + "</style>", 1)
+                   .replace("<details><summary>Coverage and report files</summary>",
+                            "@@same_mask_summary@@<details><summary>Coverage and report files</summary>", 1))
+
+
+def _same_mask_summary(rows):
+    rendered = []
+    for row in rows:
+        scope = "No shared components (000)" if row["scope"] == "Same mask 000" else row["scope"]
+        score = f"{row['agreement']:.2%}" if row["agreement"] is not None else "—"
+        rendered.append(
+            f"<tr><th scope='row'>{html.escape(row['system'])}</th><td>{html.escape(scope)}</td>"
+            f"<td>{row['triples']:,}</td><td>{row['comparisons']:,}</td><td>{score}</td></tr>"
+        )
+    return (
+        '<details id="same-mask-summary" open><summary>Same mask</summary>'
+        '<div class="scroll"><table><thead><tr><th scope="col">System</th><th scope="col">Scope</th>'
+        '<th scope="col">Triples</th><th scope="col">Comparisons</th><th scope="col">DIMSIM agreement</th>'
+        '</tr></thead><tbody>' + "".join(rendered) + '</tbody></table></div>'
+        '<p><a href="tables/same_mask_breakdown.csv">Breakdown CSV</a> · '
+        '<a href="tables/same_mask_agreement.csv">Per-mask CSV</a></p></details>'
+    )
 
 
 def _encode(values, dtype):
@@ -108,10 +152,11 @@ def render_page(path, labels, components, distances, maps, tables, *, evaluation
     replacements.update(
         syllables=f"{len(labels):,}", pairs=f"{len(labels)*(len(labels)-1)//2:,}",
         evaluation_id=html.escape(evaluation_id), excluded=str(len(excluded)), tolerance=f"{tolerance:g}",
+        same_mask_summary=_same_mask_summary(tables["same_mask_breakdown"]),
         coverage="".join(f"<tr><th scope='row'>{html.escape(row['population'])}</th><td>{row['count']:,}</td></tr>"
                          for row in tables["coverage"]),
     )
-    Path(path).write_text(re.sub(r"@@(\w+)@@", lambda match: replacements[match[1]], PAGE), encoding="utf-8")
+    Path(path).write_text(re.sub(r"@@(\w+)@@", lambda match: replacements[match[1]], _REFERENCE_PAGE), encoding="utf-8")
 
 
 REFERENCE_MAPS = (

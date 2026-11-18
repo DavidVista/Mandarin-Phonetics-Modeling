@@ -3,23 +3,11 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
+from ..evaluation.reference_geometry import SAME_MASK_SCOPES
+
 SLICES = ("any_shared_character", "shared_character_at_least_25pct")
-GROUPS = ("Controlled match", "Trade-off", "Same mask", "Same mask 000", "Same mask excluding 000")
+GROUPS = ("Controlled match", "Trade-off", *SAME_MASK_SCOPES)
 TRIPLE_BANDS = (20, 40, 80, 160, 320, 640, 1280, 2560)
-
-
-def same_mask_breakdown(rows):
-    by_system = defaultdict(list)
-    for row in rows:
-        by_system[row["system"]].append(row)
-    for system, entries in by_system.items():
-        zero = [row for row in entries if row["mask"] == "000"]
-        other = [row for row in entries if row["mask"] != "000"]
-        for scope, selected in zip(GROUPS[2:], (entries, zero, other), strict=True):
-            totals = {key: sum(row[key] for row in selected) for key in
-                      ("triples", "comparisons", "wins", "losses", "model_ties", "dimsim_ties")}
-            yield dict(system=system, scope=scope, **totals,
-                       agreement=_rate(totals["wins"] + .5 * totals["model_ties"], totals["comparisons"]))
 
 
 def _rate(value, count):

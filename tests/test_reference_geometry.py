@@ -27,6 +27,7 @@ class ReferenceGeometryTests(unittest.TestCase):
         tables, maps = evaluate_geometry(labels, components, distances, tolerance=1e-12)
         controlled = [[] for _ in SYSTEMS]
         agreed = {name: [[] for _ in SYSTEMS] for name in SLICES}
+        same_mask = {scope: [[] for _ in SYSTEMS] for scope in ("Same mask 000", "Same mask excluding 000")}
         ties = dict.fromkeys(SLICES, 0)
         for anchor in range(n):
             a = components[anchor]
@@ -50,7 +51,11 @@ class ReferenceGeometryTests(unittest.TestCase):
                     if category == SLICES[0]:
                         controlled[model].append(difference)
                     if differences[0] != 0:
-                        agreed[category][model].append((1 + np.sign(difference) * np.sign(differences[0])) / 2)
+                        score = (1 + np.sign(difference) * np.sign(differences[0])) / 2
+                        agreed[category][model].append(score)
+                        if category == SLICES[2]:
+                            scope = "Same mask excluding 000" if lm else "Same mask 000"
+                            same_mask[scope][model].append(score)
                 ties[category] += differences[0] == 0
         self.assertEqual(sum(maps["controlled_cells"][:, 3]), len(controlled[0]))
         for model, system in enumerate(SYSTEMS):
@@ -65,6 +70,16 @@ class ReferenceGeometryTests(unittest.TestCase):
                 self.assertEqual(row["comparisons"], len(expected))
                 if expected:
                     self.assertAlmostEqual(row["agreement"], np.mean(expected))
+                else:
+                    self.assertIsNone(row["agreement"])
+            for row in tables["same_mask_breakdown"]:
+                if row["system"] != system:
+                    continue
+                scores = (agreed[SLICES[2]][model] if row["scope"] == "Same mask"
+                          else same_mask[row["scope"]][model])
+                self.assertEqual(row["comparisons"], len(scores))
+                if scores:
+                    self.assertAlmostEqual(row["agreement"], np.mean(scores))
                 else:
                     self.assertIsNone(row["agreement"])
         for index, category in enumerate(SLICES[1:]):
@@ -111,7 +126,9 @@ class ReferenceGeometryTests(unittest.TestCase):
         workflow = {"id": "reference", "workflow": "reference-geometry", "parameters": params}
         result = run_workflow(workflow, fixture.root / "reports")
         self.assertEqual(run_workflow(workflow, fixture.root / "reports"), result)
-        self.assertIn("reference_geometry.html", validate_workflow_result(result)["artifacts"])
+        artifacts = validate_workflow_result(result)["artifacts"]
+        for path in ("reference_geometry.html", "tables/same_mask_agreement.csv", "tables/same_mask_breakdown.csv"):
+            self.assertIn(path, artifacts)
         page = (result / "reference_geometry.html").read_text(encoding="utf-8")
         self.assertNotIn("@@", page)
         self.assertIn("4 syllables", page)
@@ -119,6 +136,9 @@ class ReferenceGeometryTests(unittest.TestCase):
         self.assertIn("const rankGroupSize=0;", page)
         self.assertIn("const prepared=", page)
         self.assertIn("Coverage and report files", page)
+        self.assertIn("<h1>Reference Geometry</h1>", page)
+        self.assertIn("No shared components (000)", page)
+        self.assertIn("Same mask excluding 000", page)
         self.assertNotIn("char-zh-cn-geometry-v1", page)
         inventory = json.loads((result / "data/inventory.json").read_text())
         self.assertEqual(inventory["labels"], sorted(fixture.fixture_labels))
