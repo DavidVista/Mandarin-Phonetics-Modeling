@@ -37,6 +37,17 @@ In this example, the other objectives train for 20 epochs. Each run records its 
 
 ## Preparation and execution modes
 
+The `configs/local/experiment.{bilstm,bert}.json` and `configs/notebook/experiment.{bilstm,bert}.json` profiles define the full `bilstm-final` and `bert-final` experiments. Local and notebook variants share scientific settings and use separate output/state paths. Each seed samples 90,000 training and 10,000 validation sentences; the shared test contains 100,000 sentences.
+
+| Encoder | Training objectives | Seeds | Epoch limits |
+|---|---|---|---|
+| BiLSTM | Syllable, Components, Acoustic, C+A λ=1/3/10, S+A λ=1 | 5 | Components 10; Acoustic 60; other objectives 20 |
+| BERT | Syllable, Components, C+A λ=1 | 3 | 4 per objective |
+
+Pretrained BERT is an additional evaluation source, with one deterministic extraction and no training run. In a managed full pipeline, its source manifest pin comes from the verified completed experiment stage; trained sources still require their completed training-stage pins. Standalone reassessment configs continue to support explicitly pinned bundles. Both architectures enable Core, UNK and DIMSIM parsing diagnostics; occurrence-level polyphony and shared-character residual analysis are part of every new encoder report.
+
+The profiles retain `acoustic.existing_bundle: null`: generate acoustic targets when required, and reuse compatible validated stage outputs. The `*-final` experiment, evaluation, report and state IDs keep these runs separate from historical results. Published bundles and previous state files are not migrated. Changing an objective inventory requires preparing the corresponding new experiment bundle; extending an old bundle remains a separate workflow.
+
 ### Chinese BERT
 
 For a new experiment, replace `experiment.architecture.encoder` with the following object.

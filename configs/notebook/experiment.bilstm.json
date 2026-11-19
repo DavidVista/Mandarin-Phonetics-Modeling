@@ -10,9 +10,9 @@
     "experiments": "../../datasets/experiments/notebook",
     "cache": "../../datasets/source-data/acoustic-cache",
     "runs": "../../runs/notebook",
-    "generated": "../../generated/notebook",
+    "generated": "../../generated/notebook/bilstm-final",
     "reports": "../../outputs/notebook",
-    "state": "../../generated/notebook/state/bilstm.json"
+    "state": "../../generated/notebook/state/bilstm-final.json"
   },
   "corpus": {
     "revision": "9961d7d05910be7006f2dcfae21f4fc5ce4d560a",
@@ -39,7 +39,7 @@
     "existing_bundle": null,
     "manifest_sha256": null
   },
-  "experiment_id": "bilstm",
+  "experiment_id": "bilstm-final",
   "experiment": {
     "schema_version": 4,
     "sample_size": 100000,
@@ -81,7 +81,8 @@
       "acoustic",
       "components-acoustic-lambda-1",
       "components-acoustic-lambda-3",
-      "components-acoustic-lambda-10"
+      "components-acoustic-lambda-10",
+      "syllable-acoustic-lambda-1"
     ],
     "test_size": 100000
   },
@@ -93,12 +94,12 @@
   },
   "analysis": [
     {
-      "id": "bilstm-training",
+      "id": "bilstm-final-training",
       "workflow": "training-report",
       "parameters": {}
     },
     {
-      "id": "bilstm-reference-geometry",
+      "id": "bilstm-final-reference-geometry",
       "workflow": "reference-geometry",
       "parameters": {
         "base_root": "../../datasets/pinyin-embeddings/reference-targets/notebook",
@@ -117,17 +118,17 @@
       }
     },
     {
-      "id": "bilstm-dimsim-distribution",
+      "id": "bilstm-final-dimsim-distribution",
       "workflow": "dimsim-distribution",
       "parameters": {}
     },
     {
-      "id": "bilstm-dimsim-parsing",
+      "id": "bilstm-final-dimsim-parsing",
       "workflow": "dimsim-parser-alignment",
       "parameters": {}
     },
     {
-      "id": "bilstm-dimsim-human-agreement",
+      "id": "bilstm-final-dimsim-human-agreement",
       "workflow": "dimsim-human-agreement",
       "parameters": {
         "input_root": "../../datasets/dimsim-human-agreement/li-2022-v1",
@@ -139,8 +140,8 @@
     "install_dependencies": true
   },
   "evaluation": {
-    "id": "bilstm",
-    "experiment_root": "../../datasets/experiments/notebook/bilstm",
+    "id": "bilstm-final",
+    "experiment_root": "../../datasets/experiments/notebook/bilstm-final",
     "experiment_manifest_sha256": null,
     "output_root": "../../datasets/evaluations/notebook",
     "excluded_pinyin": [
@@ -168,8 +169,8 @@
     }
   },
   "encoder_geometry": {
-    "id": "bilstm-geometry",
-    "representations_root": "../../outputs/notebook/bilstm-hidden-states",
+    "id": "bilstm-final-geometry",
+    "representations_root": "../../outputs/notebook/bilstm-final-hidden-states",
     "device": "cuda",
     "batch_size": 32,
     "tolerance": 1e-12,
@@ -177,6 +178,18 @@
     "execution": "notebook",
     "diagnostics": true,
     "contrasts": [
+      [
+        "syllable",
+        "components"
+      ],
+      [
+        "syllable",
+        "acoustic"
+      ],
+      [
+        "components",
+        "acoustic"
+      ],
       [
         "components",
         "components-acoustic-lambda-1"
@@ -188,6 +201,22 @@
       [
         "components",
         "components-acoustic-lambda-10"
+      ],
+      [
+        "components-acoustic-lambda-1",
+        "components-acoustic-lambda-3"
+      ],
+      [
+        "components-acoustic-lambda-3",
+        "components-acoustic-lambda-10"
+      ],
+      [
+        "syllable",
+        "syllable-acoustic-lambda-1"
+      ],
+      [
+        "components-acoustic-lambda-1",
+        "syllable-acoustic-lambda-1"
       ]
     ]
   }

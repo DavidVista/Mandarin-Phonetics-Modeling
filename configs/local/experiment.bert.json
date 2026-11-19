@@ -10,9 +10,9 @@
     "experiments": "../../datasets/experiments/local",
     "cache": "../../datasets/source-data/acoustic-cache",
     "runs": "../../runs/local",
-    "generated": "../../generated/local",
+    "generated": "../../generated/local/bert-final",
     "reports": "../../outputs/local",
-    "state": "../../generated/local/state/bert.json"
+    "state": "../../generated/local/state/bert-final.json"
   },
   "corpus": {
     "revision": "9961d7d05910be7006f2dcfae21f4fc5ce4d560a",
@@ -39,7 +39,7 @@
     "existing_bundle": null,
     "manifest_sha256": null
   },
-  "experiment_id": "bert",
+  "experiment_id": "bert-final",
   "experiment": {
     "schema_version": 4,
     "sample_size": 100000,
@@ -81,6 +81,7 @@
       "cosine_epsilon": 1e-08
     },
     "model_ids": [
+      "syllable",
       "components",
       "components-acoustic-lambda-1"
     ],
@@ -94,7 +95,7 @@
   },
   "analysis": [
     {
-      "id": "bert-training",
+      "id": "bert-final-training",
       "workflow": "training-report",
       "parameters": {}
     }
@@ -103,8 +104,8 @@
     "install_dependencies": true
   },
   "evaluation": {
-    "id": "bert",
-    "experiment_root": "../../datasets/experiments/local/bert",
+    "id": "bert-final",
+    "experiment_root": "../../datasets/experiments/local/bert-final",
     "experiment_manifest_sha256": null,
     "output_root": "../../datasets/evaluations/local",
     "excluded_pinyin": [
@@ -132,19 +133,44 @@
     }
   },
   "encoder_geometry": {
-    "id": "bert-geometry",
-    "representations_root": "../../outputs/local/bert-hidden-states",
+    "id": "bert-final-geometry",
+    "representations_root": "../../outputs/local/bert-final-hidden-states",
     "device": "cuda",
     "batch_size": 32,
     "tolerance": 1e-12,
     "allow_extraction": true,
     "execution": "local",
-    "diagnostics": false,
+    "diagnostics": true,
     "contrasts": [
+      [
+        "pretrained-bert",
+        "syllable"
+      ],
+      [
+        "pretrained-bert",
+        "components"
+      ],
+      [
+        "pretrained-bert",
+        "components-acoustic-lambda-1"
+      ],
+      [
+        "syllable",
+        "components"
+      ],
+      [
+        "syllable",
+        "components-acoustic-lambda-1"
+      ],
       [
         "components",
         "components-acoustic-lambda-1"
       ]
-    ]
+    ],
+    "representation_sources": {
+      "pretrained-bert": {
+        "type": "pretrained_bert"
+      }
+    }
   }
 }

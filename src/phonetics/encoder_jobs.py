@@ -65,12 +65,12 @@ def encoder_inputs(config, state=None):
     experiment = load_experiment_manifest(refs["experiment"], evaluation["experiment_manifest_sha256"])
     validate_run_inventory(refs, experiment)
     if managed:
-        if spec.get("representation_sources"):
-            raise ValueError("pretrained sources require an explicitly pinned evaluation config")
         pins = {"experiment": evaluation["experiment_manifest_sha256"],
                 "evaluation": completed_manifest(state, "prepare-evaluation", refs["evaluation"])}
         pins.update({model: completed_manifest(state, "train:" + model, path)
                      for model, path in spec["training_runs"].items()})
+        if spec.get("representation_sources"):
+            pins["pretrained-bert"] = pins["experiment"]
     else:
         pins = {key: sha256_file(Path(path) / "manifest.json") for key, path in refs.items()}
     if pins["experiment"] != evaluation["experiment_manifest_sha256"]:
