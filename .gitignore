@@ -248,3 +248,18 @@ datasets/prepared/
 
 # Generated notebooks, portable execution jobs and pipeline state.
 /generated/
+
+# Manuscript build products; source figures and other input PDFs stay versioned.
+/manuscript/build/
+/manuscript/main.pdf
+/manuscript/*.fdb_latexmk
+/manuscript/*.fls
+/manuscript/*.bbl
+/manuscript/*.blg
+/manuscript/*.bcf
+/manuscript/*.run.xml
+/manuscript/*.xdv
+/manuscript/*.toc
+/manuscript/*.lof
+/manuscript/*.lot
+/manuscript/*.synctex.gz

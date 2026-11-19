@@ -1,0 +1,264 @@
+\section{Literature Review}
+\label{sec:literature_review}
+
+The literature review first considers research on phonological learning and
+task-trained neural organization (Sections~\ref{sec:related} and
+\ref{sec:lr-task-trained}). It then examines Mandarin data sources and neural
+representations (Sections~\ref{sec:lr-data} and \ref{sec:lr-models}),
+followed by phonetic supervision and representation evaluation
+(Sections~\ref{sec:lr-supervision} and \ref{sec:lr-evaluation}).
+
+\subsection{Related Works}
+\label{sec:related}
+
+First works on computational phonetics have investigated how neural networks
+acquire pronunciation knowledge from written language. Seidenberg and McClelland
+developed a distributed model that learns mappings between orthographic and
+phonological representations through supervised training
+\cite{ref_seidenberg1989}. Plaut et al. extended this approach to explain
+regular and irregular word reading using learned orthography-to-phonology
+mappings \cite{ref_plaut1996}. These studies demonstrated that neural networks
+can acquire systematic pronunciation relationships without relying on explicit
+pronunciation rules. Their evaluations focused primarily on reading performance
+and the ability to reproduce observed human reading effects.
+
+Computational phonetic learning has also been studied using representations
+derived directly from speech. Bartelds et al. examined speech representations
+from pretrained neural networks and evaluated their ability to capture
+pronunciation variation \cite{ref_bartelds2022}. Distances between the learned
+representations showed correspondence with human perceptual judgments.
+Matusevych et al. compared computational models of infant phonetic learning
+based on different learning mechanisms \cite{ref_matusevych2023}. The models
+were evaluated through phonetic discrimination tasks using speech data from
+different languages. These studies demonstrate that continuous speech
+representations can capture phonetic relationships and that different learning
+mechanisms may affect their organization. However, the models operate on
+acoustic inputs rather than written character sequences.
+
+Chinese character reading provides a setting for investigating the acquisition
+of phonological information from structured orthographic inputs. Xing et al.
+developed a self-organizing connectionist model of Chinese character acquisition
+\cite{ref_xing2002}. The model reproduced effects of character frequency and
+phonological regularity observed in reading. Yang et al. subsequently developed
+a triangle model of Chinese reading that represented relationships between
+orthography, phonology, and semantics \cite{ref_yang2006}. Their later
+statistical learning model predicted distributed phonological feature vectors
+from Chinese orthography \cite{ref_yang2009}. The model reproduced
+character-naming effects associated with frequency, regularity, and consistency.
+Its phonological targets encoded relationships between speech sounds through
+shared features. However, the evaluation primarily concerned pronunciation
+performance and reading effects rather than independent graded similarity in
+hidden representations. Reichle and Yu reviewed these computational approaches
+and examined their assumptions about Chinese reading \cite{ref_reichle2018}.
+
+More recent studies have examined phonological representations and training
+conditions in Chinese reading. Li et al. used representational similarity
+analysis to investigate how human brain activity reflects phonological
+information during Chinese character reading \cite{ref_li_chinese2022}. Their
+evaluation compared neural response patterns with phonological dissimilarity
+measures. Kuo and Chang investigated the effects of reading instruction using
+computational triangle models of Chinese character reading \cite{ref_kuo2025}.
+Their models were trained under sound-focused, meaning-focused, and balanced
+instructional conditions. The authors evaluated pronunciation performance,
+reading effects, and the relative reliance on semantic and phonological
+pathways. The training conditions varied the emphasis on reading tasks rather
+than the form of phonetic information provided as supervision. Furthermore, the
+evaluation did not directly examine correspondence between hidden-state
+similarities and independent graded phonetic distances.
+
+Previous studies have demonstrated that neural networks can learn phonological
+information from orthography and that different learning objectives can
+influence neural organization. Other studies have examined phonetic
+relationships in speech representations and human neural responses. However, how
+different forms of phonetic supervision influence graded similarity in
+contextualized character representations remains insufficiently understood. We
+investigate this question by comparing four training objectives: complete Pinyin
+syllable prediction, phonological component prediction, continuous acoustic
+alignment, and combined component-based and acoustic supervision. We evaluate
+the resulting representation spaces through their correspondence with
+independent, perceptually informed Mandarin phonetic distances.
+
+
+\subsection{Task-Trained Networks and Internal Representations}
+\label{sec:lr-task-trained}
+
+The relationship between learning objectives and internal neural organization
+has also been examined in computational neuroscience. Sussillo et al. trained
+recurrent neural networks to generate muscle activity and identified dynamics
+resembling aspects of biological motor processing \cite{ref_sussillo2015}. Kell
+et al. demonstrated that task-optimized networks for speech and music
+recognition could predict aspects of human auditory cortical responses
+\cite{ref_kell2018}. Correspondences between speech recognition models and
+neural activity during auditory processing were further examined by Li et al.
+and Brodbeck et al. \cite{ref_li_auditory2023,ref_brodbeck2025}. Wu et al.
+showed that multitask learning could promote modular organization in recurrent
+networks \cite{ref_wu2026}. Together, these findings support the investigation
+of internal representations as outcomes of neural network training, without
+assuming that artificial networks reproduce the mechanisms of biological
+learning.
+
+
+\subsection{Data Sources for Mandarin Pronunciation Learning}
+\label{sec:lr-data}
+
+\subsubsection{Character--Pinyin Corpora}
+\label{sec:lr-corpora}
+
+Mandarin pronunciation prediction requires character sequences with
+corresponding pronunciation annotations. The Chinese Polyphone with Pinyin (CPP)
+benchmark introduced for g2pM provides annotated sentences for evaluating
+context-dependent pronunciation prediction \cite{ref_g2pm2020}. The same
+benchmark has been used to assess subsequent neural approaches to polyphone
+disambiguation \cite{ref_g2pw2022}. Beyond polyphonic characters, learning
+representations across a wider pronunciation inventory requires annotations for
+character occurrences throughout the corpus. The Duyu/Pinyin-Hanzi dataset
+provides Chinese text sequences paired with Pinyin transcriptions and represents
+a possible source for this purpose \cite{ref_duyu}. Additionally, the AISHELL-3
+corpus provides Mandarin text with Pinyin annotations \cite{ref_aishell32021}.
+These resources support the training of neural models to predict pronunciations
+from written characters, either as complete syllables or as phonological
+components.
+
+\subsubsection{Mandarin Speech Recordings}
+\label{sec:lr-speech-recordings}
+
+Acoustic representations require recorded pronunciations from which speech
+features can be extracted. AISHELL-3 provides Mandarin speech recordings
+accompanied by character-level and Pinyin-level transcriptions
+\cite{ref_aishell32021}. Such corpora support the analysis of pronunciation in
+continuous speech but require segmentation or alignment to obtain individual
+syllable recordings. Audio-assisted pronunciation modeling has addressed this
+problem through alignment between speech and written transcripts
+\cite{ref_g2pa2024}. Alternatively, collections of isolated syllable
+pronunciations provide direct access to recordings associated with individual
+Pinyin labels. The Chinese Lessons sound collection is an example of such a
+resource \cite{ref_chinese_lessons}. The choice between continuous speech and
+isolated syllables determines whether the extracted features describe contextual
+acoustic realizations or reference pronunciations.
+
+
+\subsection{Neural Models and Phonetic Representations}
+\label{sec:lr-models}
+
+\subsubsection{Character Encoding and Contextual Models}
+\label{sec:lr-character-models}
+
+Neural models of Mandarin pronunciation must represent individual characters
+while accounting for their linguistic context. Earlier Chinese reading models
+incorporated structured orthographic descriptions, including character
+components, to predict pronunciation. More recent grapheme-to-phoneme models
+have used learned character embeddings and contextual sequence encoders. Park
+and Lee employed a bidirectional recurrent network for Mandarin polyphone
+disambiguation \cite{ref_g2pm2020}. Pretrained Transformer encoders provide
+another approach to contextual character representation, as demonstrated by BERT
+and its application in g2pW \cite{ref_bert2019,ref_g2pw2022}. These
+architectures offer different mechanisms for contextualization, while their
+hidden states can be examined separately from the pronunciation predictions
+produced by their output layers.
+
+\subsubsection{Representations of Phonetic Information}
+\label{sec:lr-phonetic-representations}
+
+Phonetic information can be expressed through symbolic categories or continuous
+feature representations. Distributed phonological vectors encode properties
+shared by different pronunciations and have been used as targets in
+computational models of Chinese reading \cite{ref_yang2009,ref_kuo2025}. Pinyin
+provides a symbolic description of Mandarin syllables, including their segmental
+composition and lexical tones. It has been used both for pronunciation
+prediction and as additional input information in Chinese language models
+\cite{ref_g2pm2020,ref_chinesebert2021}. The latter approach differs from
+learning pronunciation as an output target, since phonetic information is
+explicitly supplied to the encoder. Continuous acoustic representations provide
+another description of pronunciation, with features learned from recorded speech
+rather than predefined phonological categories \cite{ref_bartelds2022}. These
+alternatives differ in the information they encode and in the relationships they
+can express between distinct pronunciations.
+
+
+\subsection{Phonetic Supervision and Learning Objectives}
+\label{sec:lr-supervision}
+
+\subsubsection{Categorical Pronunciation Prediction}
+\label{sec:lr-categorical}
+
+Pronunciation prediction commonly treats possible pronunciations as discrete
+classes. Models such as g2pM and g2pW learn to select a contextually appropriate
+pronunciation from a set of candidates \cite{ref_g2pm2020,ref_g2pw2022}. An
+alternative is to decompose a syllable into phonological components and predict
+them separately. Li et al. examined the granularity of pronunciation prediction
+as an auxiliary task for Chinese spelling correction \cite{ref_li_scope2022}.
+Liang et al. similarly investigated disentangled phonetic information for
+correcting Chinese characters \cite{ref_liang2023}. These approaches demonstrate
+that pronunciation can be represented through either complete categories or
+smaller phonological units. Their primary evaluations, however, concern task
+performance rather than the graded geometry of contextual hidden
+representations.
+
+\subsubsection{Acoustic Representation Learning and Alignment}
+\label{sec:lr-acoustic-alignment}
+
+Self-supervised speech encoders provide a means of extracting continuous
+features from raw audio. The wav2vec 2.0 framework learns speech representations
+through a contrastive objective, while XLSR extends this approach to
+multilingual speech \cite{ref_wav2vec2,ref_xlsr2021}. Liao et al. employed a
+Mandarin-fine-tuned XLSR-53 model to extract acoustic representations from
+Chinese speech recordings \cite{ref_liao2026}. The extracted features were used
+in a multimodal system for detecting mild cognitive impairment, demonstrating
+the application of this model as an acoustic feature extractor.
+
+Speech-derived information has also been incorporated into models operating
+across acoustic and textual modalities. Chen et al. proposed MAESTRO to
+learn matched representations from speech and text \cite{ref_maestro2022}. Yang
+used aligned speech recordings to improve Mandarin pronunciation disambiguation
+\cite{ref_g2pa2024}. Mazumdar et al. introduced a contrastive approach that
+aligns written graphemes with speech-derived representations
+\cite{ref_sparcle2026}. These studies establish approaches for combining
+symbolic linguistic information with acoustic features. Nevertheless, their
+objectives primarily concern speech recognition, pronunciation prediction, or
+synthesis, rather than comparing the phonetic geometry induced by different
+supervision signals.
+
+
+\subsection{Evaluation of Phonetic Representation Spaces}
+\label{sec:lr-evaluation}
+
+\subsubsection{Independent Phonetic Similarity Measures}
+\label{sec:lr-distance}
+
+Pronunciation accuracy evaluates whether a model selects the correct label but
+does not establish how distances between different pronunciations are
+represented internally. Independent phonetic distance measures provide an
+alternative criterion. Li et al. introduced DIMSIM, which estimates Mandarin
+phonetic similarity using learned representations of initials and finals
+together with lexical-tone information \cite{ref_dimsim}. Its parameters were
+informed by annotated phonetic relationships, providing a reference independent
+of the training objectives considered in the present study. Such measures allow
+hidden-state distances to be evaluated against graded pronunciation
+relationships.
+
+\subsubsection{Representational Similarity Analysis}
+\label{sec:lr-rsa}
+
+Representational similarity analysis compares the structure of representations
+through pairwise dissimilarities \cite{ref_kriegeskorte2008}. In Chinese reading
+research, this approach has been used to compare phonological dissimilarity with
+patterns of neural activity \cite{ref_li_chinese2022}. Contextual language
+representations introduce additional variation because the same linguistic item
+may receive different hidden states across occurrences. Previous studies have
+investigated context-sensitive similarity judgments and the geometry of
+contextualized embeddings \cite{ref_huang2012,ref_ethayarajh2019}. These methods
+provide a basis for examining relationships between pronunciations using
+representations extracted from written character sequences.
+
+\subsubsection{Comparison and Statistical Inference}
+\label{sec:lr-inference}
+
+The evaluation of representational geometry requires distinguishing systematic
+relationships from variation introduced by the selected observations. Schütt et
+al. examined statistical inference for representational similarity measures,
+including resampling procedures that account for dependencies between
+observations \cite{ref_schutt2023}. Phonetic discrimination studies have also
+assessed learned representations through relative comparisons between speech
+sounds \cite{ref_matusevych2023}. Together, these approaches motivate evaluating
+both the correspondence between pairwise distances and the consistency of
+relative similarity relationships.

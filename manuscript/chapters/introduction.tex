@@ -1,0 +1,208 @@
+\section{Introduction}
+\label{sec:intro}
+
+The introduction first establishes the role of graded phonetic similarity in
+written Mandarin pronunciation learning (Section~\ref{sec:intro-background}).
+It then formulates the research question (Section~\ref{sec:intro-question})
+and outlines the data, supervision objectives, and representation analyses
+used to address it (Section~\ref{sec:intro-approach}).
+
+\subsection{Background}
+\label{sec:intro-background}
+
+Phonetics examines the production, acoustic properties, and perception of speech
+sounds \cite{ref_phonetic_sciences}. Different speech sounds may exhibit varying
+degrees of phonetic similarity, with some pronunciations being closer to each
+other than others. Experimental studies demonstrate that human listeners
+distinguish such differences when comparing spoken forms and individual phonemes
+\cite{ref_word_similarity,ref_phoneme_similarity}. Graded phonetic similarity
+therefore describes an aspect of phonetic structure that extends beyond the
+identification of individual sounds. Modeling phonetic information requires
+investigating not only whether a system correctly identifies pronunciations but
+also whether its learned representations reflect the relationships between
+different pronunciations.
+
+We consider the learning of phonetic representations from written Chinese
+character sequences, drawing inspiration from how readers associate written
+characters with their pronunciations in linguistic context. Phonological
+information is activated during Chinese character recognition, even when readers
+perform tasks involving semantic judgments
+\cite{ref_early_phonology,ref_chinese_reading}. Mandarin provides a convenient
+setting for character-level pronunciation modeling, as each written character
+typically corresponds to a single spoken syllable in a given context. Syllables
+can be further decomposed into three phonological components: an initial, a
+final, and a lexical tone \cite{ref_mandarin_phonology}. Different syllables may
+share one or more phonological components, whereas distinct characters may have
+identical pronunciations, resulting in substantial \textit{homophony}.
+Furthermore, some characters have multiple pronunciations whose selection
+depends on the surrounding linguistic context. Learning pronunciation from
+written characters therefore requires a model to associate character identities
+with their pronunciations while accounting for contextual information.
+
+Computational models of Chinese reading have demonstrated that neural networks
+can acquire phonological information from written characters and reproduce
+patterns observed in human reading \cite{ref_yang2009}. The relative emphasis on
+pronunciation and meaning during training has also been shown to affect reading
+performance \cite{ref_kuo2025}. An alternative source of phonetic information is
+recorded speech, from which neural encoders can extract continuous
+representations that capture pronunciation differences \cite{ref_bartelds2022}.
+Such acoustic information has also been incorporated into Mandarin pronunciation
+prediction models \cite{ref_g2pa2024}. However, the influence of categorical
+pronunciation prediction and continuous acoustic supervision, applied separately
+or jointly, on graded phonetic similarity in contextualized character
+representations remains insufficiently understood.
+
+\subsection{Research Question}
+\label{sec:intro-question}
+
+This study addresses the following research question: \emph{How do different forms of phonetic supervision influence the
+extent to which contextualized neural representations learned from Mandarin
+character sequences reflect graded phonetic similarity?}
+
+
+\subsection{Experimental Approach}
+\label{sec:intro-approach}
+
+\subsubsection{Data and Contextual Character Encoding}
+\label{sec:intro-data-encoding}
+
+We investigate phonetic representation learning using written Mandarin character
+sequences and their corresponding pronunciations. The Duyu/Pinyin-Hanzi corpus
+provides character sequences with contextual Pinyin annotations \cite{ref_duyu}.
+Recordings of isolated Mandarin syllables are obtained from the Chinese Lessons
+sound collection \cite{ref_chinese_lessons}. These sources provide the written
+inputs, pronunciation labels, and acoustic reference signals used in the study.
+
+Characters are represented at the individual character level and processed using
+two contextual encoders: a bidirectional long short-term memory network (BiLSTM)
+with trainable character embeddings and a pretrained Chinese BERT model.
+Recurrent networks have previously been applied to Mandarin pronunciation
+prediction, while BERT-based models provide an alternative approach to
+contextual character representation
+\cite{ref_g2pm2020,ref_bert2019,ref_g2pw2022}. Both encoders produce hidden
+representations associated with character occurrences, allowing the effects of
+phonetic supervision to be examined within different neural architectures.
+
+\subsubsection{Phonetic Supervision Objectives}
+\label{sec:intro-supervision}
+
+We use Hanyu Pinyin (hereafter Pinyin), a standardized Romanization system for
+Mandarin Chinese, to represent target pronunciations \cite{ref_pinyin}.
+Categorical supervision is considered at two levels. The first predicts complete
+Pinyin syllables as distinct classes. The second predicts initial, final, and
+lexical tone separately, allowing syllables to share phonological components.
+Both approaches have precedents in neural pronunciation modeling
+\cite{ref_g2pm2020,ref_li_scope2022}.
+
+Continuous acoustic supervision provides an alternative to categorical
+prediction. A pretrained speech encoder extracts fixed acoustic representations
+from syllable recordings \cite{ref_wav2vec2,ref_xlsr2021}. For each character
+occurrence $i$, a trainable linear head projects its contextual representation
+$\mathbf{h}_i$ into the acoustic target space:
+
+\begin{equation}
+\label{eq:acoustic-projection}
+    \hat{\mathbf{a}}_i = W\mathbf{h}_i + \mathbf{b}.
+\end{equation}
+
+The projection is trained to match the direction of the corresponding acoustic
+target $\mathbf{a}_i$ by minimizing cosine distance:
+
+\begin{equation}
+\label{eq:acoustic-loss}
+    \mathcal{L}_{\mathrm{acoustic}}
+    =
+    \frac{1}{N}\sum_{i=1}^{N}
+    \left[
+    1 -
+    \frac{
+        \hat{\mathbf{a}}_i^\top \mathbf{a}_i
+    }{
+        \max(\|\hat{\mathbf{a}}_i\|_2,\epsilon)
+        \max(\|\mathbf{a}_i\|_2,\epsilon)
+    }
+    \right],
+\end{equation}
+
+where $N$ is the number of valid character occurrences, excluding padding, and
+$\epsilon=10^{-8}$ provides numerical stability. Unlike a magnitude-sensitive
+regression loss, this objective encourages directional agreement with the
+acoustic representations.
+
+We compare four training objectives:
+
+\begin{equation}
+\label{eq:training-objectives}
+\begin{aligned}
+\mathcal{J}_{\mathrm{syllable}}
+    &= \mathrm{CE}_{\mathrm{syllable}}, \\[3pt]
+\mathcal{J}_{\mathrm{component}}
+    &= \frac{
+        \mathrm{CE}_{\mathrm{initial}}
+        + \mathrm{CE}_{\mathrm{final}}
+        + \mathrm{CE}_{\mathrm{tone}}
+    }{3}, \\[3pt]
+\mathcal{J}_{\mathrm{acoustic}}
+    &= \mathcal{L}_{\mathrm{acoustic}}, \\[3pt]
+\mathcal{J}_{\mathrm{combined}}
+    &= \mathcal{J}_{\mathrm{component}}
+       + \lambda\mathcal{L}_{\mathrm{acoustic}}.
+\end{aligned}
+\end{equation}
+
+Here, each cross-entropy term is averaged over valid character occurrences, and
+$\lambda$ controls the contribution of acoustic alignment in the combined
+objective. The four conditions allow us to examine the effects of
+complete-syllable classification, component-level prediction, continuous
+acoustic supervision, and their combination on the learned representation
+spaces.
+
+\subsubsection{Assessment of Acoustic Representations}
+\label{sec:intro-acoustic-assessment}
+
+The properties of continuous supervision depend on the speech representations
+used as targets. We therefore examine two pretrained speech encoders: the
+original multilingual XLSR-53 model and its Mandarin-fine-tuned variant released
+by Grosman. The latter has also been used to extract acoustic features from
+Mandarin speech in subsequent research \cite{ref_xlsr2021,ref_grosman2021,ref_liao2026}.
+
+We assess the extracted syllable embeddings using two complementary criteria.
+The first compares their pairwise similarities with DIMSIM, an independent
+measure of Mandarin phonetic distance \cite{ref_dimsim}. The second examines
+whether syllables sharing additional phonological components exhibit the
+expected relative similarity rankings. This analysis uses Anchor-Q, a metric
+introduced in the present study and motivated by the discrimination principle of
+machine ABX evaluation \cite{ref_matusevych2023}. Together, these criteria
+characterize graded phonetic relationships and component-level organization in
+the acoustic target spaces. The metrics do not assume that speech recognition
+fine-tuning necessarily improves either property.
+
+\subsubsection{Evaluation of Contextual Representations}
+\label{sec:intro-contextual-evaluation}
+
+The effects of supervision are evaluated using contextual hidden states
+extracted from individual character occurrences. Unlike pronunciation accuracy,
+which measures agreement with target labels, representation analysis examines
+relationships between different pronunciations in the learned space.
+
+We consider two pair-sampling distributions. Natural-frequency sampling reflects
+the occurrence frequencies of pronunciations in the corpus, whereas
+uniform-Pinyin sampling gives pronunciation types equal selection probability.
+For sampled pairs, cosine similarities between contextual hidden states are
+compared with the corresponding DIMSIM distances. This approach provides a
+measure of how closely the representation space reflects graded Mandarin
+phonetic relationships.
+
+Anchor-Q provides a complementary evaluation of phonological component
+agreement. Each comparison contains an anchor occurrence and two candidates
+whose syllables differ in their agreement with the anchor on one initial, final,
+or tone component. Agreement on the remaining components is held constant. A
+comparison is successful when the candidate sharing the additional component has
+greater cosine similarity to the anchor. The resulting score summarizes the
+consistency of these relative rankings across phonological components.
+
+DIMSIM-based analysis therefore examines correspondence with graded phonetic
+distances, while Anchor-Q assesses local ranking consistency under controlled
+changes in component agreement. Applying both evaluations to the four training
+conditions allows us to investigate how different supervision objectives
+influence the organization of contextualized Mandarin character representations.
