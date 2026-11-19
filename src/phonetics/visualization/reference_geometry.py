@@ -10,7 +10,7 @@ import re
 import numpy as np
 
 from ..evaluation.reference_geometry import SYSTEMS, TRANSITIONS
-from .core import DISTANCE_COLORS, apply_style, export_figure, layout, load_protocol
+from .core import DISTANCE_COLORS, apply_style, export_figure, load_protocol
 from .reference_geometry_template import PAGE
 
 _PANEL_MODELS = (0, 2, 1)
@@ -158,10 +158,11 @@ REFERENCE_MAPS = (
 )
 
 
-def render_distance_maps(root, labels, distances, order, *, provenance, figures=REFERENCE_MAPS, encoder_models=None):
+def render_distance_maps(root, labels, distances, order, *, provenance, figures=REFERENCE_MAPS, encoder_models=None,
+                         architecture=None):
     from matplotlib import pyplot as plt
     from matplotlib.colors import LinearSegmentedColormap
-    from matplotlib.ticker import MaxNLocator
+    from .geometry_style import geometry_map, map_layout
 
     protocol = load_protocol()
     apply_style(protocol)
@@ -178,23 +179,21 @@ def render_distance_maps(root, labels, distances, order, *, provenance, figures=
         group = spec["color_scale_group"]
         maxima[group] = max(maxima.get(group, 0), float(np.nanmax(matrix)))
     for index, ((figure_id, stem), spec) in enumerate(zip(figures, specs)):
-        figure, (axis,) = layout(1, protocol)
+        limit = maxima[spec["color_scale_group"]] or 1.0
+        cmap = (LinearSegmentedColormap.from_list("lilac", DISTANCE_COLORS)
+                if spec["colormap"] == "lilac" else plt.get_cmap(spec["colormap"]))
+        title = spec["name"]
+        if encoder_models is not None:
+            from .encoder_geometry import _system_name
+            title = " · ".join(x for x in (architecture, _system_name(encoder_models[index])) if x)
+        figure, axis = geometry_map(distances[index][np.ix_(order, order)], limit=limit,
+            cmap=cmap.with_extremes(bad="#bfbfbf"), xlabel=spec["xlabel"],
+            colorbar_label=spec["colorbar_label"], title=title)
         try:
-            limit = maxima[spec["color_scale_group"]] or 1.0
-            cmap = (LinearSegmentedColormap.from_list("lilac", DISTANCE_COLORS)
-                    if spec["colormap"] == "lilac" else plt.get_cmap(spec["colormap"]))
-            cmap = cmap.with_extremes(bad="#bfbfbf")
-            image = axis.imshow(distances[index][np.ix_(order, order)], origin="upper",
-                                interpolation="nearest", cmap=cmap, vmin=0, vmax=limit)
-            axis.set(xlabel=spec["xlabel"], ylabel=spec["ylabel"], xticks=[], yticks=[])
-            for label in axis.texts:
-                label.set_visible(False)
-            colorbar = figure.colorbar(image, ax=axis, pad=.04, fraction=.20,
-                                       anchor=(0, .5), ticks=MaxNLocator(4))
-            colorbar.set_label(spec["colorbar_label"])
             figure._phonetics_resolution = {
                 "ordered_labels": np.asarray(labels)[order].tolist(),
                 "color_limits": [0.0, limit], "axis_tick_labels": False,
+                **map_layout(figure),
             }
             export_figure(figure, root, stem, figure_id, protocol, scientific_provenance=provenance)
         finally:

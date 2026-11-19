@@ -4,6 +4,7 @@ import numpy as np
 from .core import apply_style, export_figure, load_protocol
 from .encoder_geometry import _system_name
 from .reference_geometry_template import DISTANCE_COLORS
+from .geometry_style import geometry_map, map_layout, system_color
 
 
 def render_geometry_figures(output, labels, distances, maps, summary, *, systems, provenance, architecture):
@@ -27,7 +28,7 @@ def render_geometry_figures(output, labels, distances, maps, summary, *, systems
                 mean = [r["mean_similarity_mean"] if r["mean_similarity_mean"] is not None else np.nan for r in rows]
                 sd = [r["mean_similarity_sd"] or 0 for r in rows]
                 axis.errorbar(range(8), mean, yerr=sd, marker="o", capsize=3,
-                              color="black" if i == 0 else plt.get_cmap("tab10")((i-1) % 10),
+                              color=system_color(system),
                               linestyle="--" if i == 0 else "-", label=_system_name(system))
             left.set(xticks=range(8), xticklabels=[f"{i:03b}" for i in order],
                      xlabel="Overlap mask", ylabel="Negative DIMSIM distance")
@@ -39,6 +40,7 @@ def render_geometry_figures(output, labels, distances, maps, summary, *, systems
             fig.subplots_adjust(top=.78, bottom=.15, right=.9)
             fig._phonetics_resolution = {"mask_order": [f"{i:03b}" for i in order],
                                         "interval": "sample SD across training seeds",
+                                        "system_colors": {s: system_color(s) for s in systems},
                                         "deterministic_sources_without_sd": [s for s in systems if s == "pretrained-bert"]}
             export_figure(fig, output, "mask-coefficients", "encoder_mask_coefficients", protocol,
                           scientific_provenance=provenance)
@@ -51,18 +53,16 @@ def render_geometry_figures(output, labels, distances, maps, summary, *, systems
         shared_max = float(np.nanmax(distances[1:])) or 1
         for i, system in enumerate(systems):
             values = distances[i][anchors[:, None], candidates]
-            fig, axis = plt.subplots(figsize=(7, 6))
+            limit = (float(np.nanmax(distances[0])) or 1) if i == 0 else shared_max
+            cmap = LinearSegmentedColormap.from_list("distance", DISTANCE_COLORS).with_extremes(bad="#bfbfbf")
+            fig, axis = geometry_map(values, limit=limit, cmap=cmap,
+                xlabel="Candidate rank by DIMSIM", colorbar_label="DIMSIM distance" if i == 0 else "Cosine distance",
+                title=f"{architecture} · {_system_name(system)}")
             try:
-                limit = (float(np.nanmax(distances[0])) or 1) if i == 0 else shared_max
-                cmap = LinearSegmentedColormap.from_list("distance", DISTANCE_COLORS)
-                view = axis.imshow(values, aspect="auto", interpolation="nearest", vmin=0, vmax=limit, cmap=cmap)
-                axis.set(xlabel="Candidate rank by DIMSIM", ylabel="Anchor", xticks=[], yticks=[],
-                         title=f"{architecture} · {_system_name(system)}")
-                fig.colorbar(view, ax=axis, label="DIMSIM distance" if i == 0 else "Cosine distance")
-                fig.tight_layout()
                 fig._phonetics_resolution = {"anchor_labels": [labels[j] for j in anchors],
                     "candidate_indices_by_anchor": candidates.tolist(), "color_limits": [0, limit],
-                    "self_excluded": True, "candidate_order": "ascending DIMSIM distance; stable label ties"}
+                    "self_excluded": True, "candidate_order": "ascending DIMSIM distance; stable label ties",
+                    **map_layout(fig)}
                 export_figure(fig, output, f"{system.lower()}-dimsim-neighborhood", "encoder_dimsim_neighborhood",
                               protocol, scientific_provenance=provenance)
             finally:

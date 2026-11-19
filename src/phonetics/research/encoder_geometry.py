@@ -124,6 +124,8 @@ def _write_tables(root, tables, suffix):
 def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, checkpoints,
                          output, tolerance, source_sha256, diagnostics=False, contrasts=None):
     experiment = load_experiment_manifest(experiment_root, pins["experiment"])
+    architecture_name = {"char_bilstm": "BiLSTM", "bert": "BERT"}[
+        experiment["identity"]["config"]["architecture"]["encoder"]["type"]]
     from ..encoder_jobs import validate_run_inventory
 
     models = validate_run_inventory(pins, experiment)
@@ -386,12 +388,13 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                    evaluation=identity["evaluation_id"], excluded=identity["excluded_pinyin"],
                    tolerance=tolerance, systems=systems, seeds=seeds, diagnostics=diagnostics)
         render_distance_maps(stage / "figures", labels, means[1:], map_sum["component_order"], encoder_models=models,
+                             architecture=architecture_name,
                              provenance={"source_digest": content_hash(report_identity),
                                          "evaluation_manifest_sha256": pins["evaluation"],
                                          "hidden_export_manifests": export_pins,
                                          "aggregation": "mean distance across seeds"})
         render_residual_histograms(
-            stage / "figures", models, histogram_seeds, protocol=protocol,
+            stage / "figures", models, histogram_seeds, protocol=protocol, architecture=architecture_name,
             provenance={"source_digest": content_hash(report_identity),
                         "evaluation_manifest_sha256": pins["evaluation"],
                         "hidden_export_manifests": export_pins,
@@ -401,7 +404,6 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
         )
         render_geometry_figures(stage / "figures", labels, means, map_sum, summary,
                                 systems=systems, provenance={"source_digest": content_hash(report_identity)},
-                                architecture={"char_bilstm": "BiLSTM", "bert": "BERT"}[
-                                    experiment["identity"]["config"]["architecture"]["encoder"]["type"]])
+                                architecture=architecture_name)
         seal_bundle(stage, "encoder_geometry_report", report_identity)
     return target

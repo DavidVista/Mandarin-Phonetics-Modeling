@@ -66,20 +66,20 @@ def residual_histogram_seed(distances, masks, labels, occurrences, edges):
 
 def _model_order(model):
     if model == "pretrained-bert":
-        return (-1, 0)
+        return (5, 0)
     family, weight = parse_model_id(model)
     return (BASE_MODEL_IDS.index(family), 0) if weight is None else (3 if family == "components-acoustic" else 4, weight)
 
 
-def render_residual_histograms(output_dir, models, summaries, *, protocol, provenance):
+def render_residual_histograms(output_dir, models, summaries, *, protocol, provenance, architecture=None):
     from matplotlib import pyplot as plt
+    from matplotlib.lines import Line2D
     from matplotlib.ticker import PercentFormatter
 
     histograms, tails, modes = (np.mean(part, axis=0) for part in zip(*summaries))
     order = sorted(range(len(models)), key=lambda index: _model_order(models[index]))
     spec = protocol.figure(FIGURE_ID)
     edges = np.linspace(spec["edges_start"], spec["edges_stop"], spec["edges_count"])
-    centers = (edges[:-1] + edges[1:]) / 2
     occupied = np.flatnonzero(histograms.any(axis=(0, 1)))
     xlim = min(-.65, edges[occupied[0]]), max(1.05, edges[occupied[-1] + 1])
     ylim = 0, max(.29, float(histograms.max()) + .025)
@@ -89,11 +89,12 @@ def render_residual_histograms(output_dir, models, summaries, *, protocol, prove
     rows = len(order)
     with plt.rc_context():
         apply_style(protocol)
-        fig, axes = plt.subplots(rows, 8, figsize=(16.5, max(3.6, 1.55 * rows + 1.5)),
+        height = max(4.6, 1.55 * rows + 2.3)
+        fig, axes = plt.subplots(rows, 8, figsize=(16.5, height),
                                  sharex=True, sharey=True, squeeze=False,
                                  gridspec_kw={"width_ratios": [1] * 7 + [1.33]})
         try:
-            top = .82 if rows == 1 else .88
+            top = 1 - 1.25 / height
             gap = .94
             # Reserve room below the last row for the tick labels, tail shares and legend.
             tail_offset = .57 / (rows + (rows - 1) * gap)
@@ -116,14 +117,10 @@ def render_residual_histograms(output_dir, models, summaries, *, protocol, prove
                         ax.set_title(f"{mask:03b}", fontweight="bold")
                     if mask == 0:
                         ax.text(-.47, .5, label, transform=ax.transAxes, ha="right", va="center", fontweight="bold")
-                    if mask == 7 and row == 0:
-                        for group, text, x in ((0, "Multiple\ncharacters", .2), (1, "One\ncharacter", .8)):
-                            peak = modes[model, group]
-                            if peak.any():
-                                i = int(np.argmax(peak))
-                                ax.annotate(text, (centers[i], h[i]), xytext=(x, .92),
-                                            textcoords="axes fraction", ha="center", va="top",
-                                            fontsize=7, bbox={"facecolor": "white", "edgecolor": "none", "pad": 1}, arrowprops={"arrowstyle": "-", "color": muted, "lw": .65})
+                    if mask == 7:
+                        for group, color in enumerate(("#1f77b4", "#ff7f0e")):
+                            ax.stairs(modes[model, group], edges, color=color,
+                                      linestyle="--" if group else "-", linewidth=1)
                     if mask == 7 or not h.any():
                         continue
                     for side, x in enumerate((.24, .76)):
@@ -132,18 +129,25 @@ def render_residual_histograms(output_dir, models, summaries, *, protocol, prove
                             text = f"{value:.2f}" if 0 < value < 1 else f"{value:.1f}".removesuffix(".0")
                             ax.text(x, -(.38 if row == rows - 1 else .23) - .19 * group, text + "%",
                                     transform=ax.transAxes, ha="center", va="center", color=color, fontweight="bold")
-            fig.suptitle(spec["name"], y=.98, fontsize=15, fontweight="bold")
+            title = " · ".join(x for x in (architecture, spec["name"]) if x)
+            fig.suptitle(title, y=1-.16/height, va="top", fontsize=15, fontweight="bold")
             subtitle = f"Mean across {len(summaries)} seeds" if len(summaries) > 1 else "One seed"
             if "pretrained-bert" in models:
                 subtitle += " · pretrained vectors reused across seed slices"
-            fig.text(.5, .948, subtitle, ha="center", color=muted)
+            fig.text(.5, 1-.49/height, subtitle, ha="center", va="top", color=muted)
+            fig.legend(handles=[Line2D([], [], color=ink, label="111: All readings"),
+                Line2D([], [], color="#1f77b4", label="111: Multiple characters"),
+                Line2D([], [], color="#ff7f0e", linestyle="--", label="111: One character")],
+                loc="upper center", bbox_to_anchor=(.55, 1-.76/height), ncol=3, frameon=False)
             fig.text(.016, .53, spec["ylabel"], ha="center", va="center", rotation=90)
             fig.text(.55, .126, spec["xlabel"], ha="center")
             fig.text(.55, .10, "Left = lower 5%   ·   Right = upper 5%   ·   Cutoff ties included",
                      ha="center", color=muted)
             fig.text(.55, .068, "Share of pairs with a common character", ha="center", color=purple)
             fig.text(.55, .036, "Share with a dominant character in both syllables (>50% each)", ha="center", color=red)
-            fig._phonetics_resolution = {"models": [models[i] for i in order], "mask_order": [f"{i:03b}" for i in range(8)]}
+            fig._phonetics_resolution = {"models": [models[i] for i in order], "mask_order": [f"{i:03b}" for i in range(8)],
+                "architecture": architecture, "full_match_group_normalization": "share of all supported Full Match readings",
+                "full_match_groups": ["multiple characters", "one character"]}
             return export_figure(fig, output_dir, STEM, FIGURE_ID, protocol, scientific_provenance=provenance)
         finally:
             plt.close(fig)
