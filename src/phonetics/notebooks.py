@@ -198,7 +198,8 @@ def generate_notebooks(config, *, stage='ready', refresh_sdk=False):
     if refresh_sdk:
         if stage not in ('training', 'encoder-geometry'):
             raise ValueError('--refresh-sdk requires training or encoder-geometry')
-        state = load_state(config, _allow_stale_sdk=True)
+        if stage != 'encoder-geometry' or config.get('evaluation', {}).get('experiment_manifest_sha256') is None:
+            state = load_state(config, _allow_stale_sdk=True)
         if stage == 'training' and state['waiting'] and state['waiting']['stage'] != 'training':
             raise ValueError('--refresh-sdk cannot replace a pending non-training job')
     if stage == "encoder-geometry":
@@ -308,7 +309,7 @@ print(report_zip)
         "as a ZIP and removes temporary hidden states when the computation ends."
     )
     if bert:
-        instructions += " BERT downloads the pinned tokenizer and config when no snapshot path is supplied."
+        instructions += " BERT downloads pinned tokenizer/config files; the pretrained source also requires pinned model.safetensors. Pretrained vectors are extracted once and reused across seed slices without independent-seed SD."
     document = {
         "nbformat": 4, "nbformat_minor": 5,
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},

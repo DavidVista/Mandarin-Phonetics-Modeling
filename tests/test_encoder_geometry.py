@@ -197,7 +197,7 @@ class EncoderGeometryTests(unittest.TestCase):
             self.assertIn("contrasts", "".join(cells[-2]["source"]))
             self.assertIn("ALLOW_EXTRACTION = True", "".join(cells[-2]["source"]))
             self.assertNotIn("TRAINING_MODELS", "".join(cells[-1]["source"]))
-            with self.assertRaisesRegex(ValueError, "one training run"):
+            with self.assertRaisesRegex(ValueError, "evaluation source"):
                 run_encoder_workflow(refs={**refs, "extra": str(experiment)}, pins=pins, spec=spec,
                                      reports_root=fixture.root, source_sha256="c" * 64)
             result = run_encoder_workflow(refs=refs, pins=pins, spec=spec, reports_root=fixture.root,
@@ -214,14 +214,14 @@ class EncoderGeometryTests(unittest.TestCase):
                 subprocess.run([sys.executable, "-X", "utf8", "-"], input=code.encode(),
                                cwd=fixture.root, check=True, capture_output=True)
                 notebook_result = notebook_root / "reports" / spec["id"]
-                for name in ("same_mask_breakdown", "shared_character_residual", "shared_character_matched_agreement"):
+                for name in ("same_mask_breakdown", "shared_character_residual", "polyphony_summary"):
                     relative = Path("tables") / f"{name}_across_seeds.csv"
                     self.assertEqual((notebook_result / relative).read_bytes(), (cli_result / relative).read_bytes())
         else:
             result = run_encoder_geometry(**arguments)
         validate_bundle(result, "encoder_geometry_report")
         self.assertEqual(len(list((result / "views").glob("*.js"))), len(seeds) + 1)
-        self.assertEqual(len(list((result / "figures").glob("*.png"))), len(models) + 1)
+        self.assertEqual(len(list((result / "figures").glob("*.png"))), 2 * len(models) + 3)
         figure = result / "figures" / "residual-histograms-by-mask"
         self.assertTrue(figure.with_suffix(".png").read_bytes().startswith(b"\x89PNG"))
         self.assertTrue(figure.with_suffix(".eps").read_bytes().startswith(b"%!PS-Adobe"))
@@ -236,7 +236,7 @@ class EncoderGeometryTests(unittest.TestCase):
         self.assertIn("Component mismatch count", (result / "tables/pairwise_spearman.csv").read_text())
         self.assertIn("model_ties", (result / "tables/same_mask_agreement.csv").read_text())
         page = (result / "encoder_geometry.html").read_text(encoding="utf-8")
-        for name in ("shared_character_residual", "shared_character_matched_agreement", "same_mask_breakdown"):
+        for name in ("shared_character_residual", "polyphony_summary", "same_mask_breakdown"):
             self.assertIn(f"tables/{name}_across_seeds.csv", page)
         self.assertIn("BiLSTM evaluation report", page)
         paired_model = contrasts[0][1] if contrasts else "components-acoustic-lambda-1"

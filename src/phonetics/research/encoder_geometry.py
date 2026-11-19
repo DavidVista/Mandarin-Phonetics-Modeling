@@ -19,7 +19,9 @@ from ..visualization.reference_geometry import render_distance_maps
 from ..visualization.residual_histograms import FIGURE_ID, render_residual_histograms, residual_histogram_seed
 from .reference_geometry import _read_reference
 from . import encoder_diagnostics as diagnostic
-from .shared_character import TRIPLE_BANDS, reading_counts, shared_pair_residuals, shared_triple_agreement
+from .shared_character import reading_counts, shared_pair_residuals
+from .polyphony import POLICY, plan_polyphony, evaluate_polyphony
+from ..visualization.geometry_figures import render_geometry_figures
 
 BASELINE = "Component mismatch count"
 DEFAULT_CONTRASTS = (
@@ -64,11 +66,10 @@ def _summarize_seed_tables(tables, seeds):
         "anchor_win_rates": ("system", "anchor"),
         "anchor_summary": ("system",), "pairwise_spearman": ("system",),
         "mask_profiles": ("system", "mask"), "mask_summary": ("system", "includes_full_match"),
-        "full_match_gains": ("system", "component", "step_1", "step_2", "step_3"),
         "paired_differences": ("from_system", "to_system", "metric", "slice"),
         "same_mask_breakdown": ("system", "scope"),
         "shared_character_residual": ("slice", "system", "mask"),
-        "shared_character_matched_agreement": ("slice", "comparison", "system"),
+        "polyphony_summary": ("slice", "system", "population"),
     }
     result = {}
     for name, keys in dimensions.items():
@@ -83,8 +84,9 @@ def _summarize_seed_tables(tables, seeds):
             for field in sorted(set(entries[0]) - set(keys) - {"seed"}):
                 values = [row[field] for row in entries if row[field] is not None]
                 output[f"{field}_mean"] = float(np.mean(values)) if values else None
-                output[f"{field}_sd"] = float(np.std(values, ddof=1)) if len(values) > 1 else None
-                output[f"{field}_seeds"] = len(values)
+                deterministic = output.get("system") == "pretrained-bert"
+                output[f"{field}_sd"] = float(np.std(values, ddof=1)) if len(values) > 1 and not deterministic else None
+                output[f"{field}_seeds"] = min(1, len(values)) if deterministic else len(values)
             rows.append(output)
         result[name] = rows
     return result
@@ -190,6 +192,8 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                        "full_match_policy": "at_least_two_occurrences_in_every_seed",
                        "checkpoints": {model: {str(seed): item for seed, item in selections.items()}
                                        for model, selections in checkpoints.items()}}
+    report_identity["polyphony_policy"] = {**POLICY, "tolerance": tolerance}
+    report_identity["deterministic_sources"] = [m for m in models if m == "pretrained-bert"]
     if explicitly_configured:
         report_identity["contrasts"] = [list(pair) for pair in contrasts]
     target = Path(output).resolve()
@@ -214,20 +218,25 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
         for name in ("tables", "data", "figures", "views"):
             (stage / name).mkdir()
         write_json(stage / "config.json", report_identity)
-        write_json(stage / "data/shared_character_matched_agreement.json", {
-            "minimum_valid_occurrences_per_reading_per_seed": 11,
-            "unknown_policy": "exclude_target_position",
-            "strong_shared_character_minimum_fraction_per_reading": .25,
-            "frequency_band_edges": TRIPLE_BANDS,
-            "pair_frequency_bands": "base-two logarithmic bins",
-            "pair_population": "Readings with at least 11 valid occurrences in every seed.",
-            "triple_population": "Readings with at least 11 valid occurrences in the current seed.",
-            "matching": ["seed", "anchor", "comparison type", "exact candidate masks", "candidate frequency bands"],
-            "control": "Neither candidate shares a character with the anchor.",
-            "agreement": "DIMSIM ties are excluded. Encoder ties receive half credit.",
-            "weighting": "Control strata are weighted by matched Shared Char comparison counts.",
-            "source_inputs": {"experiment": pins["experiment"], "evaluation": pins["evaluation"]},
-        })
+        poly_groups, poly_plan, poly_coverage = plan_polyphony(
+            occurrences, {seed: [i for i in indices_by_seed[seed] if occurrences[i]["pinyin"] in common]
+                          for seed in seeds})
+        used_groups = {(item["character"], reading) for item in poly_plan
+                       for reading in (item["reading_a"], item["reading_b"])}
+        used_groups.update((char, reading) for item in poly_plan if item["matched_control"]
+                           for reading, chars in item["controls"].items() for char in chars)
+        occurrence_plans, seed_plans = {}, {}
+        for seed, groups in poly_groups.items():
+            rows = [{"character": char, "reading": reading,
+                     "occurrence_ids": [positions[i] for i in groups[char, reading]]}
+                    for char, reading in sorted(used_groups)]
+            key = content_hash(rows)
+            occurrence_plans.setdefault(key, rows)
+            seed_plans[str(seed)] = key
+        write_json(stage / "data/polyphony.json", {**POLICY, "tolerance": tolerance,
+            "source_inputs": pins, "plan": poly_plan,
+            "occurrence_plans": occurrence_plans, "seed_occurrence_plan": seed_plans})
+        _write_tables(stage / "tables", {"polyphony_coverage": poly_coverage}, "")
         write_json(stage / "data/inventory.json", {
             "labels": labels, "components": component_rows,
             "full_match_labels": [label for label, available in zip(labels, full_match) if available],
@@ -270,6 +279,9 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
             primary_unknown = primary_occurrences - len(indices_by_seed[seed])
             for model in models:
                 _, hidden, _, _ = next(generators[model])
+                poly_tables = evaluate_polyphony(hidden, poly_groups[seed], poly_plan, tolerance, model)
+                for name, rows in poly_tables.items():
+                    all_tables[name].extend({"seed": seed, **row} for row in rows)
                 distance = contextual_distances(labels, retained, hidden[selected])
                 diagnostic_rows["full_match"].extend(
                     {"seed": seed, **row} for row in diagnostic.full_match_rows(
@@ -304,7 +316,7 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                                              tolerance=tolerance, systems=(*systems, BASELINE), contextual=True)
             maps["controlled_values"] = maps["controlled_values"][:, :len(systems)]
             maps["agreement"] = maps["agreement"][:, :len(systems)]
-            for name in ("mask_profiles", "mask_summary", "full_match_gains", "residuals_top50"):
+            for name in ("mask_profiles", "mask_summary", "residuals_top50"):
                 tables[name] = [row for row in tables[name] if row["system"] != BASELINE]
             overlap_rates, near_far_rates = rank_metrics(comparisons, maps["neighborhood"], tolerance)
             for row, overlap, near_far in zip(tables["pairwise_spearman"], overlap_rates, near_far_rates):
@@ -314,9 +326,6 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
             counts = reading_counts(labels, retained)
             tables["shared_character_residual"] = list(
                 shared_pair_residuals(counts, mask, distances, systems, residual_eligible)
-            )
-            tables["shared_character_matched_agreement"] = list(
-                shared_triple_agreement(counts, mask, distances, systems, tolerance)
             )
             if diagnostics:
                 diagnostic_rows["coverage"].append(
@@ -347,6 +356,17 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
         means = matrix_sum / len(seeds)
         for name in ("controlled_values", "agreement"):
             map_sum[name] /= len(seeds)
+        for seed in seeds:
+            rates = {(r["system"], r["slice"], r["population"]): r for r in all_tables["polyphony_summary"] if r["seed"] == seed}
+            for before, after in contrasts:
+                for (system, population, subset), row in list(rates.items()):
+                    if system == before:
+                        other = rates[after, population, subset]
+                        for metric in ("score", "delta", "within_distance", "cross_distance"):
+                            a, b = row[metric], other[metric]
+                            all_tables["paired_differences"].append(dict(seed=seed, from_system=before,
+                                to_system=after, metric="Polyphony " + metric, slice=population + "/" + subset,
+                                difference=b-a if a is not None and b is not None else None))
         summary = _summarize_seed_tables(all_tables, seeds)
         np.savez_compressed(stage / "data/across-seeds.npz", distances=means, **map_sum)
         _write_tables(stage / "tables", {**all_tables, "coverage": coverage}, "")
@@ -379,5 +399,9 @@ def run_encoder_geometry(*, evaluation_root, experiment_root, pins, exports, che
                         "tail_fraction": .05, "tail_cutoff_ties": "include",
                         "dominant_character_fraction_exclusive": .5},
         )
+        render_geometry_figures(stage / "figures", labels, means, map_sum, summary,
+                                systems=systems, provenance={"source_digest": content_hash(report_identity)},
+                                architecture={"char_bilstm": "BiLSTM", "bert": "BERT"}[
+                                    experiment["identity"]["config"]["architecture"]["encoder"]["type"]])
         seal_bundle(stage, "encoder_geometry_report", report_identity)
     return target

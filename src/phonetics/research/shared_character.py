@@ -3,11 +3,8 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
-from ..evaluation.reference_geometry import SAME_MASK_SCOPES
 
 SLICES = ("any_shared_character", "shared_character_at_least_25pct")
-GROUPS = ("Controlled match", "Trade-off", *SAME_MASK_SCOPES)
-TRIPLE_BANDS = (20, 40, 80, 160, 320, 640, 1280, 2560)
 
 
 def _rate(value, count):
@@ -78,99 +75,3 @@ def shared_pair_residuals(counts, masks, distances, systems, eligible):
                            mean_shared=shared_mean, mean_control_weighted=control_mean,
                            shared_pairs_total=total, shared_pairs_matched=matched,
                            control_pairs_matched=controls, matched_strata=strata_count)
-
-
-def _classes(masks, anchor, left, right):
-    ml, mr = masks[anchor, left], masks[anchor, right]
-    same = ml == mr
-    trade = (ml & mr) != np.minimum(ml, mr)
-    controlled = (~same & ~trade & ((7 ^ masks[left, right]) == (ml ^ mr)))
-    return np.select((controlled, trade, same), (0, 1, 2), default=-1)
-
-
-def _scores(distances, tolerance, anchor, left, right):
-    gap = distances[:, anchor, right] - distances[:, anchor, left]
-    sign = (gap > tolerance).astype(np.int8) - (gap < -tolerance).astype(np.int8)
-    ordered = sign[0] != 0
-    return int(ordered.sum()), ((1 + sign[:, ordered] * sign[0, ordered]) / 2).sum(axis=1)
-
-
-def _control_pairs(pool, left_key, right_key):
-    left, right = pool.get(left_key, ()), pool.get(right_key, ())
-    if left_key == right_key:
-        left = np.asarray(left, dtype=np.intp)
-        i, j = np.triu_indices(len(left), 1)
-        return left[i], left[j]
-    return np.repeat(left, len(right)).astype(np.intp), np.tile(right, len(left)).astype(np.intp)
-
-
-def shared_triple_agreement(counts, masks, distances, systems, tolerance):
-    frequency = np.asarray([sum(group.values()) for group in counts])
-    eligible = np.flatnonzero(frequency >= 11)
-    bands = np.searchsorted(TRIPLE_BANDS, frequency, side="right")
-    totals = np.zeros((2, 5, 5), dtype=int)
-    credits = np.zeros((2, 5, 3, len(systems)))
-    matched_pairs = defaultdict(set)
-    matched_anchors = defaultdict(set)
-    for anchor, shared, strong in _shared_readings(counts, eligible, frequency):
-        if not shared:
-            continue
-        pool = defaultdict(list)
-        for other in eligible:
-            if other != anchor and other not in shared:
-                pool[int(masks[anchor, other]), int(bands[other])].append(other)
-        pool = {key: np.asarray(value, dtype=np.intp) for key, value in pool.items()}
-        exposed = defaultdict(lambda: ([], []))
-        for candidate in sorted(shared):
-            left_key = (int(masks[anchor, candidate]), int(bands[candidate]))
-            for right_key, controls in pool.items():
-                classes = _classes(masks, anchor, candidate, controls)
-                for kind in np.unique(classes):
-                    if kind < 0:
-                        continue
-                    selected = controls[classes == kind]
-                    for slice_index in range(2 if candidate in strong else 1):
-                        lefts, rights = exposed[slice_index, kind, left_key, right_key]
-                        lefts.extend([candidate] * len(selected))
-                        rights.extend(selected)
-        cache = {}
-        for (s, kind, left_key, right_key), (lefts, rights) in exposed.items():
-            count, score = _scores(distances, tolerance, anchor, np.asarray(lefts), np.asarray(rights))
-            if not count:
-                continue
-            key = (kind, *sorted((left_key, right_key)))
-            if key not in cache:
-                left, right = _control_pairs(pool, left_key, right_key)
-                selected = _classes(masks, anchor, left, right) == kind
-                cache[key] = _scores(distances, tolerance, anchor, left[selected], right[selected])
-            control_count, control_score = cache[key]
-            groups = (kind,) if kind != 2 else (kind, 3 if left_key[0] == 0 else 4)
-            for group in groups:
-                totals[s, group] += [count, count if control_count else 0, bool(control_count),
-                                     not control_count, control_count]
-                credits[s, group, 0] += score
-                if control_count:
-                    credits[s, group, 1] += score
-                    credits[s, group, 2] += count / control_count * control_score
-                    left, right = np.asarray(lefts), np.asarray(rights)
-                    ordered = np.abs(distances[0, anchor, right] - distances[0, anchor, left]) > tolerance
-                    support = np.union1d(left[ordered], right[ordered])
-                    matched_pairs[s, group].update(
-                        (min(anchor, other), max(anchor, other)) for other in support
-                    )
-                    matched_anchors[s, group].add(anchor)
-    for s, slice_name in enumerate(SLICES):
-        for g, comparison in enumerate(GROUPS):
-            count, matched, matched_strata, unmatched_strata, controls = map(int, totals[s, g])
-            for i, system in enumerate(systems):
-                all_score, shared, control = credits[s, g, :, i]
-                yield dict(slice=slice_name, comparison=comparison, system=system,
-                           shared_char_comparisons=count, matched_shared_char_comparisons=matched,
-                           matched_share=_rate(matched, count), matched_strata=matched_strata,
-                           matched_shared_char_pairs=len(matched_pairs[s, g]),
-                           matched_anchors=len(matched_anchors[s, g]),
-                           unmatched_strata=unmatched_strata, control_comparisons_in_matched_strata=controls,
-                           shared_char_agreement_all=_rate(all_score, count),
-                           shared_char_agreement_matched=_rate(shared, matched),
-                           control_agreement_weighted=_rate(control, matched),
-                           delta_percentage_points=_rate(100 * (shared - control), matched))

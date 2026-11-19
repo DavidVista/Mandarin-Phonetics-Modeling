@@ -92,17 +92,9 @@ def _profile_payload(tables):
     for system in (SYSTEMS[i] for i in _PANEL_MODELS):
         means = [row["mean_similarity"] for row in tables["mask_profiles"] if row["system"] == system]
         r2 = [row["r_squared"] for row in tables["mask_summary"] if row["system"] == system]
-        steps = []
-        gains = (row for row in tables["full_match_gains"] if row["system"] == system)
-        for row, final in zip(gains, ("011 → 111", "101 → 111", "110 → 111")):
-            steps.append({
-                "labels": [row[f"step_{i}"].replace(" to ", " → ") for i in range(1, 4)] + [final],
-                "values": [row[f"gain_{i}"] for i in range(1, 4)] + [row["full_match_gain"]],
-                "baseline": row["ordinary_mean"], "absolute": row["j"],
-            })
-        profiles.append({"name": system, "beta": means, "r2": r2, "steps": steps})
-        residuals.append([{"a": row["left"], "b": row["right"], "mask": row["mask"], "residual": row["residual"]}
-                          for row in tables["residuals_top50"] if row["system"] == system])
+        profiles.append({"name": system, "beta": means, "r2": r2})
+        residuals.append([{"a": r["left"], "b": r["right"], "mask": r["mask"], "residual": r["residual"]}
+                          for r in tables.get("residuals_top50", ()) if r["system"] == system])
     return profiles, residuals
 
 

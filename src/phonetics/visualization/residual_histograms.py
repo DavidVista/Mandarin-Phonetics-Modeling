@@ -65,8 +65,10 @@ def residual_histogram_seed(distances, masks, labels, occurrences, edges):
 
 
 def _model_order(model):
+    if model == "pretrained-bert":
+        return (-1, 0)
     family, weight = parse_model_id(model)
-    return (BASE_MODEL_IDS.index(family), 0) if weight is None else (len(BASE_MODEL_IDS), weight)
+    return (BASE_MODEL_IDS.index(family), 0) if weight is None else (3 if family == "components-acoustic" else 4, weight)
 
 
 def render_residual_histograms(output_dir, models, summaries, *, protocol, provenance):
@@ -91,15 +93,15 @@ def render_residual_histograms(output_dir, models, summaries, *, protocol, prove
                                  sharex=True, sharey=True, squeeze=False,
                                  gridspec_kw={"width_ratios": [1] * 7 + [1.33]})
         try:
-            top = .86 if rows == 1 else .89
+            top = .82 if rows == 1 else .88
             gap = .94
             # Reserve room below the last row for the tick labels, tail shares and legend.
             tail_offset = .57 / (rows + (rows - 1) * gap)
             bottom = (.165 + tail_offset * top) / (1 + tail_offset)
             fig.subplots_adjust(left=.112, right=.984, top=top, bottom=bottom, wspace=.26, hspace=gap)
             for row, model in enumerate(order):
-                family, weight = parse_model_id(models[model])
-                label = family if weight is None else f"λ = {weight:g}"
+                from .encoder_geometry import _system_name
+                label = _system_name(models[model]).replace("Components + Acoustic", "C+A").replace("Syllable + Acoustic", "S+A")
                 for mask, ax in enumerate(axes[row]):
                     h = histograms[model, mask]
                     ax.stairs(h, edges, color=ink)
@@ -119,9 +121,9 @@ def render_residual_histograms(output_dir, models, summaries, *, protocol, prove
                             peak = modes[model, group]
                             if peak.any():
                                 i = int(np.argmax(peak))
-                                ax.annotate(text, (centers[i], h[i]), xytext=(x, 1.03),
-                                            textcoords="axes fraction", ha="center", va="bottom",
-                                            fontsize=7, arrowprops={"arrowstyle": "-", "color": muted, "lw": .65})
+                                ax.annotate(text, (centers[i], h[i]), xytext=(x, .92),
+                                            textcoords="axes fraction", ha="center", va="top",
+                                            fontsize=7, bbox={"facecolor": "white", "edgecolor": "none", "pad": 1}, arrowprops={"arrowstyle": "-", "color": muted, "lw": .65})
                     if mask == 7 or not h.any():
                         continue
                     for side, x in enumerate((.24, .76)):
@@ -132,7 +134,9 @@ def render_residual_histograms(output_dir, models, summaries, *, protocol, prove
                                     transform=ax.transAxes, ha="center", va="center", color=color, fontweight="bold")
             fig.suptitle(spec["name"], y=.98, fontsize=15, fontweight="bold")
             subtitle = f"Mean across {len(summaries)} seeds" if len(summaries) > 1 else "One seed"
-            fig.text(.5, .944, subtitle, ha="center", color=muted)
+            if "pretrained-bert" in models:
+                subtitle += " · pretrained vectors reused across seed slices"
+            fig.text(.5, .948, subtitle, ha="center", color=muted)
             fig.text(.016, .53, spec["ylabel"], ha="center", va="center", rotation=90)
             fig.text(.55, .126, spec["xlabel"], ha="center")
             fig.text(.55, .10, "Left = lower 5%   ·   Right = upper 5%   ·   Cutoff ties included",

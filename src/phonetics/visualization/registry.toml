@@ -438,3 +438,26 @@ scale = "linear"
 colorbar_label = "Cosine distance"
 color_scale_group = "encoder_cosine"
 colormap = "lilac"
+
+[figures.encoder_mask_coefficients]
+status = "approved"
+kind = "dotplot"
+name = "Mask coefficients"
+xlabel = "Overlap mask"
+ylabel = "Mean similarity"
+series = ["encoder"]
+order = ["encoder"]
+scale = "linear"
+
+[figures.encoder_dimsim_neighborhood]
+status = "approved"
+kind = "distance_map"
+name = "DIMSIM neighborhood"
+xlabel = "Candidate rank by DIMSIM"
+ylabel = "Anchor"
+series = ["encoder"]
+order = ["encoder"]
+scale = "linear"
+colorbar_label = "Distance"
+color_scale_group = "encoder_cosine"
+colormap = "lilac"

@@ -48,5 +48,6 @@ def canonical_model_id(model_id: str) -> str:
 
 def is_extension_model(model_id: str) -> bool:
     """Check whether an objective can reuse an existing experiment bundle."""
-    return (isinstance(model_id, str) and model_id.startswith(SYLLABLE_COMBINED_PREFIX)
-            and canonical_model_id(model_id) == model_id)
+    return (model_id == "syllable" or
+            (isinstance(model_id, str) and model_id.startswith(SYLLABLE_COMBINED_PREFIX)
+             and canonical_model_id(model_id) == model_id))

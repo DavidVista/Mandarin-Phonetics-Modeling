@@ -13,6 +13,8 @@ from .reference_geometry import _encode
 from .reference_geometry_template import PAGE
 
 def _system_name(system):
+    if system in ("DIMSIM", "pretrained-bert"):
+        return "Pretrained BERT" if system == "pretrained-bert" else system
     if system == "DIMSIM":
         return system
     family, weight = parse_model_id(system)
@@ -35,15 +37,7 @@ def _view_profiles(tables, across, systems):
         label = _system_name(system)
         means = [get(row, "mean_similarity") for row in tables["mask_profiles"] if row["system"] == system]
         r2 = [get(row, "r_squared") for row in tables["mask_summary"] if row["system"] == system]
-        steps = []
-        for row, final in zip((row for row in tables["full_match_gains"] if row["system"] == system),
-                              ("011 → 111", "101 → 111", "110 → 111")):
-            steps.append({
-                "labels": [row[f"step_{i}"].replace(" to ", " → ") for i in range(1, 4)] + [final],
-                "values": [get(row, f"gain_{i}") for i in range(1, 4)] + [get(row, "full_match_gain")],
-                "baseline": get(row, "ordinary_mean"), "absolute": get(row, "j"),
-            })
-        profiles.append({"name": label, "beta": means, "r2": r2, "steps": steps})
+        profiles.append({"name": label, "beta": means, "r2": r2, "beta_sd": [row.get("mean_similarity_sd") for row in tables["mask_profiles"] if row["system"] == system]})
         residuals.append([{"a": r["left"], "b": r["right"], "mask": r["mask"], "residual": r["residual"]}
                           for r in tables.get("residuals_top50", ()) if r["system"] == system])
     return profiles, residuals
@@ -92,7 +86,7 @@ def write_view(path, key, distances, maps, tables, tolerance, *, systems, seeds,
     profiles, residuals = _view_profiles(tables, across, systems)
     overlap, near_far = rankings if rankings is not None else rank_metrics(distances, maps["neighborhood"], tolerance)
     keys = ("controlled_match", "dimsim_agreement", "same_mask_breakdown", "shared_character_residual", "pairwise_spearman",
-            "paired_differences", "mask_summary", "full_match_gains")
+            "paired_differences", "mask_summary")
     view = {
         "distance": _encode_models(ordered, "<f4"),
         "maxima": [float(np.nanmax(ordered[0])), float(np.nanmax(ordered[1:]))],
@@ -130,8 +124,8 @@ def _encoder_template(models):
             "Unselected cells and the diagonal in this view are shown in light gray.",
         "Self-distances are zero for the current matrices.": "Contextual full match excludes self-comparisons. Grey encoder diagonals lack two distinct occurrences in at least one seed. The DIMSIM matrix shows its zero self-distances.",
         "Mask 111 uses self-pairs, with cosine 1 and DIMSIM distance 0.": "Mask 111 uses contextual within-reading distances and the corresponding zero DIMSIM distances on the shared Full Match inventory.",
-        "Mask means, centered R², J and residuals describe each system independently.":
-            "Mask means, centered R² and J describe each system independently.",
+        "Mask means, centered R² and residuals describe each system independently.":
+            "Lines connect mean similarities within masks; intervals show sample SD across training seeds. R² uses distinct readings, excluding Full Match.",
         "Including self-pairs (111)": "Including Full Match (111)",
         "</style>": ".panels > section:first-child{order:1}.panels > section:nth-child(3){order:2}</style>",
         "const preparedCells=decode(prepared.cells,Uint16Array), preparedEffects=decode(prepared.effects,Float64Array);":
@@ -152,10 +146,10 @@ def _encoder_template(models):
     start = page.index("<h2>Top positive residual pairs</h2>")
     end = page.index("</section>", start)
     page = page[:start] + page[end:]
-    page = page.replace('<div id="profile-steps"></div>', '<div id="profile-steps"></div>@@shared_char_profile@@')
+    page = page.replace('<table id="profile-r2"></table>', '<table id="profile-r2"></table>@@shared_char_profile@@')
     page = page.replace("const residualTopPairs=@@residualTopPairs@@;\n", "")
     start = page.index(" document.querySelector('#profile-residuals').innerHTML")
-    end = page.index(" renderProfileSteps();", start)
+    end = page.index("\n}", start)
     page = page[:start] + page[end:]
     start = page.index("<a href='figures/dimsim-distances.png'>")
     end = page.index("</p>", start)
@@ -342,10 +336,18 @@ def write_page(path, labels, components, coverage, *, architecture, evaluation, 
     architecture_name = {"char_bilstm": "BiLSTM", "bert": "BERT"}[architecture]
     page = (_SHELL.replace("@@ARCHITECTURE@@", architecture_name)
             .replace("@@SETTINGS@@", _json(settings)).replace("@@TEMPLATE@@", _json(_encoder_template(systems[1:]))))
-    links = ('<p class="report-note"><a href="tables/shared_character_matched_agreement_across_seeds.csv">Shared Char agreement across seeds</a> · '
-             '<a href="tables/shared_character_matched_agreement.csv">Shared Char agreement by seed</a> · '
-             '<a href="tables/diagnostic_full_match.csv">Full Match by character</a> · '
-             '<a href="data/shared_character_matched_agreement.json">Shared Char method</a></p>')
+    links = ('<p class="report-note"><a href="tables/polyphony_summary_across_seeds.csv">Polyphony summary</a> · '
+             '<a href="tables/polyphony_summary.csv">Polyphony by seed</a> · '
+             '<a href="tables/polyphony_pairs.csv">Reading pairs</a> · '
+             '<a href="tables/polyphony_coverage.csv">Polyphony coverage</a> · '
+             '<a href="tables/diagnostic_full_match.csv">Full Match</a> · '
+             '<a href="data/polyphony.json">Polyphony method and occurrence plan</a></p>')
+    links += ('<p class="report-note"><a href="figures/mask-coefficients.png">Mask coefficients</a> · '
+              '<a href="figures/residual-histograms-by-mask.png">Residual histograms</a> · ' +
+              " · ".join(f'<a href="figures/{system.lower()}-dimsim-neighborhood.png">{_system_name(system)} neighborhood</a>'
+                         for system in systems) + '</p>')
+    if "pretrained-bert" in systems:
+        links += '<p class="report-note">Pretrained BERT: one deterministic extraction reused across seed slices; no independent training-seed SD. Contrasts remain paired to fine-tuned seeds.</p>'
     if diagnostics:
         from ..research.encoder_diagnostics import TABLE_FIELDS
         links += '<p class="report-note">Diagnostics: ' + " · ".join(

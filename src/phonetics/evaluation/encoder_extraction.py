@@ -87,7 +87,7 @@ def inspect_checkpoints(root, pin, model, experiment_pin, experiment):
         source = (Path(__file__).parents[1] / name).read_text(encoding="utf-8")
         source_pins = {hashlib.sha256(text.encode()).hexdigest()
                        for text in (source, source.replace("\n", "\r\n"))}
-        if name == "model.py" and not is_extension_model(model):
+        if name == "model.py" and not model.startswith("syllable-acoustic-lambda-"):
             # The model before the syllable-acoustic head combination used the same existing heads.
             source_pins.add("4c9df43b451155582e1df117c0a5edaa60284a7b054fe34fad5cf75616ce6842")
         if not is_bert(config):
@@ -116,6 +116,9 @@ def inspect_checkpoints(root, pin, model, experiment_pin, experiment):
 
 
 def expected_checkpoint_seeds(root, pin, model, experiment_pin, experiment):
+    if model == "pretrained-bert":
+        from .pretrained_source import selections
+        return selections(root, pin, experiment_pin, experiment)
     manifest, selections = inspect_checkpoints(root, pin, model, experiment_pin, experiment)
     return {
         seed: {
@@ -164,6 +167,12 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
     """Encode full test sentences, retaining only the sealed occurrence positions."""
     if not allow_execution:
         raise PermissionError("encoder extraction requires explicit execution authorization")
+    if model == "pretrained-bert":
+        from .pretrained_source import extract
+        return extract(evaluation_root=evaluation_root, evaluation_pin=evaluation_pin,
+            experiment_root=experiment_root, experiment_pin=experiment_pin, training_root=training_root,
+            training_pin=training_pin, model=model, output=output, device=device, batch_size=batch_size,
+            source_sha256=source_sha256, allow_execution=allow_execution)
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("batch size must be a positive integer")
     evaluation, rows = load_positions(evaluation_root, evaluation_pin)
@@ -281,6 +290,12 @@ def extract_hidden_states(*, evaluation_root, evaluation_pin, experiment_root, e
 
 def load_export(root, *, model, evaluation_pin, experiment_pin, occurrence_ids, training_pin,
                 expected_seeds, expected_unknown=None, expected_input_hashes=None):
+    if model == "pretrained-bert":
+        from .pretrained_source import load
+        yield from load(root, model=model, evaluation_pin=evaluation_pin, experiment_pin=experiment_pin,
+            occurrence_ids=occurrence_ids, training_pin=training_pin, expected_seeds=expected_seeds,
+            expected_unknown=expected_unknown, expected_input_hashes=expected_input_hashes)
+        return
     seeds = list(expected_seeds)
     manifest = validate_bundle(root, EXTRACTION_TYPE)
     identity = manifest["identity"]

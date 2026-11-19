@@ -230,7 +230,7 @@ def evaluate_geometry(labels, components, distances, *, tolerance, systems=SYSTE
 
 def _profiles(labels, distances, masks, left, right, *, systems, full_match):
     n = len(labels)
-    rows, summary, gains, residuals = [], [], [], []
+    rows, summary, residuals = [], [], []
     for model, system in enumerate(systems):
         similarity = -distances[model] if model == 0 else 1 - distances[model]
         values, pair_masks = similarity[left, right], masks[left, right]
@@ -253,19 +253,6 @@ def _profiles(labels, distances, masks, left, right, *, systems, full_match):
             sst = np.dot(y - y.mean(), y - y.mean())
             summary.append({"system": system, "includes_full_match": include_diagonal,
                             "pairs": len(y), "r_squared": float(1 - sse / sst) if sst else None})
-        for component, bit in zip(("Initial", "Final", "Tone"), (4, 2, 1)):
-            ordinary = [mask for mask in range(7) if not mask & bit and mask | bit != 7]
-            steps = [float(means[mask | bit] - means[mask]) for mask in ordinary]
-            full = float(means[7] - means[7 ^ bit])
-            average = float(np.mean(steps))
-            row = {"system": system, "component": component}
-            for index, (mask, value) in enumerate(zip(ordinary, steps), 1):
-                row[f"step_{index}"] = f"{MASKS[mask]} to {MASKS[mask | bit]}"
-                row[f"gain_{index}"] = value if np.isfinite(value) else None
-            row.update(ordinary_mean=average if np.isfinite(average) else None,
-                       full_match_gain=full if np.isfinite(full) else None,
-                       j=full - average if np.isfinite(full - average) else None)
-            gains.append(row)
         # Inputs have lexical labels, so stable sorting also fixes residual ties.
         for rank, index in enumerate(np.argsort(-error, kind="stable")[:50], 1):
             if error[index] <= 0:
@@ -273,5 +260,5 @@ def _profiles(labels, distances, masks, left, right, *, systems, full_match):
             residuals.append({"system": system, "rank": rank, "left": labels[left[index]],
                               "right": labels[right[index]], "mask": MASKS[pair_masks[index]],
                               "residual": float(error[index])})
-    return {"mask_profiles": rows, "mask_summary": summary, "full_match_gains": gains,
+    return {"mask_profiles": rows, "mask_summary": summary,
             "residuals_top50": residuals}

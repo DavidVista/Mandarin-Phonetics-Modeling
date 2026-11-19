@@ -54,7 +54,7 @@ def validate_execution_config(config, resolve):
     additional = spec.get('additional_model_ids', [])
     if (not isinstance(additional, list) or not all(is_extension_model(model) for model in additional)
             or len(set(additional)) != len(additional) or set(additional) & set(config['experiment']['model_ids'])):
-        raise ValueError('execution.additional_model_ids must contain distinct new syllable-acoustic objectives')
+        raise ValueError('execution.additional_model_ids must contain distinct supported extension objectives')
     spec.setdefault('visualization', 'local')
     config.setdefault('visualization', [])
     for key in ('acoustic', 'training', 'visualization'):

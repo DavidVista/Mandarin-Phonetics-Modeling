@@ -348,6 +348,34 @@ Config-driven workflows publish a verified wrapper under `paths.reports/<id>/`. 
 
 ## Generated artifacts and validation boundaries
 
+### Reassessing completed encoders
+
+Completed experiments, evaluation bundles and selected checkpoints can be reused with a new SDK and report ID. Prepare an evaluation-only config that records the exact input manifest hashes:
+
+```sh
+python -m phonetics.reassessment --config configs/notebook/experiment.bilstm.json --output generated/reassessment/bilstm.json --id bilstm-geometry-polyphony
+python -m phonetics.reassessment --config configs/notebook/experiment.bert.json --output generated/reassessment/bert.json --id bert-geometry-polyphony --models components components-acoustic-lambda-1 --pretrained-bert
+phonetics generate-notebooks --config generated/reassessment/bilstm.json --stage encoder-geometry
+phonetics generate-notebooks --config generated/reassessment/bert.json --stage encoder-geometry
+```
+
+The new configs enable Core, UNK sensitivity and DIMSIM parser diagnostics. `--models` selects trained systems independently of the frozen experiment objective list. `--pretrained-bert` adds an evaluation source pinned to the BERT snapshot (revision and file hashes) in the experiment, including `model.safetensors`. This source has no training run, epoch or heads. It exports the same last-layer character positions as trained BERT. One deterministic extraction is reused across seed slices; its summary has no independent training-seed SD. Differences against trained systems remain paired within seed.
+
+Attach the original experiment/evaluation bundles and selected training bundles with the exact hashes in the generated `.inputs.json`. Attach Arial fonts if necessary. An explicit BERT snapshot must contain the pinned weights when the pretrained source is selected; otherwise the existing downloader obtains the pinned revision. Execute only the encoder geometry notebook after reviewing its device and inputs. It extracts representations from ready weights and produces a new report ZIP. Existing compatible exports can be attached to avoid re-extraction. No prepared data, acoustic targets or training runs need rebuilding. Reports contain aggregate matrices, so an old report alone cannot supply the occurrence vectors required for polyphony.
+
+For local execution with the required Torch/BERT runtime and device, use:
+
+```sh
+phonetics workflow --config generated/reassessment/bilstm.json --id bilstm-geometry-polyphony --allow-execution
+phonetics workflow --config generated/reassessment/bert.json --id bert-geometry-polyphony --allow-execution
+```
+
+Extract the notebook report ZIP into a new directory under `paths.reports`; keep its manifest and relative layout. These standalone reports do not replace pending training jobs or mutate run state. The input pins and artifact checks validate existing checkpoints before inference. A missing Syllable BERT must first be trained as a `syllable` extension against the same experiment; after importing that completed run, prepare another new report ID with `--models syllable components components-acoustic-lambda-1 --pretrained-bert`. Historical S+A can be added explicitly as an auxiliary system.
+
+Polyphony CSVs include support/exclusions, directed comparisons, reading pairs, character scores, seed summaries and paired system differences. `data/polyphony.json` fixes occurrence IDs, controls, weights and tolerance. Main/high-support slices require at least 2/11 occurrences for each character-reading in every seed. Other-character controls use the same threshold and equal character weights. Main and control scores are compared on the same eligible pair subset. Score is a fraction; the main-minus-control score is in percentage points. Raw triple counts are descriptive support, not independent observations; weighted scores are not recovered by pooling those counts. Shared-character analysis remains only for mask-centred residuals. New reports omit the previous triple agreement and J/component-gain outputs.
+
+Static PNG/EPS exports include connected mask coefficients with sample SD, residual histograms and DIMSIM neighbourhoods for every selected encoder and DIMSIM. Each neighbourhood row has its own DIMSIM-sorted candidate order; encoder panels share a colour scale and DIMSIM uses its own units. Metadata records the actual ordering and limits.
+
 Only source code, config, lock and tests belong in Git. `generated/notebooks/`, `generated/jobs/` and `generated/state/` are ignored. The workspace has one generation script, `meta/tools/generate_notebooks.py`, delegating to the same `phonetics generate-notebooks` command.
 
 Local contract tests do not prove successful ML training, GPU equivalence or execution on Kaggle/macOS/Linux. Those runs require their selected environments and inputs. Source bundles, existing embeddings, current datasets and historical archives are not relocated by this change.

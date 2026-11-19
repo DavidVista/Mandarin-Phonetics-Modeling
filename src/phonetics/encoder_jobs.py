@@ -12,7 +12,7 @@ from .execution import safe_id
 
 def resolve_encoder_config(spec, resolve):
     required = {"id", "training_runs", "representations_root", "device", "batch_size", "tolerance"}
-    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics", "contrasts", "allow_extraction", "execution"}:
+    if not isinstance(spec, dict) or not required <= set(spec) <= required | {"diagnostics", "contrasts", "allow_extraction", "execution", "representation_sources", "input_manifest_sha256"}:
         raise ValueError("encoder_geometry requires id, training_runs, representations_root, device, batch_size and tolerance")
     if type(spec.get("diagnostics", False)) is not bool:
         raise ValueError("encoder diagnostics must be a boolean")
@@ -22,14 +22,17 @@ def resolve_encoder_config(spec, resolve):
         raise ValueError("encoder_geometry.execution must be local or notebook")
     safe_id(spec["id"])
     runs = spec["training_runs"]
-    if (not isinstance(runs, dict) or not runs
+    sources = spec.get("representation_sources", {})
+    if sources not in ({}, {"pretrained-bert": {"type": "pretrained_bert"}}):
+        raise ValueError("representation_sources supports pretrained-bert with type pretrained_bert")
+    if (not isinstance(runs, dict) or not (runs or sources)
             or any(canonical_model_id(model) != model for model in runs)):
         raise ValueError("training_runs requires canonical model IDs")
     if "contrasts" in spec:
         contrasts = spec["contrasts"]
         if (not isinstance(contrasts, list)
                 or any(not isinstance(pair, list) or len(pair) != 2
-                       or any(not isinstance(model, str) or model not in runs for model in pair)
+                       or any(not isinstance(model, str) or model not in {*runs, *sources} for model in pair)
                        or pair[0] == pair[1] for pair in contrasts)
                 or len({tuple(pair) for pair in contrasts}) != len(contrasts)):
             raise ValueError("contrasts must contain unique pairs of distinct configured models")
@@ -57,9 +60,13 @@ def encoder_inputs(config, state=None):
         "evaluation": str(Path(evaluation["output_root"]) / evaluation["id"]),
         "experiment": evaluation["experiment_root"], **spec["training_runs"],
     }
+    if spec.get("representation_sources"):
+        refs["pretrained-bert"] = refs["experiment"]
     experiment = load_experiment_manifest(refs["experiment"], evaluation["experiment_manifest_sha256"])
     validate_run_inventory(refs, experiment)
     if managed:
+        if spec.get("representation_sources"):
+            raise ValueError("pretrained sources require an explicitly pinned evaluation config")
         pins = {"experiment": evaluation["experiment_manifest_sha256"],
                 "evaluation": completed_manifest(state, "prepare-evaluation", refs["evaluation"])}
         pins.update({model: completed_manifest(state, "train:" + model, path)
@@ -68,6 +75,8 @@ def encoder_inputs(config, state=None):
         pins = {key: sha256_file(Path(path) / "manifest.json") for key, path in refs.items()}
     if pins["experiment"] != evaluation["experiment_manifest_sha256"]:
         raise ValueError("configured experiment manifest changed")
+    if "input_manifest_sha256" in spec and spec["input_manifest_sha256"] != pins:
+        raise ValueError("reassessment input manifest SHA256 differs from the pinned selection")
     return refs, pins
 
 
@@ -75,11 +84,17 @@ def validate_run_inventory(refs, experiment):
     from .objectives import is_extension_model
 
     models = experiment["identity"]["config"]["model_ids"]
-    required = {"experiment", "evaluation", *models}
-    additional = sorted(set(refs) - required)
-    if not required <= set(refs) or not all(is_extension_model(model) for model in additional):
-        raise ValueError("select exactly one training run for each experiment model and any valid extension models")
-    return [*models, *additional]
+    selected = set(refs) - {"experiment", "evaluation"}
+    if not {"experiment", "evaluation"} <= set(refs) or not selected:
+        raise ValueError("select at least one evaluation source and both input bundles")
+    for model in selected:
+        if model == "pretrained-bert":
+            from .bert import is_bert
+            if not is_bert(experiment["identity"]["config"]):
+                raise ValueError("pretrained BERT requires a BERT experiment")
+        elif model not in models and not is_extension_model(model):
+            raise ValueError("evaluation source is not an experiment model or supported extension")
+    return (["pretrained-bert"] if "pretrained-bert" in selected else []) + [m for m in models if m in selected] + sorted(selected - set(models) - {"pretrained-bert"})
 
 
 def locate_manifests(refs, pins, mount):
@@ -110,13 +125,13 @@ def locate_exports(spec, pins, models, mount=None):
         if not path.is_file():
             continue
         manifest = json.loads(path.read_text(encoding="utf-8"))
-        if manifest.get("bundle_type") != EXTRACTION_TYPE:
+        if manifest.get("bundle_type") not in (EXTRACTION_TYPE, "pretrained_encoder_export"):
             continue
         identity = manifest.get("identity", {})
         model = identity.get("model")
         if (model in result and identity.get("evaluation_manifest_sha256") == pins["evaluation"]
                 and identity.get("experiment_manifest_sha256") == pins["experiment"]
-                and identity.get("training_manifest_sha256") == pins[model]):
+                and identity.get("training_manifest_sha256", identity.get("source_manifest_sha256")) == pins[model]):
             result[model].add(path.parent.resolve())
     if any(len(paths) > 1 for paths in result.values()):
         counts = {model: len(paths) for model, paths in result.items()}
@@ -131,7 +146,7 @@ def extract_configured(config, model, *, allow_execution):
     from .execution import sdk_hashes
 
     refs, pins = encoder_inputs(config)
-    if model not in config["encoder_geometry"]["training_runs"]:
+    if model not in refs or model in ("experiment", "evaluation"):
         raise ValueError("unknown encoder model")
     spec = config["encoder_geometry"]
     return extract_hidden_states(
@@ -149,7 +164,7 @@ def import_hidden_states(config, model, result):
     from .evaluation.encoder_extraction import expected_checkpoint_seeds, expected_unknown_positions, load_export, load_positions
 
     refs, pins = encoder_inputs(config)
-    if model not in config["encoder_geometry"]["training_runs"]:
+    if model not in refs or model in ("experiment", "evaluation"):
         raise ValueError("unknown encoder model")
     evaluation, rows = load_positions(refs["evaluation"], pins["evaluation"])
     if evaluation["identity"]["experiment_manifest_sha256"] != pins["experiment"]:
